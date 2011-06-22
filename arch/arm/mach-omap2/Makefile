@@ -293,9 +293,15 @@ obj-$(CONFIG_MACH_OMAP4_PANDA)		+= board-omap4panda.o \
 					   board-44xx-identity.o \
 					   omap4_apps_brd_id.o \
 					   omap_phy_internal.o
+obj-$(CONFIG_MACH_NOTLE)		+= board-notle.o \
+					   hsmmc.o \
+					   omap4_apps_brd_id.o \
+					   omap_phy_internal.o
 
 obj-$(CONFIG_MACH_OMAP3517EVM)		+= board-am3517evm.o \
-					   omap_phy_internal.o \
+					   omap_phy_internal.o
+
+obj-$(CONFIG_MACH_OMAP3517EVM)		+= board-am3517evm.o
 
 obj-$(CONFIG_MACH_OMAP3517EVM)		+= board-am3517evm.o
 

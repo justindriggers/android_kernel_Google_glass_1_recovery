@@ -592,7 +592,6 @@ wl_iw_set_passive_scan(
 	return error;
 }
 
-
 static int
 wl_iw_set_txpower(
 	struct net_device *dev,
@@ -646,7 +645,6 @@ wl_iw_get_macaddr(
 
 	return error;
 }
-
 
 static int
 wl_iw_set_country(
@@ -1073,7 +1071,6 @@ wl_iw_set_suspend(
 
 	return ret;
 }
-
 
 int
 wl_format_ssid(char* ssid_buf, uint8* ssid, int ssid_len)
@@ -1831,7 +1828,6 @@ char softap_cmd_example[] = {
 	return res;
 }
 #endif
-
 
 #ifdef SOFTAP
 int init_ap_profile_from_string(char *param_str, struct ap_profile *ap_cfg)
@@ -7225,7 +7221,7 @@ static int wl_iw_set_priv(
 			ret = wl_iw_set_dtim_skip(dev, info, (union iwreq_data *)dwrq, extra);
 		else if (strnicmp(extra, SETSUSPEND_CMD, strlen(SETSUSPEND_CMD)) == 0)
 			ret = wl_iw_set_suspend(dev, info, (union iwreq_data *)dwrq, extra);
-	    else if (strnicmp(extra, TXPOWER_SET_CMD, strlen(TXPOWER_SET_CMD)) == 0)
+		else if (strnicmp(extra, TXPOWER_SET_CMD, strlen(TXPOWER_SET_CMD)) == 0)
 			ret = wl_iw_set_txpower(dev, info, (union iwreq_data *)dwrq, extra);
 #if defined(PNO_SUPPORT)
 		else if (strnicmp(extra, PNOSSIDCLR_SET_CMD, strlen(PNOSSIDCLR_SET_CMD)) == 0)

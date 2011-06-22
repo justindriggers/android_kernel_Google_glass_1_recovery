@@ -24,6 +24,7 @@ obj-$(CONFIG_OMAP_IOMMU) += iommu.o iovmm.o
 obj-$(CONFIG_OMAP_IOMMU_DEBUG) += iommu-debug.o
 
 obj-$(CONFIG_OMAP_DM_TIMER) += dmtimer.o
+obj-$(CONFIG_OMAP_DM_TIMER_PWM) += dmtimer-pwm.o
 obj-$(CONFIG_OMAP_DEBUG_DEVICES) += debug-devices.o
 obj-$(CONFIG_OMAP_DEBUG_LEDS) += debug-leds.o
 i2c-omap-$(CONFIG_I2C_OMAP) := i2c.o

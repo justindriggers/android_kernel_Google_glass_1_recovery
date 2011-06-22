@@ -5752,6 +5752,7 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 			/* Expect app to have torn down any connection before calling */
 			/* Stop the bus, disable F2 */
 			dhd_bus_stop(bus, FALSE);
+
 #if defined(OOB_INTR_ONLY)
 			bcmsdh_set_irq(FALSE);
 #endif /* defined(OOB_INTR_ONLY) */

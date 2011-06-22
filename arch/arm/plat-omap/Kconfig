@@ -240,6 +240,17 @@ config OMAP_DM_TIMER
 	help
 	 Select this option if you want to use OMAP Dual-Mode timers.
 
+config OMAP_DM_TIMER_PWM
+	bool "Use dual-mode timers to generate PWM outputs"
+	depends on OMAP_DM_TIMER && ARCH_OMAP2PLUS
+	select HAVE_PWM
+	help
+	 Select this option if you want to use OMAP Dual-Mode timers
+	 to output pulse-width modulation (pwm) signals.  Note that
+	 you cannot have this option and any other option that
+	 provides pwm functionality via the pwm_request family of
+	 functions.
+
 config OMAP_SERIAL_WAKE
 	bool "Enable wake-up events for serial ports"
 	depends on ARCH_OMAP1 && OMAP_MUX

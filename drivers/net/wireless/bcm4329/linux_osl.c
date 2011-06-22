@@ -247,6 +247,7 @@ void*
 osl_pktget(osl_t *osh, uint len)
 {
 	struct sk_buff *skb;
+
 	gfp_t flags;
 
 	flags = (in_atomic()) ? GFP_ATOMIC : GFP_KERNEL;

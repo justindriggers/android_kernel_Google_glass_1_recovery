@@ -5,13 +5,13 @@
  * Definitions subject to change without notice.
  *
  * Copyright (C) 1999-2010, Broadcom Corporation
- * 
+ *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- * 
+ *
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -19,7 +19,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- * 
+ *
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -1313,15 +1313,15 @@ enum {
 #define AUTO_NET_SWITCH_BIT		1
 #define ENABLE_BKGRD_SCAN_BIT	2
 #define IMMEDIATE_SCAN_BIT		3
-#define	AUTO_CONNECT_BIT		4
-#define	ENABLE_BD_SCAN_BIT		5
+#define AUTO_CONNECT_BIT		4
+#define ENABLE_BD_SCAN_BIT		5
 #define ENABLE_ADAPTSCAN_BIT	6
 
 #define SORT_CRITERIA_MASK		0x01
 #define AUTO_NET_SWITCH_MASK	0x02
 #define ENABLE_BKGRD_SCAN_MASK	0x04
 #define IMMEDIATE_SCAN_MASK		0x08
-#define	AUTO_CONNECT_MASK		0x10
+#define AUTO_CONNECT_MASK		0x10
 #define ENABLE_BD_SCAN_MASK		0x20
 #define ENABLE_ADAPTSCAN_MASK	0x40
 
@@ -1331,28 +1331,33 @@ enum {
 
 
 typedef struct wl_pfn_param {
-	int32 version;			
-	int32 scan_freq;		
-	int32 lost_network_timeout;	
-	int16 flags;			
-	int16 rssi_margin;		
-	int32  repeat_scan;
-	int32  max_freq_adjust;
+	int32 version;
+	int32 scan_freq;
+	int32 lost_network_timeout;
+	int16 flags;
+	int16 rssi_margin;
+	int32 repeat_scan;
+	int32 max_freq_adjust;
 } wl_pfn_param_t;
 
 typedef struct wl_pfn {
-	wlc_ssid_t		ssid;			
-	int32			bss_type;		
-	int32			infra;			
-	int32			auth;			
-	uint32			wpa_auth;		
-	int32			wsec;			
+	wlc_ssid_t		ssid;
+	int32			bss_type;
+	int32			infra;
+	int32			auth;
+	uint32			wpa_auth;
+	int32			wsec;
+#ifdef WLPFN_AUTO_CONNECT
+	union {
+		wl_wsec_key_t	sec_key;
+		wsec_pmk_t	wpa_sec_key;
+	} pfn_security;
+#endif
 } wl_pfn_t;
 
 #define PNO_SCAN_MAX_FW		508*1000
 #define PNO_SCAN_MAX_FW_SEC	PNO_SCAN_MAX_FW/1000
 #define PNO_SCAN_MIN_FW_SEC	10
-
 
 #define TOE_TX_CSUM_OL		0x00000001
 #define TOE_RX_CSUM_OL		0x00000002

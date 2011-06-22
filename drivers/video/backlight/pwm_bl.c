@@ -26,6 +26,7 @@ struct pwm_bl_data {
 	struct device		*dev;
 	unsigned int		period;
 	unsigned int		lth_brightness;
+	unsigned int		uth_brightness;
 	int			(*notify)(struct device *,
 					  int brightness);
 	int			(*check_fb)(struct device *, struct fb_info *);
@@ -51,7 +52,8 @@ static int pwm_backlight_update_status(struct backlight_device *bl)
 		pwm_disable(pb->pwm);
 	} else {
 		brightness = pb->lth_brightness +
-			(brightness * (pb->period - pb->lth_brightness) / max);
+			(brightness *
+			 (pb->uth_brightness - pb->lth_brightness) / max);
 		pwm_config(pb->pwm, brightness, pb->period);
 		pwm_enable(pb->pwm);
 	}
@@ -108,6 +110,11 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 	pb->check_fb = data->check_fb;
 	pb->lth_brightness = data->lth_brightness *
 		(data->pwm_period_ns / data->max_brightness);
+	pb->uth_brightness = data->uth_brightness *
+		(data->pwm_period_ns / data->max_brightness);
+	if (pb->uth_brightness == 0 || pb->uth_brightness > pb->period) {
+		pb->uth_brightness = pb->period;
+	}
 	pb->dev = &pdev->dev;
 
 	pb->pwm = pwm_request(data->pwm_id, "backlight");
@@ -213,4 +220,3 @@ module_exit(pwm_backlight_exit);
 MODULE_DESCRIPTION("PWM based Backlight Driver");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:pwm-backlight");
-

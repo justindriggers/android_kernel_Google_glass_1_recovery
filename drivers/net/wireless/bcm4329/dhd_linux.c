@@ -2052,7 +2052,6 @@ dhd_del_if(dhd_info_t *dhd, int ifidx)
 	up(&dhd->sysioc_sem);
 }
 
-
 dhd_pub_t *
 dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 {
@@ -2485,7 +2484,6 @@ dhd_net_attach(dhd_pub_t *dhdp, int ifidx)
 	printf("%s: Broadcom Dongle Host Driver mac=%.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n", net->name,
 	       dhd->pub.mac.octet[0], dhd->pub.mac.octet[1], dhd->pub.mac.octet[2],
 	       dhd->pub.mac.octet[3], dhd->pub.mac.octet[4], dhd->pub.mac.octet[5]);
-
 
 #if defined(CONFIG_WIRELESS_EXT)
 #if defined(CONFIG_FIRST_SCAN)

@@ -58,6 +58,39 @@ struct panel_config {
 
 /* Panel configurations */
 static struct panel_config generic_dpi_panels[] = {
+        /* Generic Wingman Panel */
+        {
+                {
+                        .x_res          = 320,
+                        .y_res          = 240,
+
+/* This value for microdisplay:
+                        .pixel_clock    = 51200,
+*/
+/* This value for HDMI:
+*/
+                        .pixel_clock    = 25600,
+/* But it seems like the actual pixel clock generated is off by
+   a factor of two \\sometimes//?
+                        .pixel_clock    = 51200,
+*/
+
+                        .hfp            = 48,
+                        .hsw            = 32,
+                        .hbp            = 80,
+
+                        .vfp            = 3,
+                        .vsw            = 4,
+                        .vbp            = 7,
+                },
+                .acbi                   = 0x0,
+                .acb                    = 0x0,
+                .config                 = OMAP_DSS_LCD_TFT,
+                .power_on_delay         = 0,
+                .power_off_delay        = 0,
+                .name                   = "generic-wingman",
+        },
+
 	/* Generic Panel */
 	{
 		{

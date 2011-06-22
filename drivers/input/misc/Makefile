@@ -55,5 +55,5 @@ obj-$(CONFIG_INPUT_SFH7741)		+= sfh7741.o
 obj-$(CONFIG_INPUT_BMA180)		+= bma180.o
 obj-$(CONFIG_INPUT_MPU3050)		+= mpu3050.o
 obj-$(CONFIG_INPUT_TSL2771)		+= tsl2771.o
-
-
+obj-$(CONFIG_INPUT_LSM303DLHC)          += lsm303dlhc_acc.o lsm303dlhc_mag.o
+obj-$(CONFIG_INPUT_L3G4200D)            += l3g4200d_gyr.o
