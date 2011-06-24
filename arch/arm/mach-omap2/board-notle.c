@@ -456,6 +456,7 @@ static struct regulator_init_data notle_vaux1 = {
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
 	},
 	.num_consumer_supplies  = 1,
 	.consumer_supplies      = notle_vaux_supply,
@@ -485,6 +486,7 @@ static struct regulator_init_data notle_vaux3 = {
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
 	},
 };
 
@@ -498,6 +500,7 @@ static struct regulator_init_data notle_vmmc = {
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
 	},
 	.num_consumer_supplies  = 1,
 	.consumer_supplies      = notle_vmmc_supply,
@@ -513,6 +516,7 @@ static struct regulator_init_data notle_vpp = {
 		.valid_ops_mask	 = REGULATOR_CHANGE_VOLTAGE
 					| REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
 	},
 };
 
@@ -526,6 +530,7 @@ static struct regulator_init_data notle_vusim = {
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
 	},
 };
 
@@ -538,6 +543,7 @@ static struct regulator_init_data notle_vana = {
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
 	},
 };
 
@@ -550,6 +556,7 @@ static struct regulator_init_data notle_vcxio = {
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
 	},
 };
 
@@ -562,6 +569,7 @@ static struct regulator_init_data notle_vdac = {
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
 	},
 };
 
@@ -574,6 +582,7 @@ static struct regulator_init_data notle_vusb = {
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 =	REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
 	},
 };
 
