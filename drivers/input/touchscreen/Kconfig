@@ -750,6 +750,12 @@ config TOUCHSCREEN_STMPE
 	  To compile this driver as a module, choose M here: the
 	  module will be called stmpe-ts.
 
+config TOUCHSCREEN_STOUCH
+        tristate "STouch STMPE stmpe32m28 touchpad"
+        depends on I2C
+        help
+          This enables the STouch stmpe32m28 touchpad.
+
 config TOUCHSCREEN_TPS6507X
 	tristate "TPS6507x based touchscreens"
 	depends on I2C

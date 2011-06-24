@@ -468,6 +468,7 @@ static struct regulator_init_data notle_vaux2 = {
 		.min_uV			= 2800000,
 		.max_uV			= 2800000,
 		.apply_uV		= true,
+                .always_on      = true,
 		.valid_modes_mask	= REGULATOR_MODE_NORMAL
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
@@ -725,10 +726,13 @@ static struct rmi_i2c_platformdata synaptics_platformdata = {
 };
 
 static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
-	{
-		I2C_BOARD_INFO("rmi4_ts", 0x20),
-		.platform_data = &synaptics_platformdata,
-	},
+        {
+                I2C_BOARD_INFO("rmi4_ts", 0x20),
+                .platform_data = &synaptics_platformdata,
+        },
+        {
+                I2C_BOARD_INFO("stmpe32m28", 0x48),
+        },
 };
 
 /*
