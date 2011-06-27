@@ -771,6 +771,7 @@ extern int omap4_prm_is_hardreset_asserted(void __iomem *rstctrl_reg, u8 shift);
 extern int omap4_prm_assert_hardreset(void __iomem *rstctrl_reg, u8 shift);
 extern int omap4_prm_deassert_hardreset(void __iomem *rstctrl_reg, u8 shift);
 
+extern void omap4_prm_global_set_warm_reset_cmd_string(const char *cmd);
 extern void omap4_prm_global_warm_sw_reset(void);
 extern void omap4_prm_global_cold_sw_reset(void);
 
