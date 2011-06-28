@@ -78,8 +78,8 @@ static int twl6030_interrupt_mapping_table[24] = {
 	USBOTG_INTR_OFFSET,	/* Bit 18	ID			*/
 	USB_PRES_INTR_OFFSET,	/* Bit 19	VBUS			*/
 	CHARGER_INTR_OFFSET,	/* Bit 20	CHRG_CTRL		*/
-	CHARGER_INTR_OFFSET,	/* Bit 21	EXT_CHRG		*/
-	CHARGERFAULT_INTR_OFFSET,/* Bit 22	INT_CHRG		*/
+	CHARGERFAULT_INTR_OFFSET,	/* Bit 21	EXT_CHRG	*/
+	CHARGERFAULT_INTR_OFFSET,	/* Bit 22	INT_CHRG	*/
 	RSV_INTR_OFFSET,	/* Bit 23	Reserved		*/
 };
 
@@ -204,12 +204,6 @@ static int twl6030_irq_thread(void *data)
 
 
 		sts.bytes[3] = 0; /* Only 24 bits are valid*/
-                if (sts.int_sts == 0x2000) {
-                        // GPADC.  Happens every time the battery status is read.
-                	pr_debug("twl6030: Interrupt status  0x%6x\n", sts.int_sts);
-                } else {
-                	pr_info("twl6030: Interrupt status  0x%6x\n", sts.int_sts);
-                }
 
 		/*
 		 * Since VBUS status bit is not reliable for VBUS disconnect
@@ -511,11 +505,6 @@ int twl6030_init_irq(int irq_num, unsigned irq_base, unsigned irq_end,
 			REG_INT_MSK_LINE_A, 3); /* MASK ALL INT LINES */
 	ret = twl_i2c_write(TWL_MODULE_PIH, &mask[0],
 			REG_INT_MSK_STS_A, 3); /* MASK ALL INT STS */
-
-	mask[1] = 0xFF;
-	mask[2] = 0xFF;
-	mask[3] = 0xFF;
-
 	ret = twl_i2c_write(TWL_MODULE_PIH, &mask[0],
 			REG_INT_STS_A, 3); /* clear INT_STS_A,B,C */
 
@@ -601,3 +590,4 @@ int twl6030_exit_irq(void)
 
 	return 0;
 }
+
