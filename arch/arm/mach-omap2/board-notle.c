@@ -58,6 +58,7 @@
 #include "timer-gp.h"
 #include "hsmmc.h"
 #include "control.h"
+#include "common-board-devices.h"
 #include "mux.h"
 
 #define MUX(x) OMAP4_CTRL_MODULE_PAD_##x##_OFFSET
@@ -825,12 +826,7 @@ static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
 
 static int __init notle_i2c_init(void)
 {
-	/*
-	 * Phoenix Audio IC needs I2C1 to
-	 * start with 400 KHz or less
-	 */
-	omap_register_i2c_bus(1, 400, notle_i2c_boardinfo,
-			ARRAY_SIZE(notle_i2c_boardinfo));
+	omap4_pmic_init("twl6030", &notle_twldata);
 	omap_register_i2c_bus(2, 400, NULL, 0);
 	omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
 			ARRAY_SIZE(notle_i2c_3_boardinfo));
