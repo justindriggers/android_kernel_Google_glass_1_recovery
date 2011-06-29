@@ -69,8 +69,8 @@
 #define MUX_YELLOW_LED                  MUX(FREF_CLK4_OUT)
 #define GPIO_WL_RST_N                   43
 #define MUX_WL_RST_N                    MUX(GPMC_A19)
-#define GPIO_BT_RST_N                   46
-#define MUX_BT_RST_N                    MUX(GPMC_A22)
+#define GPIO_BT_RST_N                   151
+#define MUX_BT_RST_N                    MUX(MCSPI4_CLK)
 #define GPIO_WL_BT_REG_ON               48
 #define MUX_WL_BT_REG_ON                MUX(GPMC_A24)
 #define GPIO_GPS_ON_OFF                 49
@@ -375,7 +375,8 @@ static struct omap2_hsmmc_info mmc[] = {
         {
                 .name           = "bcm4329",
                 .mmc            = 5,
-                .caps           = MMC_CAP_4_BIT_DATA | MMC_CAP_POWER_OFF_CARD,
+                .caps           = MMC_CAP_4_BIT_DATA,
+                    // TODO(abliss): | MMC_CAP_POWER_OFF_CARD, 
                 .gpio_wp        = -EINVAL,
                 .gpio_cd        = -EINVAL,
 //                .ocr_mask       = MMC_VDD_165_195,
@@ -591,6 +592,7 @@ static struct regulator_init_data notle_vusb = {
 static struct regulator_init_data omap4_notle_clk32kg = {
         .constraints = {
                .valid_ops_mask         = REGULATOR_CHANGE_STATUS,
+               .always_on              = true,
         },
 };
 
@@ -605,6 +607,7 @@ static struct regulator_consumer_supply notle_vmmc5_supply[] = {
 static struct regulator_init_data notle_vmmc5 = {
         .constraints = {
                 .valid_ops_mask         = REGULATOR_CHANGE_STATUS,
+                .always_on              = true,
         },
         .num_consumer_supplies  = 1,
         .consumer_supplies      = notle_vmmc5_supply,
@@ -925,7 +928,8 @@ static int __init notle_wifi_init(void) {
                 goto error2;
         }
 
-        r = gpio_request_one(GPIO_BCM_BT_WAKE, GPIOF_IN, "bt_wake");
+        r = gpio_request_one(GPIO_BCM_BT_WAKE, GPIOF_OUT_INIT_HIGH, "bt_wake");
+        gpio_set_value(GPIO_BCM_BT_WAKE, 1);
         if (r) {
                 pr_err("Failed to get bt_wake gpio\n");
                 goto error3;
@@ -954,6 +958,12 @@ static int __init notle_wifi_init(void) {
 
         notle_wifi_resources.start = notle_wifi_resources.end = r;
 
+        r = gpio_to_irq(GPIO_BCM_BT_HOST_WAKE);
+        if (r < 0) {
+                pr_err("Failed to allocate irq for gpio %i\n", GPIO_BCM_BT_HOST_WAKE);
+                goto error6;
+        }
+        // TODO(abliss): wire up BT host wake IRQ for power management
         r = platform_device_register(&notle_wifi_device);
         if (r) {
                 pr_err("Failed to register platform device\n");
@@ -1041,6 +1051,8 @@ static void __init my_mux_init(void) {
         __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_LCD_RESET_N);
         __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_AUDIO_POWERON);
         __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_EN_10V);
+        __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_BCM_BT_WAKE);
+        __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_BT_RST_N);
 
         // Set display backlight to be pulled low when we start.
         __raw_writew(OMAP_MUX_MODE7 | OMAP_PULL_ENA, core_base_addr + MUX_BACKLIGHT);
@@ -1052,8 +1064,6 @@ static void __init my_mux_init(void) {
                 core_base_addr + MUX_BCM_BT_HOST_WAKE);
         __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
                 core_base_addr + MUX_BCM_WLAN_WAKE);
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-                core_base_addr + MUX_BCM_BT_WAKE);
 }
 
 static void __init notle_init(void)

@@ -10,9 +10,19 @@ CONFIG_OMAP2_DSS=y
 # CONFIG_OMAP2_DSS_VENC is not set
 CONFIG_FB_OMAP2=y
 CONFIG_PANEL_GENERIC_DPI=y
-# CONFIG_BCM4329 is not set
-CONFIG_BCM4329_FW_PATH="/system/etc/firmware/fw_bcm4329.bin"
-CONFIG_BCM4329_NVRAM_PATH="/system/etc/firmware/bcm4329.cal"
+
+# Wireless
+# NOTE(abliss): I know this looks weird! But it is the only way that works
+# with the nexus-custom bcm4329 driver drop from broadcom.
+CONFIG_BCM4329=n
+# CONFIG_BCM4329_FW_PATH="/system/etc/firmware/fw_bcm4329.bin"
+# CONFIG_BCM4329_NVRAM_PATH="/system/etc/firmware/bcm4329.cal"
+CONFIG_BCMDHD=m
+CONFIG_BCMDHD_FW_PATH="/system/etc/firmware/fw_bcm4329.bin"
+CONFIG_BCMDHD_NVRAM_PATH="/system/etc/firmware/bcm4329.cal"
+CONFIG_BCMDHD_WEXT=y
+CONFIG_WIFI_CONTROL_FUNC=y
+
 CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C=y
 # Add this for ST touchpad support:
 #CONFIG_TOUCHSCREEN_STOUCH=y
