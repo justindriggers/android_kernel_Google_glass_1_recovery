@@ -1105,8 +1105,9 @@ static int __init sdp4430_soc_init(void)
 	int ret;
 
 	if (!machine_is_omap_4430sdp() && !machine_is_omap4_panda() &&
-		!machine_is_omap_tabletblaze()) {
-		pr_debug("Not SDP4430, BlazeTablet or PandaBoard!\n");
+		!machine_is_omap_tabletblaze() &&
+                !machine_is_notle()) {
+		pr_debug("Not SDP4430, BlazeTablet or PandaBoard or Notle!\n");
 		return -ENODEV;
 	}
 	printk(KERN_INFO "SDP4430 SoC init\n");
@@ -1116,6 +1117,8 @@ static int __init sdp4430_soc_init(void)
 		snd_soc_sdp4430.name = "Panda";
 	else if (machine_is_omap_tabletblaze())
 		snd_soc_sdp4430.name = "Tablet44xx";
+	else if (machine_is_notle())
+		snd_soc_sdp4430.name = "Notle";
 
 	sdp4430_snd_device = platform_device_alloc("soc-audio", -1);
 	if (!sdp4430_snd_device) {
@@ -1181,4 +1184,3 @@ module_exit(sdp4430_soc_exit);
 MODULE_AUTHOR("Misael Lopez Cruz <x0052729@ti.com>");
 MODULE_DESCRIPTION("ALSA SoC SDP4430");
 MODULE_LICENSE("GPL");
-

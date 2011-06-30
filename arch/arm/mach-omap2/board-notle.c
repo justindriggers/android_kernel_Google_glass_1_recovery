@@ -687,6 +687,33 @@ static struct twl4030_bci_platform_data notle_bci_data = {
         .low_bat_voltagemV              = 3300,
 };
 
+// Copied from board-4430sdp.c, but it doesn't seem to be used.
+static void omap4_audio_conf(void)
+{
+	/* twl6040 naudint */
+	omap_mux_init_signal("sys_nirq2.sys_nirq2", \
+		OMAP_PIN_INPUT_PULLUP);
+}
+
+static struct twl4030_codec_audio_data twl6040_audio = {
+	/* Add audio only data */
+};
+
+static struct twl4030_codec_vibra_data twl6040_vibra = {
+/*
+	.max_timeout	= 15000,
+	.initial_vibrate = 0,
+*/
+};
+
+static struct twl4030_codec_data twl6040_codec = {
+	.audio		= &twl6040_audio,
+	.vibra		= &twl6040_vibra,
+	.audpwron_gpio	= 127,
+	.naudint_irq	= OMAP44XX_IRQ_SYS_2N,
+	.irq_base	= TWL6040_CODEC_IRQ_BASE,
+};
+
 static struct twl4030_madc_platform_data notle_gpadc_data = {
 	.irq_line	= 1,
 };
@@ -710,6 +737,7 @@ static struct twl4030_platform_data notle_twldata = {
 	.usb		= &omap4_usbphy_data,
 
 	/* children */
+        .codec          = &twl6040_codec,
 	.bci            = &notle_bci_data,
 	.madc           = &notle_gpadc_data,
 };
