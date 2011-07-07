@@ -29,6 +29,7 @@
 #include <linux/i2c/twl.h>
 #include <linux/pwm.h>
 #include <linux/pwm_backlight.h>
+#include <linux/rfkill-gpio.h>
 
 #include <linux/i2c/l3g4200d.h>
 #include <linux/i2c/lsm303dlhc.h>
@@ -675,6 +676,29 @@ static struct platform_device backlight_device = {
         },
 };
 
+/*
+ * Driver data struct for the rfkill-gpio driver.  Fields:
+ * @name:		name for the gpio rf kill instance
+ * @reset_gpio:		GPIO which is used for reseting rfkill switch
+ * @shutdown_gpio:	GPIO which is used for shutdown of rfkill switch
+ * @power_clk_name:	[optional] name of clk to turn off while blocked
+ */
+
+static struct rfkill_gpio_platform_data bluetooth_rfkill_data = {
+        .name = "bluetooth",
+        .reset_gpio = GPIO_BT_RST_N,
+        .shutdown_gpio = -1,
+        .type = RFKILL_TYPE_BLUETOOTH,
+};
+
+static struct platform_device bluetooth_rfkill_device = {
+        .name = "rfkill_gpio",
+        .id = -1,
+        .dev = {
+                .platform_data = &bluetooth_rfkill_data,
+        },
+};
+
 static struct platform_device *notle_devices[] __initdata = {
         &leds_gpio,
         &notle_vwlan_device,
@@ -964,20 +988,12 @@ static int __init notle_wifi_init(void) {
                 pr_err("Failed to get wlan_reset gpio\n");
                 goto error4;
         }
-
-        r = gpio_request_one(GPIO_BT_RST_N, GPIOF_OUT_INIT_LOW, "bt_reset");
-        if (r) {
-                pr_err("Failed to get bt_reset gpio\n");
-                goto error5;
-        }
-
         gpio_set_value(GPIO_WL_RST_N, 1);
-        gpio_set_value(GPIO_BT_RST_N, 1);
 
         r = gpio_to_irq(GPIO_BCM_WLAN_HOST_WAKE);
         if (r < 0) {
                 pr_err("Failed to allocate irq for gpio %i\n", GPIO_BCM_WLAN_HOST_WAKE);
-                goto error6;
+                goto error5;
         }
 
         notle_wifi_resources.start = notle_wifi_resources.end = r;
@@ -985,20 +1001,25 @@ static int __init notle_wifi_init(void) {
         r = gpio_to_irq(GPIO_BCM_BT_HOST_WAKE);
         if (r < 0) {
                 pr_err("Failed to allocate irq for gpio %i\n", GPIO_BCM_BT_HOST_WAKE);
-                goto error6;
+                goto error5;
         }
-        // TODO(abliss): wire up BT host wake IRQ for power management
         r = platform_device_register(&notle_wifi_device);
         if (r) {
                 pr_err("Failed to register platform device\n");
-                goto error6;
+                goto error5;
         }
+
+        // TODO(abliss): wire up BT host wake IRQ for power management
+        r = platform_device_register(&bluetooth_rfkill_device);
+        if (r) {
+                pr_err("Failed to register BT rfkill device\n");
+                goto error5;
+        }
+
 
         pr_info("%s()-: 0", __func__);
         return 0;
 
-error6:
-        gpio_free(GPIO_BT_RST_N);
 error5:
         gpio_free(GPIO_WL_RST_N);
 error4:
