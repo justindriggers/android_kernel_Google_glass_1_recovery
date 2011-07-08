@@ -60,6 +60,7 @@
 #include "control.h"
 #include "common-board-devices.h"
 #include "mux.h"
+#include "cm1_44xx.h"
 
 #define MUX(x) OMAP4_CTRL_MODULE_PAD_##x##_OFFSET
 
@@ -687,23 +688,12 @@ static struct twl4030_bci_platform_data notle_bci_data = {
         .low_bat_voltagemV              = 3300,
 };
 
-// Copied from board-4430sdp.c, but it doesn't seem to be used.
-static void omap4_audio_conf(void)
-{
-	/* twl6040 naudint */
-	omap_mux_init_signal("sys_nirq2.sys_nirq2", \
-		OMAP_PIN_INPUT_PULLUP);
-}
 
 static struct twl4030_codec_audio_data twl6040_audio = {
 	/* Add audio only data */
 };
 
 static struct twl4030_codec_vibra_data twl6040_vibra = {
-/*
-	.max_timeout	= 15000,
-	.initial_vibrate = 0,
-*/
 };
 
 static struct twl4030_codec_data twl6040_codec = {
@@ -885,6 +875,7 @@ static struct omap_board_mux empty_board_mux[] __initdata = {
 
 static int omap_audio_init(void) {
 	int r;
+	u32 omap4430_cm_clksel_dpll_abe_register;
 
 	/* Configuration of requested GPIO lines */
 
@@ -894,6 +885,11 @@ static int omap_audio_init(void) {
                 pr_err("Failed to get audio_poweron gpio\n");
                 goto error;
         }
+
+	/* Set ABE DPLL to a correct value so that Notle clock */
+	/* does not mess up Phoenix audio */
+	omap4430_cm_clksel_dpll_abe_register = OMAP4430_CM1_BASE + OMAP4430_CM1_CKGEN_INST + OMAP4_CM_CLKSEL_DPLL_ABE_OFFSET;
+	omap_writel(0x82ee00, omap4430_cm_clksel_dpll_abe_register);
 
         return 0;
 
