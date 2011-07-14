@@ -24,6 +24,7 @@
 #include <linux/ioport.h>
 #include <linux/leds.h>
 #include <linux/gpio.h>
+#include <linux/gpio_keys.h>
 #include <linux/usb/otg.h>
 #include <linux/i2c.h>
 #include <linux/i2c/twl.h>
@@ -85,6 +86,8 @@
 #define MUX_AUDIO_POWERON               MUX(GPMC_WAIT1)
 #define GPIO_EN_10V                     84
 #define MUX_EN_10V                      MUX(USBB1_ULPITLL_CLK)
+#define GPIO_CAMERA                     94 // NB: in v3, this moves to 121 and
+#define MUX_CAMERA                      MUX(USBB1_ULPITLL_DAT6) // ABE_DMIC_DIN2
 
 // Notle v2 wifi
 #define GPIO_BCM_WLAN_HOST_WAKE         170
@@ -699,10 +702,36 @@ static struct platform_device bluetooth_rfkill_device = {
         },
 };
 
+// Translate hardware buttons to keys -- we have only one
+static struct gpio_keys_button notle_button_table[] = {
+    [0] = {
+		.code   = KEY_CAMERA,	\
+		.gpio   = GPIO_CAMERA,	\
+		.desc   = "Camera",	\
+		.type   = EV_KEY,	\
+		.wakeup = 1,		\
+    },
+};
+
+static struct gpio_keys_platform_data gpio_keys_data = {
+	.buttons  = notle_button_table,
+	.nbuttons = ARRAY_SIZE(notle_button_table),
+};
+
+static struct platform_device gpio_keys = {
+	.name = "gpio-keys",
+	.dev  = {
+		.platform_data = &gpio_keys_data,
+	},
+	.id   = -1,
+};
+
 static struct platform_device *notle_devices[] __initdata = {
         &leds_gpio,
         &notle_vwlan_device,
+        &gpio_keys,
 };
+
 
 static struct twl4030_bci_platform_data notle_bci_data = {
         .monitoring_interval            = 10,
@@ -1109,6 +1138,9 @@ static void __init my_mux_init(void) {
                 core_base_addr + MUX_BCM_BT_HOST_WAKE);
         __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
                 core_base_addr + MUX_BCM_WLAN_WAKE);
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
+                core_base_addr + MUX_CAMERA);
+
 }
 
 static void __init notle_init(void)
