@@ -63,6 +63,7 @@
 #include "common-board-devices.h"
 #include "mux.h"
 #include "cm1_44xx.h"
+#include "pm.h"
 
 #define MUX(x) OMAP4_CTRL_MODULE_PAD_##x##_OFFSET
 
@@ -363,6 +364,7 @@ static struct omap2_hsmmc_info mmc[] = {
 		.gpio_wp	= -EINVAL,
 		.ocr_mask	= MMC_VDD_29_30,
                 .no_off_init    = true,
+                .power_saving   = true,
 	},
 #ifdef NOTDEF
         /* XXX turn on DDR mode when we debug the problem */
@@ -376,6 +378,7 @@ static struct omap2_hsmmc_info mmc[] = {
 		.nonremovable   = true,
 		.ocr_mask	= MMC_VDD_29_30,
                 .no_off_init    = true,
+                .power_saving   = true,
 	},
         {
                 .name           = "bcm4329",
@@ -1182,6 +1185,8 @@ static void __init notle_init(void)
         } else {
                 pr_err("DVI initialization failed: %d\n", err);
         }
+
+        omap_enable_smartreflex_on_init();
 }
 
 static void __init notle_map_io(void)
