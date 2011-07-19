@@ -831,9 +831,10 @@ static struct l3g4200d_gyr_platform_data notle_l3g4200d_data = {
                                                  constant here). */
 
       /* axis mapping, reorder these to change the order of the axes. */
-	.axis_map_x = 1,
+	.axis_map_x = 0,
 	.negate_x = 1,
-	.axis_map_y = 0,
+	.axis_map_y = 1,
+	.negate_y = 1,
 	.axis_map_z = 2,
 };
 
@@ -842,9 +843,8 @@ static struct lsm303dlhc_acc_platform_data notle_lsm303dlh_acc_data = {
         .poll_interval = 10,   // Poll interval in ms.
 
       /* axis mapping, reorder these to change the order of the axes. */
-	.axis_map_x = 0,
-	.negate_x = 1,
-	.axis_map_y = 1,
+	.axis_map_x = 1,
+	.axis_map_y = 0,
 	.negate_y = 1,
 	.axis_map_z = 2,
         /* These need to be set or initialized to <0 or the driver croaks. */
@@ -861,9 +861,8 @@ static struct lsm303dlhc_mag_platform_data notle_lsm303dlh_mag_data = {
         .poll_interval = 10,   // Poll interval in ms.
 
       /* axis mapping, reorder these to change the order of the axes. */
-	.axis_map_x = 0,
-	.negate_x = 1,
-	.axis_map_y = 2,
+	.axis_map_x = 2,
+	.axis_map_y = 0,
 	.negate_y = 1,
 	.axis_map_z = 1,
 };
