@@ -954,7 +954,7 @@ error:
         return r;
 }
 
-static int omap_gps_init(void) {
+static int notle_gps_init(void) {
 	int r;
 
 	/* Configuration of requested GPIO lines */
@@ -973,13 +973,18 @@ static int omap_gps_init(void) {
                 pr_err("Failed to get gps_on_off gpio\n");
                 goto error;
         }
-	gpio_set_value(GPIO_GPS_ON_OFF, 1);
-
         return 0;
 
 error:
         return r;
 }
+
+static int __init notle_gps_start(void) {
+	gpio_set_value(GPIO_GPS_ON_OFF, 1);
+        pr_info("Turning on GPS chip\n");
+        return 0;
+}
+late_initcall(notle_gps_start);
 
 static int __init notle_wifi_init(void) {
         int r;
@@ -1213,7 +1218,7 @@ static void __init notle_init(void)
                 pr_err("Audio initialization failed: %d\n", err);
         }
 
-        err = omap_gps_init();
+        err = notle_gps_init();
         if (err) {
                 pr_err("GPS initialization failed: %d\n", err);
         }
