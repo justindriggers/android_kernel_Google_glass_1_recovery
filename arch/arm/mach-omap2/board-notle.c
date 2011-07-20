@@ -65,6 +65,8 @@
 #include "cm1_44xx.h"
 #include "pm.h"
 
+#define BACKLIGHT_HACK
+
 #define MUX(x) OMAP4_CTRL_MODULE_PAD_##x##_OFFSET
 
 #define GPIO_GREEN_LED                  7
@@ -1066,6 +1068,7 @@ error:
         return r;
 }
 
+#ifndef BACKLIGHT_HACK
 static void notle_dmtimer_pwm_enable(void) {
         unsigned int core_base_addr = 0xfc100000;
 
@@ -1107,6 +1110,48 @@ static void __init notle_pwm_backlight_init(void) {
         pr_info("Successfully initialized backlight\n");
         return;
 }
+#else
+static void __init notle_pwm_backlight_init(void) { }
+
+static int notle_backlight_hack(void) {
+        // *** Adjust this value to set the backlight brightness. ***
+        float brightness = .01;
+        unsigned int core_base_addr = 0xfc100000;
+        struct omap_dm_timer* notle_pwm_timer;
+        const unsigned int sys_clock_hz = 19200000;
+        // This wants to be high enough we don't see flicker,
+        // but if it's too high, the display just blanks when
+        // set to a 1% duty cycle.
+        const unsigned int pwm_rate_hz = 991;
+        unsigned int denom = sys_clock_hz / pwm_rate_hz;
+        unsigned int num = denom * brightness;
+        const unsigned int max = 0xffffffff;
+
+        if (num > denom) num = denom;
+        if (num == denom) {
+                num = 0xfffffffe;
+                denom = 0xffffffff;
+        }
+
+        notle_pwm_timer = omap_dm_timer_request_specific(PWM_TIMER);
+        if (!notle_pwm_timer) {
+                return -1;
+        }
+        omap_dm_timer_set_source(notle_pwm_timer, OMAP_TIMER_SRC_SYS_CLK);
+        // pwm mode, turn it on, toggle, not pulse, and change on both
+        // compare and overflow.
+        omap_dm_timer_set_pwm(notle_pwm_timer, 1, 1,
+                OMAP_TIMER_TRIGGER_OVERFLOW_AND_COMPARE);
+        omap_dm_timer_set_load_start(notle_pwm_timer, 1, max - denom);
+        omap_dm_timer_set_match(notle_pwm_timer, 1, max - num);
+
+        __raw_writew(OMAP_MUX_MODE1, core_base_addr + MUX_BACKLIGHT);
+        pr_info("Set brightness to %i via BACKLIGHT_HACK\n", (int)(brightness * 100));
+        return 0;
+}
+late_initcall(notle_backlight_hack);
+
+#endif
 
 static void __init my_mux_init(void) {
         // Move this code to board_mux constants when we're convinced it works:
