@@ -982,7 +982,9 @@ static int __init notle_gps_start(void) {
         pr_info("Turning on GPS chip\n");
         return 0;
 }
+/* XXX Turning on GPS currently costs us ~50mA of current draw.
 late_initcall(notle_gps_start);
+*/
 
 static int __init notle_wifi_init(void) {
         int r;
