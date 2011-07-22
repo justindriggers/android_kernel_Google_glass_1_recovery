@@ -65,8 +65,6 @@
 #include "cm1_44xx.h"
 #include "pm.h"
 
-#define BACKLIGHT_HACK
-
 #define MUX(x) OMAP4_CTRL_MODULE_PAD_##x##_OFFSET
 
 #define GPIO_GREEN_LED                  7
@@ -1115,9 +1113,13 @@ static void __init notle_pwm_backlight_init(void) {
         pr_info("Successfully initialized backlight\n");
         return;
 }
-#else
-static void __init notle_pwm_backlight_init(void) { }
 
+/*
+   This code uses omap4 timers that are initialized as devices, so it must
+   be called after device initialization is finished.
+*/
+late_initcall(notle_pwm_backlight_init);
+#else
 static int notle_backlight_hack(void) {
         // *** Adjust this value to set the backlight brightness. ***
         float brightness = .01;
@@ -1206,7 +1208,6 @@ static void __init notle_init(void)
         my_mux_init();
 
         notle_i2c_init();
-        notle_pwm_backlight_init();
 
         platform_add_devices(notle_devices, ARRAY_SIZE(notle_devices));
         omap_serial_init();

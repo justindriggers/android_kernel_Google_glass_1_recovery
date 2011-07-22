@@ -85,6 +85,7 @@ struct pwm_device *pwm_request_dmtimer(int timer_id, const char *label,
   pwm_id_map[next_available_id]->timer = timer;
   pwm_id_map[next_available_id]->ops = ops;
   pwm_id_map[next_available_id]->divisor = 0;
+  pwm_id_map[next_available_id]->enabled = 0;
 
   return pwm_id_map[next_available_id++];
 }
@@ -126,7 +127,7 @@ int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns) {
     duty_cycles = 2;
   }
 
-  omap_dm_timer_set_load(pwm->timer, 1, overflow - period_cycles);
+  omap_dm_timer_set_load_start(pwm->timer, 1, overflow - period_cycles);
   omap_dm_timer_set_match(pwm->timer, 1, overflow - duty_cycles);
   return 0;
 }
@@ -144,7 +145,9 @@ int pwm_enable(struct pwm_device *pwm) {
     return -EINVAL;
   }
 
-  omap_dm_timer_start(pwm->timer);
+  if (!pwm->enabled)
+    omap_dm_timer_enable(pwm->timer);
+
   /* Call board-specific enable function now that the timer is started. */
   if (pwm->ops && pwm->ops->enable) {
     /*
@@ -157,6 +160,7 @@ int pwm_enable(struct pwm_device *pwm) {
     msleep(10);
     pwm->ops->enable();
   }
+  pwm->enabled = 1;
   return 0;
 }
 EXPORT_SYMBOL(pwm_enable);
@@ -177,7 +181,13 @@ void pwm_disable(struct pwm_device *pwm) {
   if (pwm->ops && pwm->ops->disable) {
     pwm->ops->disable();
   }
-  omap_dm_timer_stop(pwm->timer);
+
+  // The linux pwm driver doesn't call enable/disable symmetrically.
+  // The omap enable/disable code does device get/sync calls, so we
+  // need to make sure we only call disable once for each enable.
+  if (pwm->enabled)
+    omap_dm_timer_disable(pwm->timer);
+  pwm->enabled = 0;
 }
 EXPORT_SYMBOL(pwm_disable);
 

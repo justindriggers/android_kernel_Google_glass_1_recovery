@@ -29,6 +29,7 @@ struct pwm_device {
    * by the dmtimer.
    * */
   unsigned long divisor;
+  bool enabled;
 };
 
 struct pwm_device *pwm_request_dmtimer(int timer_id, const char *label,
