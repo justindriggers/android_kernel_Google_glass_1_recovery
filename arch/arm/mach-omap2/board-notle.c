@@ -478,7 +478,6 @@ static struct regulator_init_data notle_vaux2 = {
 		.min_uV			= 2800000,
 		.max_uV			= 2800000,
 		.apply_uV		= true,
-                .always_on      = true,
 		.valid_modes_mask	= REGULATOR_MODE_NORMAL
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
