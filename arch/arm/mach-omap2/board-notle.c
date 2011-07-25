@@ -971,6 +971,8 @@ static int notle_gps_init(void) {
                 pr_err("Failed to get gps_on_off gpio\n");
                 goto error;
         }
+        gpio_export(GPIO_GPS_ON_OFF, false);
+
         return 0;
 
 error:
