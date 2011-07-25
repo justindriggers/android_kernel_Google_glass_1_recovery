@@ -289,6 +289,29 @@ static struct panel_config generic_dpi_panels[] = {
 		.power_off_delay	= 0,
 		.name			= "powertip_ph480272t",
 	},
+
+        /* HP LP2465 */
+        {
+                {
+                        .x_res          = 1024,
+                        .y_res          = 768,
+
+                        .pixel_clock    = 64000,
+                        .hfp            = 24,
+                        .hsw            = 63,
+                        .hbp            = 160,
+
+                        .vfp            = 3,
+                        .vsw            = 6,
+                        .vbp            = 29,
+                },
+                .acbi                   = 0x0,
+                .acb                    = 0x0,
+                .config                 = OMAP_DSS_LCD_TFT,
+                .power_on_delay         = 0,
+                .power_off_delay        = 0,
+                .name                   = "hp-lp2465",
+        },
 };
 
 struct panel_drv_data {
