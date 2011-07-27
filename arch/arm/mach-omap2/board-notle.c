@@ -36,6 +36,10 @@
 #include <linux/i2c/lsm303dlhc.h>
 #include <linux/i2c/ltr506.h>
 
+#ifdef CONFIG_MPU_SENSORS_MPU6050B1
+#include <linux/mpu.h>
+#endif
+
 #include <linux/regulator/fixed.h>
 #include <linux/regulator/machine.h>
 
@@ -815,6 +819,33 @@ static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
 /*
  * i2c-4 
  */
+#ifdef CONFIG_MPU_SENSORS_MPU6050B1
+static struct mpu_platform_data mpu6050_data = {
+        .int_config     = 0x10,
+        .orientation    = { 0, 1, 0,
+                            1, 0, 0,
+                            0, 0, -1},
+        .level_shifter  = 0,
+        .accel          = {
+                .get_slave_descr = mantis_get_slave_descr,
+                .adapt_num = 4,
+                .bus = EXT_SLAVE_BUS_SECONDARY,
+                .address = 0x68,
+                .orientation = { 0, 1, 0,
+                                 1, 0, 0,
+                                 0, 0, -1 },
+        },
+        .compass        = {
+                .get_slave_descr = ak8975_get_slave_descr,
+                .adapt_num = 4,
+                .bus = EXT_SLAVE_BUS_SECONDARY,
+                .address = 0x0C,
+                .orientation = { 1, 0, 0,
+                                 0, 1, 0,
+                                 0, 0, -1 },
+        },
+};
+#else
 static struct l3g4200d_gyr_platform_data notle_l3g4200d_data = {
         .min_interval = 1,                // Minimum poll interval in ms.
 	.poll_interval = 10,              /* poll interval (in ms) to pass
@@ -865,11 +896,19 @@ static struct lsm303dlhc_mag_platform_data notle_lsm303dlh_mag_data = {
 	.negate_y = 1,
 	.axis_map_z = 1,
 };
+#endif
 
 static struct ltr506_als_platform_data notle_ltr506_als_data = {
 };
 
 static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
+#ifdef CONFIG_MPU_SENSORS_MPU6050B1
+        {
+		I2C_BOARD_INFO("mpu6050B1", 0x68),
+	//	.irq = OMAP44XX_IRQ_SYS_1N,
+		.platform_data = &mpu6050_data,
+        },
+#else
 	{
 		I2C_BOARD_INFO("l3g4200d_gyr", 0x68),
 		.flags = I2C_CLIENT_WAKE,
@@ -883,15 +922,16 @@ static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
 		.platform_data = &notle_lsm303dlh_acc_data,
 	},
 	{
-		I2C_BOARD_INFO("ltr506_als", 0x1d),
-		.flags = I2C_CLIENT_WAKE,
-		.platform_data = &notle_ltr506_als_data,
-	},
-	{
 		I2C_BOARD_INFO("lsm303dlhc_mag", 0x1e),
 		.flags = I2C_CLIENT_WAKE,
 	//	.irq = OMAP44XX_IRQ_SYS_1N,
 		.platform_data = &notle_lsm303dlh_mag_data,
+	},
+#endif
+	{
+		I2C_BOARD_INFO("ltr506_als", 0x1d),
+		.flags = I2C_CLIENT_WAKE,
+		.platform_data = &notle_ltr506_als_data,
 	},
 	{
 		I2C_BOARD_INFO("notle_himax", 0x48),
