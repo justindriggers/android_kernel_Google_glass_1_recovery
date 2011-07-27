@@ -188,6 +188,8 @@
 #define	RESUME_ENTRIES		17
 /* end RESUME STATE INDICES */
 
+/* Use this (modified) DLHC driver to support older DLH parts as well */
+bool is_dlh_part;
 
 struct {
 	unsigned int cutoff_ms;
@@ -203,7 +205,7 @@ struct {
 		{ 1000, ODR1    },
 };
 
-/* Driver written for DLHC.  Temporarily retrofit DLH support: */
+/* Driver written for DLHC.  Retrofit DLH support: */
 #define DLH_ODR05		0x40  /* .5Hz output data rate */
 #define DLH_ODR1		0x60  /* 1Hz output data rate */
 #define DLH_ODR2		0x80  /* 2Hz output data rate */
@@ -343,11 +345,17 @@ static int lsm303dlhc_acc_hw_init(struct lsm303dlhc_acc_data *acc)
 		goto err_firstread;
 	} else
 		acc->hw_working = 1;
-        // Temporary workaround for supporting DLH part with this driver
-	if (buf[0] != WHOAMI_LSM303DLH_ACC) {
+	if (buf[0] == WHOAMI_LSM303DLH_ACC) {
+                printk(KERN_INFO "LSM303DLH accelerometer found\n");
+                is_dlh_part = true;
+        } else if (buf[0] == WHOAMI_LSM303DLHC_ACC) {
+                printk(KERN_INFO "LSM303DLHC accelerometer found\n");
+                is_dlh_part = false;
+        } else {
 	dev_err(&acc->client->dev,
-		"device unknown. Expected: 0x%x,"
-		" Replies: 0x%x\n", WHOAMI_LSM303DLH_ACC, buf[0]);
+		"device unknown. Expected: 0x%x or 0x%x,"
+		" Replies: 0x%x\n", WHOAMI_LSM303DLHC_ACC,
+                WHOAMI_LSM303DLH_ACC, buf[0]);
 		err = -1; /* choose the right coded error */
 		goto err_unknown_device;
 	}
@@ -608,13 +616,19 @@ int lsm303dlhc_acc_update_odr(struct lsm303dlhc_acc_data *acc,
 	 * odr_table vector from the end (shortest interval) backward (longest
 	 * interval), to support the poll_interval requested by the system.
 	 * It must be the longest interval lower then the poll interval.*/
-        /* Temporarily use DLH version of table */
-	for (i = ARRAY_SIZE(lsm303dlh_acc_odr_table) - 1; i > 0; i--) {
-		if (lsm303dlh_acc_odr_table[i].cutoff_ms <= poll_interval_ms)
-			break;
-	}
-	config[1] = lsm303dlh_acc_odr_table[i].mask;
-
+        if (is_dlh_part) {
+                for (i = ARRAY_SIZE(lsm303dlh_acc_odr_table) - 1; i > 0; i--) {
+                        if (lsm303dlh_acc_odr_table[i].cutoff_ms <= poll_interval_ms)
+                                break;
+                }
+                config[1] = lsm303dlh_acc_odr_table[i].mask;
+        } else {
+                for (i = ARRAY_SIZE(lsm303dlhc_acc_odr_table) - 1; i > 0; i--) {
+                        if (lsm303dlhc_acc_odr_table[i].cutoff_ms <= poll_interval_ms)
+                                break;
+                }
+                config[1] = lsm303dlhc_acc_odr_table[i].mask;
+        }
 	config[1] |= LSM303DLHC_ACC_ENABLE_ALL_AXES;
 
 	/* If device is currently enabled, we need to write new
