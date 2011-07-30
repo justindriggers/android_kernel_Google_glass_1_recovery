@@ -249,11 +249,13 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 				}
 #ifdef CONFIG_SYNA_MULTI_TOUCH
 				/* Report Multi-Touch events for each finger */
+				input_report_abs(function_device->input, ABS_MT_PRESSURE, Z);
 				/* major axis of touch area ellipse */
-				input_report_abs(function_device->input, ABS_MT_TOUCH_MAJOR, Z);
-				/* minor axis of touch area ellipse */
-				input_report_abs(function_device->input, ABS_MT_WIDTH_MAJOR,
+				input_report_abs(function_device->input, ABS_MT_TOUCH_MAJOR,
 						max(Wx, Wy));
+				/* minor axis of touch area ellipse */
+				input_report_abs(function_device->input, ABS_MT_TOUCH_MINOR,
+						min(Wx, Wy));
 				/* Currently only 2 supported - 1 or 0 */
 				input_report_abs(function_device->input, ABS_MT_ORIENTATION,
 					(Wx > Wy ? 1 : 0));
@@ -276,19 +278,8 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 	/* if we had a finger down before and now we don't have any send a button up. */
 	if ((fingerDownCount == 0) && instanceData->wasdown) {
 		instanceData->wasdown = false;
-
-#ifdef CONFIG_SYNA_MULTI_TOUCH
-		input_report_abs(function_device->input, ABS_MT_TOUCH_MAJOR, 0);
-		input_report_abs(function_device->input, ABS_MT_WIDTH_MAJOR, 0);
-		input_report_abs(function_device->input, ABS_MT_POSITION_X, instanceData->oldX);
-		input_report_abs(function_device->input, ABS_MT_POSITION_Y, instanceData->oldY);
-		input_report_abs(function_device->input, ABS_MT_TRACKING_ID, 1);
-		input_mt_sync(function_device->input);
-#endif
-
-		input_report_abs(function_device->input, ABS_X, instanceData->oldX);
-		input_report_abs(function_device->input, ABS_Y, instanceData->oldY);
 		instanceData->oldX = instanceData->oldY = 0;
+		input_mt_sync(function_device->input);
 		printk(KERN_DEBUG "%s: Finger up.", __func__);
 	}
 
@@ -450,6 +441,7 @@ static void f11_set_abs_params(struct rmi_function_device *function_device)
 	input_set_abs_params(function_device->input, ABS_TOOL_WIDTH, 0, 15, 0, 0);
 
 #ifdef CONFIG_SYNA_MULTI_TOUCH
+	input_set_abs_params(function_device->input, ABS_MT_PRESSURE, 0, 255, 0, 0);
 	input_set_abs_params(function_device->input, ABS_MT_TOUCH_MAJOR, 0, 15, 0, 0);
 	input_set_abs_params(function_device->input, ABS_MT_TOUCH_MINOR, 0, 15, 0, 0);
 	input_set_abs_params(function_device->input, ABS_MT_ORIENTATION, 0, 1, 0, 0);
