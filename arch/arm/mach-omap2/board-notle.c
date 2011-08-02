@@ -56,6 +56,7 @@
 #include <plat/common.h>
 #include <plat/usb.h>
 #include <plat/mmc.h>
+#include <plat/omap-serial.h>
 #include <plat/dmtimer-pwm.h>
 
 #include <video/omapdss.h>
@@ -642,6 +643,38 @@ static struct platform_device notle_vwlan_device = {
         },
 };
 
+static struct omap_uart_port_info omap_serial_port_info[] = {
+        { /* ttyO0 unused */
+                .use_dma        = 0,
+                .dma_rx_buf_size = DEFAULT_RXDMA_BUFSIZE,
+                .dma_rx_poll_rate = DEFAULT_RXDMA_POLLRATE,
+                .dma_rx_timeout = DEFAULT_RXDMA_TIMEOUT,
+                .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
+        },
+        { /* ttyO1 bluetooth */
+                .use_dma        = 0,
+                .dma_rx_buf_size = DEFAULT_RXDMA_BUFSIZE,
+                .dma_rx_poll_rate = DEFAULT_RXDMA_POLLRATE,
+                .dma_rx_timeout = DEFAULT_RXDMA_TIMEOUT,
+                .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
+        },
+        { /* ttyO2 console port */
+                .use_dma        = 0,
+                .dma_rx_buf_size = DEFAULT_RXDMA_BUFSIZE,
+                .dma_rx_poll_rate = DEFAULT_RXDMA_POLLRATE,
+                .dma_rx_timeout = DEFAULT_RXDMA_TIMEOUT,
+                .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
+        },
+        {  /* ttyO3 GPS */
+                .use_dma        = 1,
+                .dma_rx_buf_size = DEFAULT_RXDMA_BUFSIZE,
+                /* TODO(cmanton) Use interrupts for better (?) power management */
+                .dma_rx_poll_rate = 100000,  // units in usec
+                .dma_rx_timeout = DEFAULT_RXDMA_TIMEOUT,
+                .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
+        },
+};
+
 /*
  * Driver data struct for the pwm-backlight driver.  Fields:
  *
@@ -1003,14 +1036,28 @@ static int notle_gps_init(void) {
                 goto error;
         }
 
-        /* The part needs to see a rising edge. */
+        r = gpio_export(GPIO_GPS_RESET_N, false);
+        if (r) {
+                pr_err("Unable to export gps_reset_n gpio\n");
+        }
+
+        r = gpio_sysfs_set_active_low(GPIO_GPS_RESET_N, 0);
+        if (r) {
+                pr_err("Unable to set sysfs gps_reset_n active low\n");
+        }
+
+        /* Need a rising edge to turn device on. */
         r = gpio_request_one(GPIO_GPS_ON_OFF, GPIOF_OUT_INIT_LOW,
                 "gps_on_off");
         if (r) {
                 pr_err("Failed to get gps_on_off gpio\n");
                 goto error;
         }
-        gpio_export(GPIO_GPS_ON_OFF, false);
+
+        r = gpio_export(GPIO_GPS_ON_OFF, false);
+        if (r) {
+                pr_err("Unable to export gps_on_off gpio\n");
+        }
 
         return 0;
 
@@ -1253,7 +1300,7 @@ static void __init notle_init(void)
         notle_i2c_init();
 
         platform_add_devices(notle_devices, ARRAY_SIZE(notle_devices));
-        omap_serial_init();
+        omap_serial_board_init(omap_serial_port_info);
         omap4_twl6030_hsmmc_init(mmc);
         usb_musb_init(&musb_board_data);
 
