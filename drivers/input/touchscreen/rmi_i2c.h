@@ -22,10 +22,16 @@
  *#############################################################################
  */
 
-#ifndef _RMI_I2C_H
+#if !defined(_RMI_I2C_H)
 #define _RMI_I2C_H
 
 #include "rmi_platformdata.h"
+
+/* In the future, we may change the device name.  If so, defining it here
+ * makes life easier.
+ */
+#define RMI4_I2C_DRIVER_NAME "rmi4_ts"
+#define RMI4_I2C_DEVICE_NAME "rmi4_ts"
 
 /* Sensor-specific configuration data, to be included as the platform data
  * for the relevant i2c_board_info entry.
@@ -38,11 +44,6 @@
 struct rmi_i2c_platformdata {
 	/* The seven-bit i2c address of the sensor. */
 	int i2c_address;
-	/* The number of the irq.  Set to zero if polling is required. */
-	int irq;
-	/* The type of the irq (e.g., IRQF_TRIGGER_FALLING).
-	 * Only valid if irq != 0 */
-	int irq_type;
 
 	/* If >0, the driver will delay this many milliseconds before attempting
 	 * I2C communications.  This is necessary because some horribly broken

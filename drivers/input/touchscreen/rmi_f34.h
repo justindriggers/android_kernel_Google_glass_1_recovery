@@ -26,8 +26,9 @@
  *
  *#############################################################################
  */
-#ifndef _RMI_FUNCTION_34_H
-#define _RMI_FUNCTION_34_H
+
+#if !defined(_RMI_F34_H)
+#define _RMI_F34_H
 
 /* define fn $34 commands */
 #define WRITE_FW_BLOCK            2
@@ -36,15 +37,12 @@
 #define WRITE_CONFIG_BLOCK        6
 #define ERASE_CONFIG              7
 #define ENABLE_FLASH_PROG         15
-#define DISABLE_FLASH_PROG        16
 
 void FN_34_inthandler(struct rmi_function_info *rmifninfo,
-	unsigned int assertedIRQs);
+		      unsigned int asserted_IRQs);
 int FN_34_config(struct rmi_function_info *rmifninfo);
 int FN_34_init(struct rmi_function_device *function_device);
-int FN_34_detect(struct rmi_function_info *rmifninfo,
-		struct rmi_function_descriptor *fndescr,
-		unsigned int interruptCount);
+int FN_34_detect(struct rmi_function_info *rmifninfo);
 void FN_34_attention(struct rmi_function_info *rmifninfo);
 
 #endif

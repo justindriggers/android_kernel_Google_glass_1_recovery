@@ -27,28 +27,77 @@
 
 #include "rmi_platformdata.h"
 
-#define RMI_CHIP_VER_3	0
-#define RMI_CHIP_VER_4	1
+#define RMI4_SPI_DRIVER_NAME "rmi4_ts"
+#define RMI4_SPI_DEVICE_NAME "rmi4_ts"
 
-#define RMI_SUPPORT (RMI_CHIP_VER_3|RMI_CHIP_VER_4)
+/* Some RMI4 SPI devices require a delay between writing the address and
+ * starting the read.  A subset of those required a delay between each
+ * byte transferred during the read.
+ */
 
-/** Platform-specific configuration data.
- * This structure is used by the platform-specific driver to designate
- * specific information about the hardware.  A platform client may supply
- * an array of these to the rmi_phys_spi driver.
+/* microseconds between header and start of read operation. */
+#define RMI_DEFAULT_BLOCK_DELAY_US	65
+
+/* microseconds inter-byte delay between bytes during read. */
+#define RMI_DEFAULT_BYTE_DELAY_US	65
+
+/* Use this to specify SPI interface dependent parameters on a per device basis.
+ *
+ * Interface independent data is given in the sensor_data field of this struct.
  */
 struct rmi_spi_platformdata {
-	/* struct spi_device spi_dev; */
-	int chip;
+	/* RMI4 devices implement two different ways of talking to the
+	 * device over SPI.  These are called SPIv1 and SPIv2.  Due to
+	 * resource constraints on some ASICs, delays may be required when
+	 * reading data from the chip.
+	 *
+	 * The block delay specifies the number of microseconds the
+	 * driver should delay between sending the read request and
+	 * the start of reading data from the ASIC.  If you don't know
+	 * what value to use here, you should specify
+	 * RMI_DEFAULT_BLOCK_DELAY_US.
+	 *
+	 * The byte delay specifies the number of microseconds the driver should
+	 * delay between each byte of a read request.  If don't know what value
+	 * to use here, you should specify RMI_DEFAULT_BLOCK_DELAY_US.
+	 *
+	 * Usually these two values should be the same, but in some cases
+	 * it may be desirable to use different values.
+	 */
+	unsigned int block_delay_us;
+	unsigned int byte_delay_us;
 
-	/* The number of the irq.  Set to zero if polling is required. */
-	int irq;
+	/* SPIv2 supports a special "split read" operation, which can permit the
+	 * SPI interface to run at full speed (subject to product specific
+	 * limitations) with no delay between blocks and bytes.  In almost all
+	 * cases, it is permissible to default these values to zero.
+	 */
+	unsigned int split_read_block_delay_us;
+	unsigned int split_read_byte_delay_us;
 
-	/* The type of the irq (e.g., IRQF_TRIGGER_FALLING).  Only valid if
-	* irq != 0 */
-	int irq_type;
+	/* Some SPI hardware and/or drivers do not manage the SSB/CS line in a
+	 * reasonable way.  In particular, the problem is that SSB/CS will be
+	 * deasserted in between every spi_transfer in an spi_message (despite
+	 * whatever you might have set the spi_transfer.cs_change flag to),
+	 * rather than asserting it at the start of the spi_message and leaving
+	 * it asserted until all transfers are completed.  In this case, we
+	 * have to manage the SSB/CS line manually, and you need to provide
+	 * the cs_assert callback here.
+	 *
+	 * If the cs_assert function is non-null, it will be called before
+	 * the driver submits an spi_message in order to assert the line (the
+	 * assert parameter will be TRUE), and afterwards to clear it (the
+	 * assert parameter will be FALSE).  cs_assert should return 0 for
+	 * success, or a negative error code if it fails.
+	 *
+	 * You can provide any needed context data in the cs_assert_data
+	 * variable, which will be passed into all cs_assert calls.
+	 */
+	void *cs_assert_data;
+	int (*cs_assert) (const void *cs_assert_data, const bool assert);
 
-	/* Use this to specify platformdata that is not I2C specific. */
+
+	/* Use this to specify platformdata that is not SPI specific. */
 	struct rmi_sensordata *sensordata;
 };
 

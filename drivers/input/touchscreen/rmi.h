@@ -23,11 +23,30 @@
  *#############################################################################
  */
 
-#ifndef _RMI_H
+#if !defined(_RMI_H)
 #define _RMI_H
 
 /*  RMI4 Protocol Support
  */
+
+
+/* Every function on an RMI device is identified by a one byte function number.
+ * The hexadecimal representation of this byte is used in the function name.
+ * For example, the function identified by the byte 0x11 is referred to as
+ * F11 (or sometimes FN11).  In the extremely improbable event that F11 is no
+ * longer identified by 0x11, though, we provide these handy #defines.
+ */
+#define RMI_F01_INDEX 0x01
+#define RMI_F05_INDEX 0x05
+#define RMI_F11_INDEX 0x11
+#define RMI_F19_INDEX 0x19
+#define RMI_F34_INDEX 0x34
+#define RMI_F54_INDEX 0x54
+
+/* This byte has information about the communications protocol.  See the RMI4
+ * specification for details of what exactly is there.
+ */
+#define RMI_PROTOCOL_VERSION_ADDRESS 0xA0FD
 
 /* For each function present on the RMI device, we need to get the RMI4 Function
  * Descriptor info from the Page Descriptor Table. This will give us the
@@ -35,136 +54,19 @@
  * of sources for this function) and the function id.
  */
 struct rmi_function_descriptor {
-	unsigned char queryBaseAddr;
-	unsigned char commandBaseAddr;
-	unsigned char controlBaseAddr;
-	unsigned char dataBaseAddr;
-	unsigned char interruptSrcCnt;
-	unsigned char functionNum;
+	unsigned char query_base_addr;
+	unsigned char command_base_addr;
+	unsigned char control_base_addr;
+	unsigned char data_base_addr;
+	unsigned char interrupt_source_count;
+	unsigned char function_number;
 };
 
-/*  This encapsulates the information found using the RMI4 Function $01
- *  query registers. There is only one Function $01 per device.
- *
- *  Assuming appropriate endian-ness, you can populate most of this
- *  structure by reading query registers starting at the query base address
- *  that was obtained from RMI4 function 0x01 function descriptor info read
- *  from the Page Descriptor Table.
- *
- *  Specific register information is provided in the comments for each field.
- *  For further reference, please see the "Synaptics RMI 4 Interfacing
- *  Guide" document : go to http://www.synaptics.com/developers/manuals - and
- *  select "Synaptics RMI 4 Interfacting Guide".
+/* The product descriptor table starts here, and continues till we get
+ * a function ID of 0x00 or 0xFF.
  */
-struct rmi_F01_query {
-	/* The Protocol Major Version number.*/
-	unsigned rmi_maj_ver;
+#define RMI_PDT_START_ADDRESS 0x00E9
 
-	/* The Protocol Minor Version number.*/
-	unsigned rmi_min_ver;
-
-	/* The manufacturer identification byte.*/
-	unsigned char mfgid;
-
-	/* The Product Properties information.*/
-	unsigned char properties;
-
-	/* The product info bytes.*/
-	unsigned char prod_info[2];
-
-	/* Date Code - Year, Month, Day.*/
-	unsigned char date_code[3];
-
-	/* Tester ID (14 bits).*/
-	unsigned short tester_id;
-
-	/* Serial Number (14 bits).*/
-	unsigned short serial_num;
-
-	/* A null-terminated string that identifies this particular product.*/
-	char prod_id[11];
-};
-
-/* This encapsulates the F01 Device Control control registers.
- * TODO: This isn't right.  The number of interrupt enables needs to be determined
- * dynamically as the sensor is initialized.  Fix this.
- */
-struct rmi_F01_control {
-    unsigned char deviceControl;
-    unsigned char interruptEnable[1];
-};
-
-/** This encapsulates the F01 Device Control data registers.
- * TODO: This isn't right.  The number of irqs needs to be determined
- * dynamically as the sensor is initialized.  Fix this.
- */
-struct rmi_F01_data {
-    unsigned char deviceStatus;
-    unsigned char irqs[1];
-};
-
-
-/**********************************************************/
-
-/** This is the data read from the F11 query registers.
- */
-struct rmi_F11_device_query {
-    bool hasQuery9;
-    unsigned char numberOfSensors;
-};
-
-struct rmi_F11_sensor_query {
-    bool configurable;
-    bool hasSensitivityAdjust;
-    bool hasGestures;
-    bool hasAbs;
-    bool hasRel;
-    unsigned char numberOfFingers;
-    unsigned char numberOfXElectrodes;
-    unsigned char numberOfYElectrodes;
-    unsigned char maximumElectrodes;
-    bool hasAnchoredFinger;
-    unsigned char absDataSize;
-};
-
-struct rmi_F11_control {
-    bool relativeBallistics;
-    bool relativePositionFilter;
-    bool absolutePositionFilter;
-    unsigned char reportingMode;
-    bool manuallyTrackedFinger;
-    bool manuallyTrackedFingerEnable;
-    unsigned char motionSensitivity;
-    unsigned char palmDetectThreshold;
-    unsigned char deltaXPosThreshold;
-    unsigned char deltaYPosThreshold;
-    unsigned char velocity;
-    unsigned char acceleration;
-    unsigned short sensorMaxXPos;
-    unsigned short sensorMaxYPos;
-};
-
-
-/**********************************************************/
-
-/** This is the data read from the F19 query registers.
- */
-struct rmi_F19_query {
-	bool hasHysteresisThreshold;
-	bool hasSensitivityAdjust;
-	bool configurable;
-	unsigned char buttonCount;
-};
-
-struct rmi_F19_control {
-	unsigned char buttonUsage;
-	unsigned char filterMode;
-	unsigned char *intEnableRegisters;
-	unsigned char *singleButtonControl;
-	unsigned char *sensorMap;
-	unsigned char *singleButtonSensitivity;
-	unsigned char globalSensitivityAdjustment;
-	unsigned char globalHysteresisThreshold;
-};
+#define RMI_IS_VALID_FUNCTION_ID(id) (id != 0x00 && id != 0xFF)
 
 #endif

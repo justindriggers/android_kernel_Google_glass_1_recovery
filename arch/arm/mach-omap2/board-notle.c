@@ -833,10 +833,26 @@ static struct i2c_board_info __initdata notle_i2c_boardinfo[] = {
 	},
 };
 
-static struct rmi_i2c_platformdata synaptics_platformdata = {
+static struct rmi_sensor_suspend_custom_ops synaptics_custom_ops = {
+        .rmi_sensor_custom_suspend = 0,
+        .rmi_sensor_custom_resume = 0,
+        .delay_resume = 0,
+};
+
+static struct rmi_sensordata __initdata synaptics_sensordata = {
+        .rmi_sensor_setup = 0,
+        .rmi_sensor_teardown = 0,
+        .attn_gpio_number = 0,
+        .attn_polarity = 0,
+        .custom_suspend_ops = &synaptics_custom_ops,
+        .perfunctiondata = 0,
+};
+
+static struct rmi_i2c_platformdata __initdata synaptics_platformdata = {
        // same address here as in I2C_BOARD_INFO
        .i2c_address = 0x20,
-       .irq = 0x00,
+//       .irq = 0x00,
+        .sensordata = &synaptics_sensordata,
 };
 
 static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
@@ -1181,7 +1197,7 @@ static struct dmtimer_pwm_ops notle_dmtimer_pwm_ops = {
   .disable      = notle_dmtimer_pwm_disable,
 };
 
-static void __init notle_pwm_backlight_init(void) {
+static int __init notle_pwm_backlight_init(void) {
         int r;
         struct pwm_device *pwm;
         pwm = pwm_request_dmtimer(PWM_TIMER, "backlight",
@@ -1189,7 +1205,7 @@ static void __init notle_pwm_backlight_init(void) {
 
         if (!pwm) {
                 pr_err("Failed to request backlight dmtimer\n");
-                return;
+                return -1;
         }
 
         backlight_data.pwm_id = pwm->pwm_id;
@@ -1197,11 +1213,11 @@ static void __init notle_pwm_backlight_init(void) {
         if (r) {
                 pr_err("Failed to register backlight platform device\n");
                 pwm_free(pwm);
-                return;
+                return -1;
         }
 
         pr_info("Successfully initialized backlight\n");
-        return;
+        return 0;
 }
 
 /*

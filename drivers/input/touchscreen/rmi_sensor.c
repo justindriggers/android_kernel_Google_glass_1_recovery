@@ -21,8 +21,6 @@
  *#############################################################################
  */
 
-static const char sensorname[] = "sensor";
-
 #include <linux/kernel.h>
 #include <linux/gpio.h>
 #include <linux/list.h>
@@ -38,64 +36,198 @@ static const char sensorname[] = "sensor";
 #include <linux/input.h>
 #include <linux/interrupt.h>
 
-
 #include "rmi_drvr.h"
 #include "rmi_bus.h"
 #include "rmi_function.h"
 #include "rmi_sensor.h"
 
-long polltime = 25000000;   /* Shared with rmi_function.c. */
+/* Context data for each sensor.
+ */
+struct sensor_instance_data {
+	unsigned char pdt_props;
+	unsigned char bsr;
+	bool enabled;
+};
+
+#define HAS_BSR_MASK 0x20
+#define HAS_NONSTANDARD_PDT_MASK 0x40
+
+static bool has_bsr(struct sensor_instance_data *instance_data)
+{
+	return (instance_data->pdt_props & HAS_BSR_MASK) != 0;
+}
+
+long polltime = 25000000;	/* Shared with rmi_function.c. */
 EXPORT_SYMBOL(polltime);
 module_param(polltime, long, 0644);
 MODULE_PARM_DESC(polltime, "How long to wait between polls (in nano seconds).");
 
-
 #define PDT_START_SCAN_LOCATION 0x00E9
 #define PDT_END_SCAN_LOCATION 0x0005
 #define PDT_ENTRY_SIZE 0x0006
+#define PDT_PROPERTIES_LOCATION 0x00EF
+#define BSR_LOCATION 0x00FE
 
 static DEFINE_MUTEX(rfi_mutex);
 
-struct rmi_functions *rmi_find_function(int functionNum);
+struct rmi_function_ops *rmi_find_function(int function_number);
 
-int rmi_read(struct rmi_sensor_driver *sensor, unsigned short address, char *dest)
+/* sysfs files for sensor attributes for BSR register value. */
+static ssize_t rmi_sensor_hasbsr_show(struct device *dev,
+				      struct device_attribute *attr, char *buf);
+
+static ssize_t rmi_sensor_bsr_show(struct device *dev,
+				   struct device_attribute *attr, char *buf);
+
+static ssize_t rmi_sensor_bsr_store(struct device *dev,
+				    struct device_attribute *attr,
+				    const char *buf, size_t count);
+
+static ssize_t rmi_sensor_enabled_show(struct device *dev,
+				   struct device_attribute *attr, char *buf);
+
+static ssize_t rmi_sensor_enabled_store(struct device *dev,
+				    struct device_attribute *attr,
+				    const char *buf, size_t count);
+
+static struct device_attribute attrs[] = {
+	__ATTR(hasbsr, 0444,
+	       rmi_sensor_hasbsr_show, rmi_store_error),	/* RO attr */
+	__ATTR(bsr, 0666,
+	       rmi_sensor_bsr_show, rmi_sensor_bsr_store),	/* RW attr */
+	__ATTR(enabled, 0666,
+	       rmi_sensor_enabled_show, rmi_sensor_enabled_store) /* RW attr */
+};
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void rmi_sensor_early_suspend(struct early_suspend *h);
+static void rmi_sensor_late_resume(struct early_suspend *h);
+#endif
+
+int rmi_read(struct rmi_sensor_driver *sensor, unsigned short address,
+	     char *dest)
 {
 	struct rmi_phys_driver *rpd = sensor->rpd;
 	if (!rpd)
 		return -ENODEV;
+#ifdef CONFIG_SYNA_RMI_DEV
+	if (sensor->use_rmi_char_device)
+		return -ENODEV;
+#endif /*CONFIG_SYNA_RMI_DEV*/
+
 	return rpd->read(rpd, address, dest);
 }
 EXPORT_SYMBOL(rmi_read);
 
 int rmi_write(struct rmi_sensor_driver *sensor, unsigned short address,
-		unsigned char data)
+	      unsigned char data)
 {
 	struct rmi_phys_driver *rpd = sensor->rpd;
 	if (!rpd)
 		return -ENODEV;
+#ifdef CONFIG_SYNA_RMI_DEV
+	if (sensor->use_rmi_char_device)
+		return -ENODEV;
+#endif /*CONFIG_SYNA_RMI_DEV*/
 	return rpd->write(rpd, address, data);
 }
 EXPORT_SYMBOL(rmi_write);
 
 int rmi_read_multiple(struct rmi_sensor_driver *sensor, unsigned short address,
-		char *dest, int length)
+		      char *dest, int length)
 {
 	struct rmi_phys_driver *rpd = sensor->rpd;
 	if (!rpd)
 		return -ENODEV;
+#ifdef CONFIG_SYNA_RMI_DEV
+	if (sensor->use_rmi_char_device)
+		return -ENODEV;
+#endif /*CONFIG_SYNA_RMI_DEV*/
 	return rpd->read_multiple(rpd, address, dest, length);
 }
 EXPORT_SYMBOL(rmi_read_multiple);
 
 int rmi_write_multiple(struct rmi_sensor_driver *sensor, unsigned short address,
-		unsigned char *data, int length)
+		       unsigned char *data, int length)
 {
 	struct rmi_phys_driver *rpd = sensor->rpd;
 	if (!rpd)
 		return -ENODEV;
+#ifdef CONFIG_SYNA_RMI_DEV
+	if (sensor->use_rmi_char_device)
+		return -ENODEV;
+#endif /*CONFIG_SYNA_RMI_DEV*/
 	return rpd->write_multiple(rpd, address, data, length);
 }
 EXPORT_SYMBOL(rmi_write_multiple);
+
+/* Utility routine to set bits in a register. */
+int rmi_set_bits(struct rmi_sensor_driver *sensor, unsigned short address,
+		 unsigned char bits)
+{
+	unsigned char reg_contents;
+	int retval;
+
+	retval = rmi_read(sensor, address, &reg_contents);
+	if (retval) {
+printk("%s: Read at 0x%04x failed, code: %d.\n", __func__, address, retval);
+		pr_warning("%s: Read at 0x%04x failed, code: %d.\n",
+			__func__, address, retval);
+		return retval;
+	}
+	reg_contents = reg_contents | bits;
+	retval = rmi_write(sensor, address, reg_contents);
+	if (retval == 1)
+		return 0;
+	else if (retval == 0) {
+printk("%s: Write at 0x%04x failed.\n", __func__, address);
+		pr_warning("%s: Write at 0x%04x failed.\n",
+			__func__, address);
+		return -EINVAL;	/* TODO: What should this be? */
+	}
+	return retval;
+}
+EXPORT_SYMBOL(rmi_set_bits);
+
+/* Utility routine to clear bits in a register. */
+int rmi_clear_bits(struct rmi_sensor_driver *sensor, unsigned short address,
+		   unsigned char bits)
+{
+	unsigned char reg_contents;
+	int retval;
+
+	retval = rmi_read(sensor, address, &reg_contents);
+	if (retval)
+		return retval;
+	reg_contents = reg_contents & ~bits;
+	retval = rmi_write(sensor, address, reg_contents);
+	if (retval == 1)
+		return 0;
+	else if (retval == 0)
+		return -EINVAL;	/* TODO: What should this be? */
+	return retval;
+}
+EXPORT_SYMBOL(rmi_clear_bits);
+
+/* Utility routine to set the value of a bit field in a register. */
+int rmi_set_bit_field(struct rmi_sensor_driver *sensor, unsigned short address,
+		      unsigned char field_mask, unsigned char bits)
+{
+	unsigned char reg_contents;
+	int retval;
+
+	retval = rmi_read(sensor, address, &reg_contents);
+	if (retval)
+		return retval;
+	reg_contents = (reg_contents & ~field_mask) | bits;
+	retval = rmi_write(sensor, address, reg_contents);
+	if (retval == 1)
+		return 0;
+	else if (retval == 0)
+		return -EINVAL;	/* TODO: What should this be? */
+	return retval;
+}
+EXPORT_SYMBOL(rmi_set_bit_field);
 
 bool rmi_polling_required(struct rmi_sensor_driver *sensor)
 {
@@ -103,87 +235,130 @@ bool rmi_polling_required(struct rmi_sensor_driver *sensor)
 }
 EXPORT_SYMBOL(rmi_polling_required);
 
-/** Functions can call this in order to dispatch IRQs. */
-void dispatchIRQs(struct rmi_sensor_driver *sensor, unsigned int irqStatus)
+/* Keeps track of how many sensors we've seen so far.  TODO: What happens
+ * if we disconnect from a sensor?  Does it sensor number get recycled?
+ */
+static int sensor_count;
+
+/* Sensors are identified starting at 0 and working up.  This will retrieve
+ * the current sensor number, and increment the sensor_count.
+ */
+int rmi_next_sensor_id()
 {
-	struct rmi_function_info *functionInfo;
+	int id = sensor_count;
+	sensor_count++;
+	return id;
+}
+EXPORT_SYMBOL(rmi_next_sensor_id);
 
+/* Functions can call this in order to dispatch IRQs. */
+void dispatchIRQs(struct rmi_sensor_driver *sensor, unsigned int irq_status)
+{
+	struct rmi_function_info *function_info;
 
-	list_for_each_entry(functionInfo, &sensor->functions, link) {
-		if ((functionInfo->interruptMask & irqStatus)) {
-			if (functionInfo->function_device->rmi_funcs->inthandler) {
-				/* Call the functions interrupt handler function. */
-				functionInfo->function_device->rmi_funcs->inthandler(functionInfo, (functionInfo->interruptMask & irqStatus));
-			}
+	list_for_each_entry(function_info, &sensor->functions, link) {
+		if ((function_info->interrupt_mask & irq_status) &&
+				function_info->function_device->rmi_funcs->
+				inthandler) {
+			/* Call the function's interrupt handler. */
+			function_info->function_device->rmi_funcs->
+				inthandler(function_info,
+					(function_info->
+					interrupt_mask & irq_status));
 		}
 	}
 }
 
-/**
+/*
  * This is the function we pass to the RMI4 subsystem so we can be notified
  * when attention is required.  It may be called in interrupt context.
  */
-static void attention(struct rmi_phys_driver *physdrvr, int instance)
+static void attention(struct rmi_phys_driver *physdrvr)
 {
 	/* All we have to do is schedule work. */
-
-	/* TODO: It's possible that workIsReady is not really needed anymore.
-	 * Investigate this to see if the race condition between setting up
-	 * the work and enabling the interrupt still exists. */
-	if (physdrvr->sensor->workIsReady) {
-		schedule_work(&(physdrvr->sensor->work));
-	} else {
-		/* Got an interrupt but we're not ready so enable the irq so it doesn't get hung up */
-		printk(KERN_DEBUG "%s: Work not initialized yet - enabling irqs.\n", __func__);
-		enable_irq(physdrvr->irq);
-	}
+	schedule_work(&(physdrvr->sensor->work));
 }
 
-/**
- * This notifies any interested functions that there
- * is an Attention interrupt.  The interested functions should take appropriate
- * actions (such as reading the interrupt status register and dispatching any
- * appropriate RMI4 interreupts).
+static void disable_sensor(struct rmi_sensor_driver *sensor)
+{
+	struct rmi_phys_driver *rpd = sensor->rpd;
+	struct sensor_instance_data *instance_data =
+		sensor->sensor_device->sensordata;
+
+	rpd->disable_device(rpd);
+	instance_data->enabled = false;
+}
+
+static int enable_sensor(struct rmi_sensor_driver *sensor)
+{
+	struct rmi_phys_driver *rpd = sensor->rpd;
+	struct sensor_instance_data *instance_data =
+		sensor->sensor_device->sensordata;
+	int retval = 0;
+
+	retval = rpd->enable_device(rpd);
+	if (!retval)
+		return retval;
+	instance_data->enabled = true;
+
+	return 0;
+}
+
+/* This notifies any interested functions that there is an Attention interrupt.
+ * The interested functions should take appropriate actions (such as reading
+ * the interrupt status register and dispatching any appropriate RMI4
+ * interrupts).
  */
 void attn_notify(struct rmi_sensor_driver *sensor)
 {
-	struct rmi_function_info *functionInfo;
+	struct rmi_function_info *function_info;
 
-	/* check each function that has data sources and if the interrupt for
-	* that triggered then call that RMI4 functions report() function to
-	* gather data and report it to the input subsystem */
-	list_for_each_entry(functionInfo, &sensor->functions, link) {
-		if (functionInfo->function_device->rmi_funcs->attention)
-			functionInfo->function_device->rmi_funcs->attention(functionInfo);
+	list_for_each_entry(function_info, &sensor->functions, link) {
+		if (function_info->function_device
+		    && function_info->function_device->rmi_funcs->attention) {
+			function_info->function_device->rmi_funcs->
+			    attention(function_info);
+		}
 	}
 }
 
-/* This is the worker function - for now it simply has to call attn_notify. This work
- * should be scheduled whenever an ATTN interrupt is asserted by the touch sensor.
- * We then call attn_notify to dispatch notification of the ATTN interrupt to all
- * interested functions. After all the attention handling functions
- * have returned, it is presumed safe to re-enable the Attention interrupt.
+/* This is the worker function - for now it simply has to call attn_notify.
+ * This work should be scheduled whenever an ATTN interrupt is asserted by
+ * the touch sensor.  We then call attn_notify to dispatch notification of
+ * the ATTN interrupt to all interested functions. After all the attention
+ * handling functions have returned, it is presumed safe to re-enable the
+ * Attention interrupt.
  */
 static void sensor_work_func(struct work_struct *work)
 {
-	struct rmi_sensor_driver *sensor = container_of(work,
-			struct rmi_sensor_driver, work);
+	struct rmi_sensor_driver *sensor =
+			container_of(work, struct rmi_sensor_driver, work);
+	struct rmi_sensor_device *sensor_dev = sensor->sensor_device;
 
+	mutex_lock(&sensor->work_lock);
 	attn_notify(sensor);
 
 	/* we only need to enable the irq if doing interrupts */
-	if (!rmi_polling_required(sensor))
+	/*
+	* if suspend operation occurs and
+	* this is the function during execution
+	* we cannot enable irq again
+	*/
+	if (!rmi_polling_required(sensor) &&
+			!sensor_dev->device_is_suspended)
 		enable_irq(sensor->rpd->irq);
+	mutex_unlock(&sensor->work_lock);
 }
 
 /* This is the timer function for polling - it simply has to schedule work
  * and restart the timer. */
 static enum hrtimer_restart sensor_poll_timer_func(struct hrtimer *timer)
 {
-	struct rmi_sensor_driver *sensor = container_of(timer,
-			struct rmi_sensor_driver, timer);
+	struct rmi_sensor_driver *sensor =
+			container_of(timer, struct rmi_sensor_driver, timer);
 
-	schedule_work(&sensor->work);
+	if (!work_pending(&sensor->work))
+		schedule_work(&sensor->work);
 	hrtimer_start(&sensor->timer, ktime_set(0, polltime), HRTIMER_MODE_REL);
 	return HRTIMER_NORESTART;
 }
@@ -197,96 +372,298 @@ static enum hrtimer_restart sensor_poll_timer_func(struct hrtimer *timer)
  */
 static int probe(struct rmi_sensor_driver *sensor)
 {
-	struct rmi_phys_driver *rpd;
-
-	rpd = sensor->rpd;
+	struct rmi_phys_driver *rpd = sensor->rpd;
+	pr_debug("%s: PROBE CALLED", __func__);
 
 	if (!rpd) {
-		printk(KERN_ERR "%s: Invalid rmi physical driver - null ptr: %p\n", __func__, rpd);
-		return 0;
+		pr_err("%s: Invalid rmi physical driver - null ptr: %p\n",
+		       __func__, rpd);
+		return -EINVAL;
 	}
 
-	return 1;
+	return 0;
 }
 
 static void config(struct rmi_sensor_driver *sensor)
 {
 	/* For each data source we had detected print info and set up interrupts
-	or polling. */
-	struct rmi_function_info *functionInfo;
-	struct rmi_phys_driver *rpd;
+	   or polling. */
+	struct rmi_function_info *function_info;
+	struct rmi_phys_driver *rpd = sensor->rpd;
+	struct sensor_instance_data *instance_data =
+			sensor->sensor_device->sensordata;
+	int attr_count = 0;
 
-	rpd = sensor->rpd; /* get ptr to rmi_physical_driver from app */
+	int retval;
 
-	list_for_each_entry(functionInfo, &sensor->functions, link) {
+	dev_dbg(&sensor->sensor_device->dev, "%s: CONFIG CALLED", __func__);
+
+	list_for_each_entry(function_info, &sensor->functions, link) {
 		/* Get and print some info about the data sources... */
-		struct rmi_functions *fn;
-		bool found = false;
+		struct rmi_function_ops *fn;
 		/* check if function number matches - if so call that
-		config function */
-		fn = rmi_find_function(functionInfo->functionNum);
+		   config function */
+		fn = rmi_find_function(function_info->function_number);
 		if (fn) {
-			found = true;
-
 			if (fn->config) {
-				fn->config(functionInfo);
+				fn->config(function_info);
 			} else {
-				/* the developer did not add in the
-				pointer to the config function into
-				rmi4_supported_data_src_functions */
-				printk(KERN_ERR
+				dev_warn(&sensor->sensor_device->dev,
 					"%s: no config function for "
-					"function 0x%x\n",
-					__func__, functionInfo->functionNum);
-				break;
+					"function 0x%02x.\n", __func__,
+					function_info->function_number);
 			}
-		}
-
-		if (!found) {
+		} else {
 			/* if no support found for this RMI4 function
-			it means the developer did not add the
-			appropriate function pointer list into the
-			rmi4_supported_data_src_functions array and/or
-			did not bump up the number of supported RMI4
-			functions in rmi.h as required */
-			printk(KERN_ERR "%s: could not find support "
-				"for function 0x%x\n",
-				__func__, functionInfo->functionNum);
+			   it means the developer did not add the
+			   appropriate function pointer list into the
+			   rmi4_supported_data_src_functions array and/or
+			   did not bump up the number of supported RMI4
+			   functions in rmi.h as required */
+			dev_err(&sensor->sensor_device->dev,
+			       "%s: no support found for function 0x%02x.\n",
+			       __func__, function_info->function_number);
 		}
 	}
 
-	/* This will handle interrupts on the ATTN line (interrupt driven)
-	* or will be called every poll interval (when we're not interrupt
-	* driven).
-	*/
-	INIT_WORK(&sensor->work, sensor_work_func);
-	sensor->workIsReady = true;
+	retval = rpd->read(rpd, PDT_PROPERTIES_LOCATION,
+			   (char *) &instance_data->pdt_props);
+	if (retval) {
+		dev_warn(&sensor->sensor_device->dev,
+			"%s: Could not read PDT propertys from 0x%04x. "
+			"Assuming 0x00.\n",
+		       __func__, PDT_PROPERTIES_LOCATION);
+	}
+
+
+	dev_dbg(&sensor->sensor_device->dev, "%s: Creating sysfs files.",
+		__func__);
+	/* Set up sysfs device attributes. */
+	for (attr_count = 0; attr_count < ARRAY_SIZE(attrs); attr_count++) {
+		if (device_create_file(&sensor->sensor_device->dev,
+					&attrs[attr_count]) < 0) {
+			dev_err(&sensor->sensor_device->dev,
+				"%s: Failed to create sysfs file for %s.\n",
+				__func__, attrs[attr_count].attr.name);
+			goto error_exit;
+		}
+	}
 
 	if (rmi_polling_required(sensor)) {
 		/* We're polling driven, so set up the polling timer
-		and timer function. */
+		   and timer function. */
 		hrtimer_init(&sensor->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 		sensor->timer.function = sensor_poll_timer_func;
-		hrtimer_start(&sensor->timer, ktime_set(1, 0), HRTIMER_MODE_REL);
+		hrtimer_start(&sensor->timer, ktime_set(1, 0),
+			      HRTIMER_MODE_REL);
 	}
+
+	instance_data->enabled = true;
+	return;
+
+error_exit:
+	for (attr_count--; attr_count >= 0; attr_count--)
+		device_remove_file(&sensor->sensor_device->dev,
+				   &attrs[attr_count]);
+	/* If you alloc anything, free it here. */
 }
 
-/** Just a stub for now.
+void *rmi_sensor_get_functiondata(struct rmi_sensor_driver *driver,
+				  unsigned char function_index)
+{
+	int i;
+
+	if (!driver->perfunctiondata)
+		return NULL;
+
+	for (i = 0; i < driver->perfunctiondata->count; i++) {
+		if (driver->perfunctiondata->functiondata[i].function_index ==
+		    function_index)
+			return driver->perfunctiondata->functiondata[i].data;
+	}
+
+	return NULL;
+}
+
+/*
+ *  final implementation of suspend/early_suspend function
  */
 static int rmi_sensor_suspend(struct device *dev, pm_message_t state)
 {
-	printk(KERN_INFO "%s: sensor suspend called.", __func__);
-	return 0;
+	struct rmi_sensor_device *sensor_device =
+	    container_of(dev, struct rmi_sensor_device, dev);
+	struct rmi_phys_driver *phys_drvr = sensor_device->driver->rpd;
+	struct rmi_sensor_driver *sensor_drvr = sensor_device->driver;
+	struct rmi_sensor_suspend_custom_ops *custom_ops =
+	    sensor_drvr->custom_suspend_ops;
+	int retval;
+	struct rmi_function_info *function_info;
+	bool canSuspend = true;
+
+	mutex_lock(&sensor_drvr->sensor_device->setup_suspend_flag);
+
+	if (sensor_device->device_is_suspended) {
+		mutex_unlock(&sensor_drvr->sensor_device->setup_suspend_flag);
+		return 0;
+	}
+
+	/* iterates all of the functions to make sure that we
+	 * can enter suspend mode. */
+	list_for_each_entry(function_info, &sensor_drvr->functions, link) {
+		if (function_info->function_device
+			&& function_info->function_device->
+				rmi_funcs->suspendable) {
+
+			if (!(function_info->function_device->rmi_funcs->
+			    suspendable(function_info))) {
+				canSuspend = false;
+				dev_err(dev, "%s: suspend fails, F0x%02X is "
+					"not suspendable", __func__,
+					function_info->function_number);
+				break;
+			}
+
+		}
+	}
+
+	if (!canSuspend) {
+		mutex_unlock(&sensor_drvr->sensor_device->setup_suspend_flag);
+		return -1;
+	}
+
+	/* set flag before disabling irq */
+	sensor_device->device_is_suspended = 1;
+
+	if (rmi_polling_required(sensor_drvr)) {
+		hrtimer_cancel(&(sensor_drvr->timer));
+	} else {
+		if (phys_drvr)
+			disable_irq(phys_drvr->irq);
+	}
+	retval = cancel_work_sync(&sensor_drvr->work);
+	if (retval && !(rmi_polling_required(sensor_drvr))) {
+		/* if work is pending ,suspend fail */
+		if (phys_drvr)
+			enable_irq(phys_drvr->irq);
+		/* reset suspend flag */
+		sensor_device->device_is_suspended = 0;
+		dev_err(dev, "%s: suspend fails, work pending", __func__);
+		retval = -1;
+		goto exit;
+	}
+
+	/* invoke the suspend handler of each functions of this sensor */
+	/* ex. we will call suspend of F01 in the loop*/
+	list_for_each_entry(function_info, &sensor_drvr->functions, link) {
+		if (function_info->function_device
+			&& function_info->function_device->rmi_funcs->suspend) {
+
+			retval = function_info->function_device->rmi_funcs->
+				suspend(function_info);
+			if (retval) {
+				/* reset suspend flag */
+				sensor_device->device_is_suspended = 0;
+
+				if (rmi_polling_required(sensor_drvr)) {
+					/* restart polling timer*/
+					hrtimer_start(&(sensor_drvr->timer),
+							ktime_set(1, 0),
+							HRTIMER_MODE_REL);
+				} else {
+					if (phys_drvr) {
+						/* re-enalbe irq*/
+						enable_irq(phys_drvr->irq);
+					}
+				}
+				dev_err(dev, "%s: failed to suspend F0x%02x.",
+					__func__,
+					function_info->function_number);
+				retval = -1;
+				goto exit;
+			}
+		}
+	}
+
+	/* apply customized settings */
+	if (custom_ops->rmi_sensor_custom_suspend)
+		custom_ops->rmi_sensor_custom_suspend();
+
+exit:
+	mutex_unlock(&sensor_drvr->sensor_device->setup_suspend_flag);
+	return retval;
 }
 
-/** Just a stub for now.
+/*
+ *  final implementation of resume/late_resume function
  */
 static int rmi_sensor_resume(struct device *dev)
 {
-	printk(KERN_INFO "%s: sensor resume called.", __func__);
+	struct rmi_sensor_device *sensor_device =
+	    container_of(dev, struct rmi_sensor_device, dev);
+	struct rmi_phys_driver *phys_drvr = sensor_device->driver->rpd;
+	struct rmi_sensor_driver *sensor_drvr = sensor_device->driver;
+	struct rmi_sensor_suspend_custom_ops *custom_ops =
+	    sensor_drvr->custom_suspend_ops;
+	struct rmi_function_info *function_info;
+
+	mutex_lock(&sensor_drvr->sensor_device->setup_suspend_flag);
+	if (sensor_device->device_is_suspended) {
+		/* reset suspend flag reenable irq */
+		sensor_device->device_is_suspended = 0;
+		/* apply customized settings */
+		if (custom_ops->rmi_sensor_custom_resume)
+			custom_ops->rmi_sensor_custom_resume();
+
+		/* invoke the resume handler of each functions of this sensor */
+		/* ex. we will call resume of F01 in the loop*/
+		list_for_each_entry(function_info,
+				&sensor_drvr->functions, link) {
+			if (function_info->function_device
+				&& function_info->function_device->
+					rmi_funcs->resume)
+				function_info->function_device->rmi_funcs->
+				    resume(function_info);
+		}
+
+		/* apply delay after setup hardware */
+		if (custom_ops->delay_resume)
+			mdelay(custom_ops->delay_resume);
+
+		if (rmi_polling_required(sensor_drvr)) {
+			hrtimer_start(&(sensor_drvr->timer), ktime_set(1, 0),
+				      HRTIMER_MODE_REL);
+		} else {
+			if (phys_drvr)
+				enable_irq(phys_drvr->irq);
+		}
+	}
+	mutex_unlock(&sensor_drvr->sensor_device->setup_suspend_flag);
 	return 0;
 }
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+/*
+ * Handler for early suspend
+ */
+static void rmi_sensor_early_suspend(struct early_suspend *h)
+{
+	struct rmi_sensor_device *sensor_device =
+	    container_of(h, struct rmi_sensor_device, early_suspend_handler);
+	pm_message_t state;
+	state.event = PM_EVENT_SUSPEND;
+	(void)rmi_sensor_suspend(&(sensor_device->dev), state);
+}
+
+/*
+ * Handler for late resume
+ */
+static void rmi_sensor_late_resume(struct early_suspend *h)
+{
+	struct rmi_sensor_device *sensor_device =
+	    container_of(h, struct rmi_sensor_device, early_suspend_handler);
+	(void)rmi_sensor_resume(&(sensor_device->dev));
+}
+#endif
 /*
  * This method is called, whenever a new sensor device is added for the rmi
  * bus.
@@ -299,204 +676,408 @@ static int rmi_sensor_resume(struct device *dev)
  * The sensor device is then bound to every function it supports.
  *
  */
-int rmi_sensor_register_functions(struct rmi_sensor_driver *sensor)
+static int rmi_sensor_register_functions(struct rmi_sensor_driver *sensor)
 {
 	struct rmi_function_device *function;
-	unsigned int interruptRegisterCount;
-	struct rmi_phys_driver *rpd;
+	unsigned int interrupt_register_count = 0;
+	struct rmi_phys_driver *rpd = sensor->rpd;
 	int i;
-	unsigned char interruptCount;
-	struct rmi_function_info *functionInfo;
+	int j;
+	int interrupt_offset;
+	unsigned char interrupt_count = 0;
 	struct rmi_function_descriptor rmi_fd;
-	struct rmi_functions *fn;
-	bool found;
-	int retval;
+	struct rmi_function_ops *fops;
+	int retval = 0;
+	struct device *dev = &sensor->sensor_device->dev;
+	struct rmi_function_info *function_info = NULL;
 
-	pr_debug("%s: Registering sensor functions\n", __func__);
+	/* Read the Page Descriptor Table to determine what functions
+	 * are present */
+	dev_dbg(dev, "%s: Scanning page descriptors.", __func__);
+	for (i = PDT_START_SCAN_LOCATION;
+	     i >= PDT_END_SCAN_LOCATION; i -= PDT_ENTRY_SIZE) {
 
-	retval = 0;
+		dev_dbg(dev, "%s: Reading page descriptor 0x%02x", __func__, i);
+		retval = rpd->read_multiple(rpd, i, (char *)&rmi_fd,
+					    sizeof(rmi_fd));
+		if (retval) {
+			/* failed to read next PDT entry - end PDT
+			   scan - this may result in an incomplete set
+			   of recognized functions - we could return
+			   an error here but the driver may still be
+			   viable for diagnostics and debugging so let's
+			   let it continue. */
+			dev_err(dev,
+			    "%s: Read error %d at PDT entry 0x%02x, "
+			     "ending scan.\n", __func__, retval, i);
+			break;
+		}
 
-	/* Scan device for functions that may be supported */
-	{
-		pr_debug("%s: Scanning sensor for Functions:\n", __func__);
+		if (!RMI_IS_VALID_FUNCTION_ID(rmi_fd.function_number)) {
+			/* A zero or 0xff in the function number
+			   signals the end of the PDT */
+			dev_dbg(dev, "%s: Found end of PDT\n", __func__);
+			break;
+		}
 
-		interruptCount = 0;
-		rpd = sensor->rpd;
+		dev_dbg(dev,
+			"%s: F%02x - queries %02x commands %02x control %02x "
+			"data %02x ints %02x",
+			__func__,
+			rmi_fd.function_number, rmi_fd.query_base_addr,
+			rmi_fd.command_base_addr, rmi_fd.control_base_addr,
+			rmi_fd.data_base_addr, rmi_fd.interrupt_source_count);
 
-		/* Read the Page Descriptor Table to determine what functions
-		are present */
-		printk(KERN_DEBUG "%s: Scanning page descriptors.", __func__);
-		for (i = PDT_START_SCAN_LOCATION;
-				i >= PDT_END_SCAN_LOCATION;
-				i -= PDT_ENTRY_SIZE) {
-			printk(KERN_DEBUG "%s: Reading page descriptor 0x%02x", __func__, i);
-			retval = rpd->read_multiple(rpd, i, (char *)&rmi_fd,
-					sizeof(rmi_fd));
-			if (!retval) {
-				functionInfo = NULL;
+		/* determine if the function is supported and if so
+		 * then bind this function device to the sensor */
+		function_info = kzalloc(sizeof(*function_info), GFP_KERNEL);
+		if (!function_info) {
+			dev_err(dev,
+			    "%s: out of memory for function F%02x.",
+			     __func__, rmi_fd.function_number);
+			retval = -ENOMEM;
+			goto exit_fail;
+		}
+		function_info->sensor = sensor;
+		function_info->function_number = rmi_fd.function_number;
+		memcpy(&function_info->function_descriptor, &rmi_fd,
+				sizeof(rmi_fd));
+		function_info->num_data_sources =
+				rmi_fd.interrupt_source_count;
+		function_info->interrupt_register = interrupt_count / 8;
+		/* loop through interrupts for each source and or in a bit
+		 * to the interrupt mask for each. */
+		interrupt_offset = interrupt_count % 8;
 
-				if (rmi_fd.functionNum != 0x00 && rmi_fd.functionNum != 0xff) {
-					printk(KERN_DEBUG "%s: F%02x - queries %02x commands %02x control %02x data %02x ints %02x", __func__, rmi_fd.functionNum, rmi_fd.queryBaseAddr, rmi_fd.commandBaseAddr, rmi_fd.controlBaseAddr, rmi_fd.dataBaseAddr, rmi_fd.interruptSrcCnt);
+		for (j = interrupt_offset;
+				j < ((rmi_fd.interrupt_source_count & 0x7)
+					+ interrupt_offset);
+				j++) {
+			function_info->interrupt_mask |= 1 << j;
+		}
+		INIT_LIST_HEAD(&function_info->link);
 
-					/* Print a helpful message for debugging. */
-					if ((rmi_fd.functionNum & 0xff) == 0x01)
-						printk(KERN_DEBUG "%s:   Fn $01 Found - RMI Device Control\n", __func__);
+		/* Get the ptr to the detect function based on
+		 * the function number */
+		dev_dbg(dev, "%s: Checking for RMI function F%02x.", __func__,
+			rmi_fd.function_number);
+		fops = rmi_find_function(rmi_fd.function_number);
+		if (!fops) {
+			dev_err(dev,
+				"%s: couldn't find support for F%02X.",
+				__func__, rmi_fd.function_number);
+		} else {
+			retval = fops->detect(function_info);
+			if (retval)
+				dev_err(dev,
+				    "%s: Function detect for F%02x failed "
+				     "with %d.",
+				     __func__, rmi_fd.function_number, retval);
 
-					/* determine if the function is supported and if so
-					then bind this function device to the sensor */
-					if (rmi_fd.interruptSrcCnt) {
-						functionInfo = kzalloc(sizeof(*functionInfo), GFP_KERNEL);
-						if (!functionInfo) {
-							printk(KERN_ERR "%s: could not allocate memory for function 0x%x\n",
-								__func__, rmi_fd.functionNum);
-							retval = -ENOMEM;
-							goto exit_fail;
-						}
-						functionInfo->sensor = sensor;
-						functionInfo->functionNum = (rmi_fd.functionNum & 0xff);
-						INIT_LIST_HEAD(&functionInfo->link);
-						/* Get the ptr to the detect function based on
-						the function number */
-						found = false;
-						printk(KERN_DEBUG "%s: Checking for RMI function F%02x.", __func__, rmi_fd.functionNum);
-						fn = rmi_find_function(rmi_fd.functionNum);
-						if (fn) {
-							found = true;
-							retval = fn->detect(functionInfo, &rmi_fd,
-								interruptCount);
-							if (retval)
-								printk(KERN_ERR "%s: Function detect for F%02x failed with %d.",
-									   __func__, rmi_fd.functionNum, retval);
+			/* Create a function device and function driver. */
+			function = kzalloc(sizeof(*function), GFP_KERNEL);
+			if (!function) {
+				dev_err(dev,
+				    "%s: Error allocating memory for "
+				     "rmi_function_device.",
+				     __func__);
+				retval = -ENOMEM;
+				goto exit_fail;
+			}
 
-							/* Create a function device and function driver for this Fn */
-							function = kzalloc(sizeof(*function), GFP_KERNEL);
-							if (!function) {
-								printk(KERN_ERR "%s: Error allocating memeory for rmi_function_device\n", __func__);
-								return -ENOMEM;
-							}
+			function->dev.parent = &sensor->sensor_device->dev;
+			function->dev.bus = sensor->sensor_device->dev.bus;
+			function->rmi_funcs = fops;
+			function->sensor = sensor;
+			function->rfi = function_info;
+			function_info->function_device = function;
 
-							function->dev.parent = &sensor->sensor_device->dev;
-							function->dev.bus = sensor->sensor_device->dev.bus;
-							function->rmi_funcs = fn;
-							function->sensor = sensor;
-							function->rfi = functionInfo;
-							functionInfo->function_device = function;
+			/* Check if we have an interrupt mask of 0 and a
+			 * non-NULL interrupt handler function and print a
+			 * debug message since we should never have this.
+			 */
+			if (function_info->interrupt_mask == 0
+			    && fops->inthandler != NULL) {
+				dev_warn(dev,
+				    "%s: Can't have a zero interrupt mask "
+				     "for function F%02x (which requires an "
+				     "interrupt handler).",
+				     __func__, rmi_fd.function_number);
+			}
 
-							/* Check if we have an interrupt mask of 0 and a non-NULL interrupt
-							handler function and print a debug message since we should never
-							have this.
-							*/
-							if (functionInfo->interruptMask == 0 && fn->inthandler != NULL) {
-								printk(KERN_DEBUG "%s: Can't have a zero interrupt mask for function F%02x (which requires an interrupt handler).\n",
-									__func__, rmi_fd.functionNum);
-							}
+			/* Check if we have a non-zero interrupt mask and
+			 * a NULL interrupt handler function and print a debug
+			 * message since we should never have this.
+			 */
+			if (function_info->interrupt_mask != 0
+			    && fops->inthandler == NULL) {
+				dev_warn(dev,
+				    "%s: Can't have a non-zero interrupt "
+				     "mask %d for function F%02x with a NULL "
+				     "inthandler fn.\n",
+				     __func__, function_info->interrupt_mask,
+				     rmi_fd.function_number);
+			}
 
-
-							/* Check if we have a non-zero interrupt mask and a NULL interrupt
-							handler function and print a debug message since we should never
-							have this.
-							*/
-							if (functionInfo->interruptMask != 0 && fn->inthandler == NULL) {
-								printk(KERN_DEBUG "%s: Can't have a non-zero interrupt mask %d for function F%02x with a NULL inthandler fn.\n",
-									__func__, functionInfo->interruptMask, rmi_fd.functionNum);
-							}
-
-							/* Register the rmi function device */
-							retval = rmi_function_register_device(function, rmi_fd.functionNum);
-							if (retval) {
-								printk(KERN_ERR "%s:  Failed rmi_function_register_device.\n",
-									__func__);
-								return retval;
-							}
-						}
-
-						if (!found) {
-							printk(KERN_ERR "%s: could not find support for function 0x%x\n",
-								__func__, rmi_fd.functionNum);
-						}
-					} else {
-						printk(KERN_DEBUG "%s: Found function F%02x - Ignored.\n", __func__, rmi_fd.functionNum & 0xff);
-					}
-
-					/* bump interrupt count for next iteration */
-					/* NOTE: The value 7 is reserved - for now, only bump up one for an interrupt count of 7 */
-					if ((rmi_fd.interruptSrcCnt & 0x7) == 0x7) {
-						interruptCount += 1;
-					} else {
-						interruptCount +=
-							(rmi_fd.interruptSrcCnt & 0x7);
-					}
-
-					/* link this function info to the RMI module infos list
-					of functions */
-					if (functionInfo == NULL) {
-						printk(KERN_DEBUG "%s: WTF? functionInfo is null here.", __func__);
-					} else {
-						printk(KERN_DEBUG "%s: Adding function F%02x with %d sources.\n",
-							__func__, functionInfo->functionNum, functionInfo->numSources);
-
-						mutex_lock(&rfi_mutex);
-						list_add_tail(&functionInfo->link,
-							&sensor->functions);
-						mutex_unlock(&rfi_mutex);
-					}
-
-				} else {
-					/* A zero or 0xff in the function number
-					signals the end of the PDT */
-					printk(KERN_DEBUG "%s:   Found End of PDT\n",
-						__func__);
-					break;
-				}
-			} else {
-				/* failed to read next PDT entry - end PDT
-				scan - this may result in an incomplete set
-				of recognized functions - should probably
-				return an error but the driver may still be
-				viable for diagnostics and debugging so let's
-				let it continue. */
-				printk(KERN_ERR "%s: Read Error %d when reading next PDT entry - "
-					"ending PDT scan.\n",
-					__func__, retval);
-				break;
+			/* Register the rmi function device */
+			retval = rmi_function_register_device(function,
+						rmi_fd.function_number);
+			if (retval) {
+				dev_err(dev,
+				    "%s: Failed rmi_function_register_device.",
+				     __func__);
+				goto exit_fail;
 			}
 		}
-		printk(KERN_DEBUG "%s: Done scanning.", __func__);
 
-		/* calculate the interrupt register count - used in the
-		ISR to read the correct number of interrupt registers */
-		interruptRegisterCount = (interruptCount + 7) / 8;
-		sensor->interruptRegisterCount = interruptRegisterCount;    /* TODO: Is this needed by the sensor anymore? */
+		/* bump interrupt count for next iteration. NOTE: The value 7
+		 * is reserved - for now, only bump up one for an interrupt
+		 * count of 7. */
+		if ((rmi_fd.interrupt_source_count & 0x7) == 0x7) {
+			interrupt_count += 1;
+		} else {
+			interrupt_count +=
+			    (rmi_fd.interrupt_source_count & 0x7);
+		}
+
+		/* link this function info to the RMI module infos list
+		 * of functions. */
+		if (function_info == NULL) {
+			dev_dbg(dev, "%s: WTF? function_info is null here.",
+				 __func__);
+		} else {
+			dev_dbg(dev, "%s: Adding F%02x with %d sources.",
+				 __func__, function_info->function_number,
+				 function_info->num_data_sources);
+
+			mutex_lock(&rfi_mutex);
+			list_add_tail(&function_info->link, &sensor->functions);
+			mutex_unlock(&rfi_mutex);
+		}
+		function_info = NULL;
 	}
+
+	dev_dbg(dev, "%s: Done scanning.", __func__);
+
+	/* calculate the interrupt register count - used in the
+	 * ISR to read the correct number of interrupt registers */
+	interrupt_register_count = (interrupt_count + 7) / 8;
+	/* TODO: Is interrupt_register_count needed by the sensor anymore? */
+	sensor->interrupt_register_count = interrupt_register_count;
 
 	return 0;
 
 exit_fail:
+	if (function_info)
+		kfree(function_info->function_device);
+	kfree(function_info);
 	return retval;
 }
-EXPORT_SYMBOL(rmi_sensor_register_functions);
+
+/* sysfs show and store fns for sensor dev */
+static ssize_t rmi_sensor_hasbsr_show(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	struct rmi_sensor_device *sensor = dev_get_drvdata(dev);
+	struct sensor_instance_data *instance_data =
+	    (struct sensor_instance_data *)sensor->sensordata;
+
+	return snprintf(buf, PAGE_SIZE, "%u\n", has_bsr(instance_data));
+}
+
+static ssize_t rmi_sensor_bsr_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct rmi_sensor_device *sensor = dev_get_drvdata(dev);
+	struct sensor_instance_data *instance_data =
+	    (struct sensor_instance_data *)sensor->sensordata;
+
+	return snprintf(buf, PAGE_SIZE, "%u\n", instance_data->bsr);
+}
+
+static ssize_t rmi_sensor_bsr_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	int retval;
+	struct rmi_sensor_device *sensor = dev_get_drvdata(dev);
+	struct sensor_instance_data *instance_data =
+	    (struct sensor_instance_data *)sensor->sensordata;
+	unsigned long val;
+
+	/* need to convert the string data to an actual value */
+	strict_strtoul(buf, 10, &val);
+
+	retval = rmi_write(sensor->driver, BSR_LOCATION, (unsigned char)val);
+	if (retval) {
+		dev_err(dev, "%s : failed to write bsr %u to 0x%x\n",
+		       __func__, (unsigned int)val, BSR_LOCATION);
+		return -EIO;
+	}
+
+	instance_data->bsr = val;
+
+	return count;
+}
+
+static ssize_t rmi_sensor_enabled_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct rmi_sensor_device *sensor = dev_get_drvdata(dev);
+	struct sensor_instance_data *instance_data =
+		(struct sensor_instance_data *)sensor->sensordata;
+
+	return snprintf(buf, PAGE_SIZE, "%u\n", instance_data->enabled);
+}
+
+static ssize_t rmi_sensor_enabled_store(struct device *dev,
+				    struct device_attribute *attr,
+				    const char *buf, size_t count)
+{
+	int retval;
+	struct rmi_sensor_device *sensor = dev_get_drvdata(dev);
+	bool new_value;
+
+	if (sysfs_streq(buf, "0"))
+		new_value = false;
+	else if (sysfs_streq(buf, "1"))
+		new_value = true;
+	else
+		return -EINVAL;
+
+	if (new_value) {
+		retval = enable_sensor(sensor->driver);
+		if (retval) {
+			dev_err(dev, "Failed to ensable sensor, code=%d.\n",
+				retval);
+			return -EIO;
+		}
+	} else {
+		disable_sensor(sensor->driver);
+	}
+
+	return count;
+}
+
+/* Call this to instantiate a new sensor driver.
+ */
+struct rmi_sensor_driver *rmi_sensor_create_driver(
+				struct rmi_sensor_device *sensor_device,
+				struct rmi_phys_driver *physical_driver,
+				struct rmi_sensordata *sensor_data)
+{
+	struct rmi_sensor_driver *driver =
+	    kzalloc(sizeof(struct rmi_sensor_driver), GFP_KERNEL);
+	if (!driver) {
+		dev_err(&sensor_device->dev,
+			"%s: Out of memory for rmi_sensor_driver\n",
+		       __func__);
+		goto error_exit;
+	}
+	driver->sensor_device = sensor_device;
+	driver->polling_required = physical_driver->polling_required;
+	driver->rpd = physical_driver;
+
+	mutex_init(&driver->work_lock);
+
+	if (sensor_data) {
+		driver->perfunctiondata = sensor_data->perfunctiondata;
+		/* pass reference to customized operations for suspend/resume */
+		driver->custom_suspend_ops = sensor_data->custom_suspend_ops;
+	}
+	INIT_LIST_HEAD(&driver->functions);
+
+	/* This will handle interrupts on the ATTN line (interrupt driven)
+	 * or will be called every poll interval (when we're not interrupt
+	 * driven).
+	 */
+	INIT_WORK(&driver->work, sensor_work_func);
+
+	return driver;
+
+error_exit:
+	rmi_sensor_destroy_driver(driver);
+	return NULL;
+}
+
+/* Call this when you're done with the sensor driver.  This will clean up any
+ * pending actions, cancel any running threads or works, and release all
+ * storage.
+ */
+void rmi_sensor_destroy_driver(struct rmi_sensor_driver *driver)
+{
+	kfree(driver);
+}
 
 int rmi_sensor_register_device(struct rmi_sensor_device *dev, int index)
 {
 	int status;
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	struct early_suspend *early_suspend_handler;
+#endif
 
-	printk(KERN_INFO "%s: Registering sensor device.\n", __func__);
+	pr_debug("%s: Registering sensor device.\n", __func__);
 
 	/* make name - sensor00, sensor01, etc. */
 	dev_set_name(&dev->dev, "sensor%02d", index);
+
+	dev->sensordata =
+	    kzalloc(sizeof(struct sensor_instance_data), GFP_KERNEL);
+	if (!dev->sensordata) {
+		dev_err(&dev->dev,
+		    "%s: Out of memory for sensor instance data.\n", __func__);
+		return -ENOMEM;
+	}
+
 	status = device_register(&dev->dev);
 
+	if (status < 0) {
+		dev_err(&dev->dev, "%s: device register failed with %d.",
+			__func__, status);
+		goto error_exit;
+	}
+
+	mutex_init(&dev->setup_suspend_flag);
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	/* register early_suspend handler after device is registered
+	 */
+	early_suspend_handler = &(dev->early_suspend_handler);
+	early_suspend_handler->level =
+		EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
+	early_suspend_handler->suspend = rmi_sensor_early_suspend;
+	early_suspend_handler->resume = rmi_sensor_late_resume;
+	register_early_suspend(early_suspend_handler);
+#endif /* CONFIG_HAS_EARLYSUSPEND */
+
+	return 0;
+
+error_exit:
+	kfree(dev->sensordata);
 	return status;
 }
 EXPORT_SYMBOL(rmi_sensor_register_device);
 
 static void rmi_sensor_unregister_device(struct rmi_sensor_device *rmisensordev)
 {
-	printk(KERN_INFO "%s: Unregistering sensor device.\n", __func__);
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	struct early_suspend *early_suspend_handler;
+
+	/* unregister early_suspend handler before driver is unregistered
+	 */
+	early_suspend_handler =
+		    &(rmisensordev->early_suspend_handler);
+	unregister_early_suspend(early_suspend_handler);
+#endif /* CONFIG_HAS_EARLYSUSPEND */
+	dev_dbg(&rmisensordev->dev,
+		"%s: Unregistering sensor device.\n", __func__);
 
 	device_unregister(&rmisensordev->dev);
 }
 EXPORT_SYMBOL(rmi_sensor_unregister_device);
+
+#define DRIVER_NAME_CHARS	16
 
 int rmi_sensor_register_driver(struct rmi_sensor_driver *driver)
 {
@@ -504,81 +1085,90 @@ int rmi_sensor_register_driver(struct rmi_sensor_driver *driver)
 	int ret;
 	char *drvrname;
 
-	driver->workIsReady = false;
-
-	printk(KERN_INFO "%s: Registering sensor driver.\n", __func__);
+	pr_info("%s: Registering sensor driver.\n", __func__);
 	driver->dispatchIRQs = dispatchIRQs;
 	driver->attention = attention;
 	driver->config = config;
 	driver->probe = probe;
 
-	/* assign the bus type for this driver to be rmi bus */
-	driver->drv.bus = &rmi_bus_type;
 	driver->drv.suspend = rmi_sensor_suspend;
 	driver->drv.resume = rmi_sensor_resume;
 	/* Create a function device and function driver for this Fn */
-	drvrname = kzalloc(sizeof(sensorname) + 4, GFP_KERNEL);
+	drvrname = kzalloc(DRIVER_NAME_CHARS, GFP_KERNEL);
 	if (!drvrname) {
-		printk(KERN_ERR "%s: Error allocating memeory for rmi_sensor_driver name.\n", __func__);
+		pr_err
+		    ("%s: Error allocating memory for rmi_sensor_driver name.",
+		     __func__);
 		return -ENOMEM;
 	}
-	sprintf(drvrname, "sensor%02d", index++);
+	snprintf(drvrname, DRIVER_NAME_CHARS, "sensor%02d", index++);
 
 	driver->drv.name = drvrname;
 	driver->module = driver->drv.owner;
 
-	/* register the sensor driver */
-	ret = driver_register(&driver->drv);
+	/* Register the sensor driver on the bus. */
+	ret = rmi_bus_register_sensor_driver(driver);
 	if (ret) {
-		printk(KERN_ERR "%s: Failed driver_register %d\n",
-			__func__, ret);
+		pr_err("%s: Failed to register driver on bus, error = %d",
+		       __func__, ret);
 		goto exit_fail;
 	}
 
 	/* register the functions on the sensor */
 	ret = rmi_sensor_register_functions(driver);
 	if (ret) {
-		printk(KERN_ERR "%s: Failed rmi_sensor_register_functions %d\n",
-			__func__, ret);
+		pr_err("%s: Failed rmi_sensor_register_functions %d",
+		       __func__, ret);
+		goto exit_fail;
 	}
 
-	/* configure the sensor - enable interrupts for each function, init work, set polling timer or adjust report rate, etc. */
+	/* configure the sensor - enable interrupts for each function,
+	 * init work, set polling timer or adjust report rate, etc. */
 	config(driver);
-
-	printk(KERN_DEBUG "%s: sensor driver registration completed.", __func__);
+#ifdef CONFIG_SYNA_RMI_DEV
+	if (rmi_char_dev_register(driver->rpd, driver->sensor_device))
+		pr_err("%s: error register char device", __func__);
+#endif /*CONFIG_SYNA_RMI_DEV*/
+	pr_debug("%s: sensor driver registration completed.", __func__);
 
 exit_fail:
+	kfree(drvrname);
 	return ret;
 }
 EXPORT_SYMBOL(rmi_sensor_register_driver);
 
 static void rmi_sensor_unregister_driver(struct rmi_sensor_driver *driver)
 {
-	printk(KERN_DEBUG "%s: Unregistering sensor driver.\n", __func__);
+	struct rmi_sensor_device *rmisensordev = driver->sensor_device;
+
+	pr_debug("%s: Unregistering sensor driver.\n", __func__);
+
+#ifdef CONFIG_SYNA_RMI_DEV
+	rmi_char_dev_unregister(rmisensordev->char_dev,
+			rmisensordev->rmi_char_device_class);
+#endif /*CONFIG_SYNA_RMI_DEV*/
 
 	/* Stop the polling timer if doing polling */
 	if (rmi_polling_required(driver))
 		hrtimer_cancel(&driver->timer);
 
-	flush_scheduled_work(); /* Make sure all scheduled work is stopped */
+	flush_scheduled_work();	/* Make sure all scheduled work is stopped */
 
-	driver_unregister(&driver->drv);
+	rmi_bus_register_sensor_driver(driver);
 }
 EXPORT_SYMBOL(rmi_sensor_unregister_driver);
 
-
 static int __init rmi_sensor_init(void)
 {
-	printk(KERN_DEBUG "%s: RMI Sensor Init\n", __func__);
+	pr_debug("%s: RMI Sensor Init\n", __func__);
 	return 0;
 }
 
 static void __exit rmi_sensor_exit(void)
 {
-	printk(KERN_DEBUG "%s: RMI Sensor Driver Exit\n", __func__);
-	flush_scheduled_work(); /* Make sure all scheduled work is stopped */
+	pr_debug("%s: RMI Sensor Driver Exit\n", __func__);
+	flush_scheduled_work();	/* Make sure all scheduled work is stopped */
 }
-
 
 module_init(rmi_sensor_init);
 module_exit(rmi_sensor_exit);

@@ -23,11 +23,10 @@
  *#############################################################################
  */
 
-#include "rmi.h"
-
-#ifndef _RMI_DRVR_H
+#if !defined(_RMI_DRVR_H)
 #define _RMI_DRVR_H
 
+#include "rmi.h"
 #include "rmi_platformdata.h"
 
 /*  RMI4 Protocol Support
@@ -35,62 +34,66 @@
 
 struct rmi_phys_driver {
 	char *name;
-	int (*write)(struct rmi_phys_driver *physdrvr, unsigned short address,
-			char data);
-	int (*read)(struct rmi_phys_driver *physdrvr, unsigned short address,
-			char *buffer);
-	int (*write_multiple)(struct rmi_phys_driver *physdrvr,
-			unsigned short address, char *buffer, int length);
-	int (*read_multiple)(struct rmi_phys_driver *physdrvr, unsigned short address,
-			char *buffer, int length);
-	void (*attention)(struct rmi_phys_driver *physdrvr, int instance);
+	int (*write) (struct rmi_phys_driver *physdrvr, unsigned short address,
+		      char data);
+	int (*read) (struct rmi_phys_driver *physdrvr, unsigned short address,
+		     char *buffer);
+	int (*write_multiple) (struct rmi_phys_driver *physdrvr,
+			       unsigned short address, char *buffer,
+			       int length);
+	int (*read_multiple) (struct rmi_phys_driver *physdrvr,
+			      unsigned short address, char *buffer, int length);
+	void (*attention) (struct rmi_phys_driver *physdrvr);
 	bool polling_required;
 	int irq;
 
-	/* Standard kernel linked list implementation.
-	*  Documentation on how to use it can be found at
-	*  http://isis.poly.edu/kulesh/stuff/src/klist/.
-	*/
+	void (*set_attn_handler) (
+		struct rmi_phys_driver *physdrvr,
+		void (*attention) (struct rmi_phys_driver *physdrvr));
+	int (*enable_device) (struct rmi_phys_driver *physdrvr);
+	void (*disable_device) (struct rmi_phys_driver *physdrvr);
+
 	struct list_head drivers;
 	struct rmi_sensor_driver *sensor;
 	struct module *module;
 };
 
-int rmi_read(struct rmi_sensor_driver *sensor, unsigned short address, char *dest);
+int rmi_read(struct rmi_sensor_driver *sensor, unsigned short address,
+	     char *dest);
 int rmi_write(struct rmi_sensor_driver *sensor, unsigned short address,
-		unsigned char data);
+	      unsigned char data);
 int rmi_read_multiple(struct rmi_sensor_driver *sensor, unsigned short address,
-		char *dest, int length);
+		      char *dest, int length);
 int rmi_write_multiple(struct rmi_sensor_driver *sensor, unsigned short address,
-		unsigned char *data, int length);
+		       unsigned char *data, int length);
 int rmi_register_sensor(struct rmi_phys_driver *physdrvr,
-						 struct rmi_sensordata *sensordata);
+			struct rmi_sensordata *sensordata);
 int rmi_unregister_sensors(struct rmi_phys_driver *physdrvr);
 
-/* Set this to 1 to turn on code used in detecting buffer leaks. */
-#define RMI_ALLOC_STATS 1
+/* Utility routine to set bits in a register. */
+int rmi_set_bits(struct rmi_sensor_driver *sensor, unsigned short address,
+		 unsigned char bits);
+/* Utility routine to clear bits in a register. */
+int rmi_clear_bits(struct rmi_sensor_driver *sensor, unsigned short address,
+		   unsigned char bits);
+/* Utility routine to set the value of a bit field in a register. */
+int rmi_set_bit_field(struct rmi_sensor_driver *sensor, unsigned short address,
+		      unsigned char field_mask, unsigned char bits);
 
-#if RMI_ALLOC_STATS
-extern int appallocsrmi;
-extern int rfiallocsrmi;
-extern int fnallocsrmi;
+/* Utility routine to handle writes to read-only attributes.  Hopefully
+ * this will never happen, but if the user does something stupid, we
+ * don't want to accept it quietly.
+ */
+ssize_t rmi_store_error(struct device *dev,
+			struct device_attribute *attr,
+			const char *buf, size_t count);
 
-#define INC_ALLOC_STAT(X)   (X##allocsrmi++)
-#define DEC_ALLOC_STAT(X)   \
-	do { \
-		if (X##allocsrmi) X##allocsrmi--; \
-		else printk(KERN_DEBUG "Too many " #X " frees\n"); \
-	} while (0)
-#define CHECK_ALLOC_STAT(X) \
-	do { \
-		if (X##allocsrmi) \
-			printk(KERN_DEBUG "Left over " #X " buffers: %d\n", \
-					X##allocsrmi); \
-	} while (0)
-#else
-#define INC_ALLOC_STAT(X) do { } while (0)
-#define DEC_ALLOC_STAT(X) do { } while (0)
-#define CHECK_ALLOC_STAT(X) do { } while (0)
-#endif
+/* Utility routine to handle reads to write-only attributes.  Hopefully
+ * this will never happen, but if the user does something stupid, we
+ * don't want to accept it quietly.
+ */
+ssize_t rmi_show_error(struct device *dev,
+		       struct device_attribute *attr,
+		       char *buf);
 
 #endif

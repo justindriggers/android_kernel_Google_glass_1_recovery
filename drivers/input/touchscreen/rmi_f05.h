@@ -30,34 +30,13 @@
  *#############################################################################
  */
 
-#if !defined(_RMI_F19_H)
-#define _RMI_F19_H
+#if !defined(_RMI_F05_H)
+#define _RMI_F05_H
 
-/* This is the data read from the F19 query registers.
- */
-struct rmi_F19_query {
-	bool has_hysteresis_threshold;
-	bool has_sensitivity_adjust;
-	bool configurable;
-	unsigned char button_count;
-};
-
-struct rmi_F19_control {
-	unsigned char button_usage;
-	unsigned char filter_mode;
-	unsigned char *interrupt_enable_registers;
-	unsigned char *single_button_control;
-	unsigned char *sensor_map;
-	unsigned char *single_button_sensitivity;
-	unsigned char global_sensitivity_adjustment;
-	unsigned char global_hysteresis_threshold;
-};
-
-
-void FN_19_inthandler(struct rmi_function_info *rmifninfo,
+void FN_05_inthandler(struct rmi_function_info *rmifninfo,
 		      unsigned int asserted_IRQs);
-int FN_19_config(struct rmi_function_info *rmifninfo);
-int FN_19_init(struct rmi_function_device *function_device);
-int FN_19_detect(struct rmi_function_info *rmifninfo);
-/* No attention function for Fn $19 */
+int FN_05_config(struct rmi_function_info *rmifninfo);
+int FN_05_init(struct rmi_function_device *function_device);
+int FN_05_detect(struct rmi_function_info *rmifninfo);
+/* No attention function for F05 */
 #endif

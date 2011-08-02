@@ -1,4 +1,4 @@
-/**
+/*
  *
  * Synaptics Register Mapped Interface (RMI4) - RMI Bus Module Header.
  * Copyright (C) 2007 - 2010, Synaptics Incorporated
@@ -23,11 +23,12 @@
  *#############################################################################
  */
 
-#ifndef _RMI_BUS_H
+#if !defined(_RMI_BUS_H)
 #define _RMI_BUS_H
 
+#include "rmi_sensor.h"
 
-extern struct bus_type rmi_bus_type;
+int rmi_bus_register_sensor_driver(struct rmi_sensor_driver *sensor_driver);
+void rmi_bus_unregister_sensor_driver(struct rmi_sensor_driver *sensor_driver);
 
 #endif
-

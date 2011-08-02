@@ -25,7 +25,9 @@
 #include <linux/kernel.h>
 #include <linux/device.h>
 #include <linux/module.h>
+#include <linux/gpio.h>
 #include <linux/i2c.h>
+#include <linux/irq.h>
 #include <linux/platform_device.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
@@ -33,28 +35,17 @@
 #include "rmi_i2c.h"
 #include "rmi_drvr.h"
 #include "rmi_platformdata.h"
-
+#include "rmi_sensor.h"
 
 #define DRIVER_NAME "rmi4_ts"
-
 #define DEVICE_NAME "rmi4_ts"
 
-/* Used to lock access to the page address.*/
-/* TODO: for multiple device support will need a per-device mutex */
-static DEFINE_MUTEX(page_mutex);
-
-
 static const struct i2c_device_id rmi_i2c_id_table[] = {
-	{ DEVICE_NAME, 0 },
-	{ },
+	{RMI4_I2C_DEVICE_NAME, 0},
+	{},
 };
+
 MODULE_DEVICE_TABLE(i2c, rmi_i2c_id_table);
-
-
-/* Used to count the number of I2C modules we get.
- */
-static int device_count;
-
 
 /*
  * This is the data kept on a per instance (client) basis.  This data is
@@ -64,11 +55,18 @@ static int device_count;
 struct instance_data {
 	int instance_no;
 	int irq;
+	int attn_polarity;
+	int attn_gpio;
+	int enabled;
 	struct rmi_phys_driver rmiphysdrvr;
-	struct i2c_client *i2cclient; /* pointer to i2c_client for later use in
-					read, write, read_multiple, etc. */
+	struct i2c_client *i2cclient;	/* pointer to client for later use in
+					   read, write, read_multiple, etc. */
+	struct mutex page_mutex;
+	struct lock_class_key page_key;
 	int page;
 };
+
+static irqreturn_t i2c_attn_isr(int irq, void *info);
 
 /*
  * RMI devices have 16-bit addressing, but some of the physical
@@ -82,93 +80,42 @@ struct instance_data {
  * param[in] page - The new page address.
  * returns zero on success, non-zero on failure.
  */
-/** Writing to page select is giving errors in some configurations.  It's
- * not needed for basic operation, so we've turned it off for the moment.
+/* Writing to page select is giving errors in some configurations.  It's
+ * not needed for basic operation [see note], so we've turned it off for the
+ * moment. Once we figure out why this happening (is it a bug in our code? or
+ * in some I2C chips?  or maybe in the driver for some chips?) we'll either
+ * turn this opperation back on, move the choice to platform data, or
+ * determine whether to use it based on I2C driver capability).
+ *
+ * [NOTE: The current driver feature set doesn't require us to access
+ * addresses outside of the first page, so we're OK for the time being.
+ * Obviously this must be remedied before implementing the more advanced
+ * features that are in the pipeline.]
  */
 #if	defined(USE_PAGESELECT)
-int
-rmi_set_page(struct instance_data *instancedata, unsigned int page)
+int rmi_set_page(struct instance_data *instance_data, unsigned int page)
 {
 	char txbuf[2];
 	int retval;
 	txbuf[0] = 0xff;
 	txbuf[1] = page;
-	retval = i2c_master_send(instancedata->i2cclient, txbuf, 2);
-	if (retval != 2) {
-		dev_err(&instancedata->i2cclient->dev,
-				"%s: Set page failed: %d.", __func__, retval);
+	retval = i2c_master_send(instance_data->i2cclient,
+				txbuf, ARRAY_SIZE(txbuf));
+	if (retval != ARRAY_SIZE(txbuf)) {
+		dev_err(&instance_data->i2cclient->dev,
+			"%s: Set page failed: %d.", __func__, retval);
 	} else {
 		retval = 0;
-		instancedata->page = page;
+		instance_data->page = page;
 	}
 	return retval;
 }
 #else
-int
-rmi_set_page(struct instance_data *instancedata, unsigned int page)
+int rmi_set_page(struct instance_data *instance_data, unsigned int page)
 {
 	return 0;
 }
 #endif
-
-/*
- * Read a single register through i2c.
- *
- * param[in] pd - The pointer to the rmi_phys_driver struct
- * param[in] address - The address at which to start the data read.
- * param[out] valp - Pointer to the buffer where the data will be stored.
- * returns xero upon success (with the byte read in valp), non-zero upon error.
- */
-static int
-rmi_i2c_read(struct rmi_phys_driver *physdrvr, unsigned short address, char *valp)
-{
-	struct instance_data *instancedata =
-		container_of(physdrvr, struct instance_data, rmiphysdrvr);
-
-	char txbuf[2];
-	int retval = 0;
-	int retry_count = 0;
-
-	/* Can't have anyone else changing the page behind our backs */
-	mutex_lock(&page_mutex);
-
-	if (((address >> 8) & 0xff) != instancedata->page) {
-		/* Switch pages */
-		retval = rmi_set_page(instancedata, ((address >> 8) & 0xff));
-		if (retval)
-			goto exit;
-	}
-
-retry:
-	txbuf[0] = address & 0xff;
-	retval = i2c_master_send(instancedata->i2cclient, txbuf, 1);
-
-	if (retval != 1) {
-		dev_err(&instancedata->i2cclient->dev, "%s: Write fail: %d\n",
-				__func__, retval);
-		goto exit;
-	}
-	retval = i2c_master_recv(instancedata->i2cclient, txbuf, 1);
-
-	if (retval != 1) {
-		if (++retry_count == 5) {
-			dev_err(&instancedata->i2cclient->dev,
-					"%s: Read of 0x%04x fail: %d\n",
-					__func__, address, retval);
-		} else {
-			mdelay(10);
-			rmi_set_page(instancedata, ((address >> 8) & 0xff));
-			goto retry;
-		}
-	} else {
-		retval = 0;
-		*valp = txbuf[0];
-	}
-exit:
-
-	mutex_unlock(&page_mutex);
-	return retval;
-}
 
 /*
  * Same as rmi_i2c_read, except that multiple bytes are allowed to be read.
@@ -181,110 +128,74 @@ exit:
  * returns zero upon success (with the byte read in valp), non-zero upon error.
  *
  */
-static int
-rmi_i2c_read_multiple(struct rmi_phys_driver *physdrvr, unsigned short address,
-	char *valp, int size)
+static int rmi_i2c_read_multiple(struct rmi_phys_driver *physdrvr,
+				unsigned short address,
+				char *valp, int size)
 {
-	struct instance_data *instancedata =
-		container_of(physdrvr, struct instance_data, rmiphysdrvr);
+	struct instance_data *instance_data =
+	    container_of(physdrvr, struct instance_data, rmiphysdrvr);
 
 	char txbuf[2];
 	int retval = 0;
 	int retry_count = 0;
 
 	/* Can't have anyone else changing the page behind our backs */
-	mutex_lock(&page_mutex);
+	mutex_lock(&instance_data->page_mutex);
 
-	if (((address >> 8) & 0xff) != instancedata->page) {
+	if (((address >> 8) & 0xff) != instance_data->page) {
 		/* Switch pages */
-		retval = rmi_set_page(instancedata, ((address >> 8) & 0xff));
+		retval = rmi_set_page(instance_data, ((address >> 8) & 0xff));
 		if (retval)
 			goto exit;
 	}
 
 retry:
 	txbuf[0] = address & 0xff;
-	retval = i2c_master_send(instancedata->i2cclient, txbuf, 1);
+	retval = i2c_master_send(instance_data->i2cclient, txbuf, 1);
 
 	if (retval != 1) {
-		dev_err(&instancedata->i2cclient->dev, "%s: Write fail: %d\n",
-				__func__, retval);
+		dev_err(&instance_data->i2cclient->dev, "%s: Write fail: %d\n",
+			__func__, retval);
 		goto exit;
 	}
-	retval = i2c_master_recv(instancedata->i2cclient, valp, size);
+	retval = i2c_master_recv(instance_data->i2cclient, valp, size);
 
 	if (retval != size) {
 		if (++retry_count == 5) {
-			dev_err(&instancedata->i2cclient->dev,
-					"%s: Read of 0x%04x size %d fail: %d\n",
-					__func__, address, size, retval);
+			dev_err(&instance_data->i2cclient->dev,
+				"%s: Read of 0x%04x size %d fail: %d\n",
+				__func__, address, size, retval);
 		} else {
 			mdelay(10);
-			rmi_set_page(instancedata, ((address >> 8) & 0xff));
+			rmi_set_page(instance_data, ((address >> 8) & 0xff));
 			goto retry;
 		}
 	} else {
 		retval = 0;
 	}
-exit:
 
-	mutex_unlock(&page_mutex);
+exit:
+	mutex_unlock(&instance_data->page_mutex);
 	return retval;
 }
 
-
 /*
- * Write a single register through i2c.
- * You can write multiple registers at once, but I made the functions for that
- * seperate for performance reasons.  Writing multiple requires allocation and
- * freeing.
+ * Read a single register through i2c.
  *
  * param[in] pd - The pointer to the rmi_phys_driver struct
- * param[in] address - The address at which to start the write.
- * param[in] data - The data to be written.
- * returns one upon success, something else upon error.
+ * param[in] address - The address at which to start the data read.
+ * param[out] valp - Pointer to the buffer where the data will be stored.
+ * returns zero upon success (with the byte read in valp), non-zero upon error.
  */
 static int
-rmi_i2c_write(struct rmi_phys_driver *physdrvr, unsigned short address, char data)
+rmi_i2c_read(struct rmi_phys_driver *physdrvr, unsigned short address,
+	     char *valp)
 {
-	struct instance_data *instancedata =
-		container_of(physdrvr, struct instance_data, rmiphysdrvr);
-
-	unsigned char txbuf[2];
-	int retval = 0;
-
-	/* Can't have anyone else changing the page behind our backs */
-	mutex_lock(&page_mutex);
-
-	if (((address >> 8) & 0xff) != instancedata->page) {
-		/* Switch pages */
-		retval = rmi_set_page(instancedata, ((address >> 8) & 0xff));
-		if (retval)
-			goto exit;
-	}
-
-	txbuf[0] = address & 0xff;
-	txbuf[1] = data;
-	retval = i2c_master_send(instancedata->i2cclient, txbuf, 2);
-
-	/* TODO: Add in retry on writes only in certian error return values */
-	if (retval != 2) {
-		dev_err(&instancedata->i2cclient->dev, "%s: Write fail: %d\n",
-			__func__, retval);
-		goto exit; /* Leave this in case we add code below */
-	}
-exit:
-
-	mutex_unlock(&page_mutex);
-	return retval;
+	return rmi_i2c_read_multiple(physdrvr, address, valp, 1);
 }
 
 /*
  * Write multiple registers.
- *
- * For fast writes of 16 bytes of less we will re-use a buffer on the stack.
- * For larger writes (like for RMI reflashing) we will need to allocate a
- * temp buffer.
  *
  * param[in] pd - The pointer to the rmi_phys_driver struct
  * param[in] address - The address at which to start the write.
@@ -294,80 +205,178 @@ exit:
  */
 static int
 rmi_i2c_write_multiple(struct rmi_phys_driver *physdrvr, unsigned short address,
-	char *valp, int size)
+		       char *valp, int size)
 {
-	struct instance_data *instancedata =
-		container_of(physdrvr, struct instance_data, rmiphysdrvr);
+	struct instance_data *instance_data =
+	    container_of(physdrvr, struct instance_data, rmiphysdrvr);
 
-	unsigned char *txbuf;
-	unsigned char txbuf_most[17]; /* Use this buffer for fast writes of 16
-					bytes or less.  The first byte will
-					contain the address at which to start
-					the write. */
+	unsigned char txbuf[size+1];
 	int retval = 0;
-	int i;
 
-	if (size < sizeof(txbuf_most)) {
-		/* Avoid an allocation if we can help it. */
-		txbuf = txbuf_most;
-	} else {
-		/* over 16 bytes write we'll need to allocate a temp buffer */
-		txbuf = kzalloc(size + 1, GFP_KERNEL);
-		if (!txbuf)
-			return -ENOMEM;
-	}
-
-	/* Yes, it stinks here that we have to copy the buffer */
-	/* We copy from valp to txbuf leaving
-	the first location open for the address */
-	for (i = 0; i < size; i++)
-		txbuf[i + 1] = valp[i];
+	memcpy(txbuf+1, valp, size);
 
 	/* Can't have anyone else changing the page behind our backs */
-	mutex_lock(&page_mutex);
+	mutex_lock(&instance_data->page_mutex);
 
-	if (((address >> 8) & 0xff) != instancedata->page) {
+	if (((address >> 8) & 0xff) != instance_data->page) {
 		/* Switch pages */
-		retval = rmi_set_page(instancedata, ((address >> 8) & 0xff));
+		retval = rmi_set_page(instance_data, ((address >> 8) & 0xff));
 		if (retval)
 			goto exit;
 	}
 
-	txbuf[0] = address & 0xff; /* put the address in the first byte */
-	retval = i2c_master_send(instancedata->i2cclient, txbuf, size + 1);
+	txbuf[0] = address & 0xff;	/* put the address in the first byte */
+	retval = i2c_master_send(instance_data->i2cclient,
+				txbuf, ARRAY_SIZE(txbuf));
 
-	/* TODO: Add in retyr on writes only in certian error return values */
-	if (retval != 1) {
-		dev_err(&instancedata->i2cclient->dev, "%s: Write fail: %d\n",
-				__func__, retval);
+	/* TODO: Add in retry on writes only in certain error return values */
+	if (retval != ARRAY_SIZE(txbuf)) {
+		dev_err(&instance_data->i2cclient->dev, "%s: Write fail: %d\n",
+			__func__, retval);
 		goto exit;
 	}
-exit:
 
-	mutex_unlock(&page_mutex);
-	if (txbuf != txbuf_most)
-		kfree(txbuf);
+exit:
+	mutex_unlock(&instance_data->page_mutex);
 	return retval;
+}
+
+/*
+ * Write a single register through i2c.
+ *
+ * param[in] pd - The pointer to the rmi_phys_driver structnew file (copy)
+ * param[in] address - The address at which to start the write.
+ * param[in] data - The data to be written.
+ * returns one upon success, something else upon error.
+ */
+static int
+rmi_i2c_write(struct rmi_phys_driver *physdrvr, unsigned short address,
+	      char data)
+{
+	return rmi_i2c_write_multiple(physdrvr, address, &data, 1);
 }
 
 /*
  * This is the Interrupt Service Routine.  It just notifies the application
  * layer that attention is required.
  */
-static irqreturn_t
-i2c_attn_isr(int irq, void *info)
+static irqreturn_t i2c_attn_isr(int irq, void *info)
 {
-	struct instance_data *instancedata = info;
+	struct instance_data *instance_data = info;
 
-	disable_irq_nosync(instancedata->irq);
+	disable_irq_nosync(instance_data->irq);
 
-	if (instancedata->rmiphysdrvr.attention) {
-		instancedata->rmiphysdrvr.attention(&instancedata->rmiphysdrvr,
-			instancedata->instance_no);
+
+	if (instance_data->rmiphysdrvr.attention &&
+			(gpio_get_value(instance_data->attn_gpio) ==
+			instance_data->attn_polarity)) {
+		instance_data->rmiphysdrvr.attention(
+			&instance_data->rmiphysdrvr);
+	} else {
+		enable_irq(instance_data->irq);
 	}
 
 	return IRQ_HANDLED;
 }
+
+
+static int
+acquire_attn_irq(struct instance_data *instance_data)
+{
+	int retval;
+
+	retval = request_irq(instance_data->irq, i2c_attn_isr,
+		     IRQ_TYPE_EDGE_BOTH, "rmi_i2c",
+		     instance_data);
+	if (retval)
+		return retval;
+
+	dev_dbg(&instance_data->rmiphysdrvr.sensor->sensor_device->dev,
+		"got ATTN irq.\n");
+
+	if (gpio_get_value(instance_data->attn_gpio) ==
+			instance_data->attn_polarity &&
+			instance_data->rmiphysdrvr.attention) {
+		disable_irq(instance_data->irq);
+		instance_data->rmiphysdrvr.attention(
+			&instance_data->rmiphysdrvr);
+			}
+
+	return retval;
+}
+
+/* Specify the routine that will be called when attention is asserted.
+ */
+static void set_attn_handler (struct rmi_phys_driver *physdrvr,
+	void (*attention) (struct rmi_phys_driver *physdrvr))
+{
+	struct instance_data *instance_data =
+		container_of(physdrvr, struct instance_data, rmiphysdrvr);
+
+	physdrvr->attention = attention;
+	if (instance_data->attn_gpio &&
+                gpio_get_value(instance_data->attn_gpio) ==
+		instance_data->attn_polarity &&
+		instance_data->rmiphysdrvr.attention) {
+                disable_irq(instance_data->irq);
+                instance_data->rmiphysdrvr.attention(
+                        &instance_data->rmiphysdrvr);
+        }
+}
+
+
+static void release_attn_irq(struct rmi_phys_driver *physdrvr)
+{
+	struct instance_data *instance_data =
+	container_of(physdrvr, struct instance_data, rmiphysdrvr);
+
+	dev_info(&physdrvr->sensor->sensor_device->dev,
+		 "Releasing ATTN irq.\n");
+	disable_irq(instance_data->irq);
+	free_irq(instance_data->irq, instance_data);
+}
+
+
+static int
+enable_device(struct rmi_phys_driver *physdrvr)
+{
+	int retval = 0;
+	struct instance_data *instance_data =
+		container_of(physdrvr, struct instance_data, rmiphysdrvr);
+
+	if (instance_data->enabled)
+		return 0;
+
+	retval = acquire_attn_irq(instance_data);
+	if (retval)
+		goto error_exit;
+	instance_data->enabled = true;
+	dev_dbg(&physdrvr->sensor->sensor_device->dev,
+		"Physical device enabled.\n");
+	return 0;
+
+error_exit:
+	dev_err(&physdrvr->sensor->sensor_device->dev,
+		"Failed to enable physical device.  Code=%d.\n", retval);
+	return retval;
+}
+
+
+static void
+disable_device(struct rmi_phys_driver *physdrvr)
+{
+	struct instance_data *instance_data =
+	container_of(physdrvr, struct instance_data, rmiphysdrvr);
+
+	if (!instance_data->enabled)
+		return;
+
+	release_attn_irq(physdrvr);
+	dev_dbg(&physdrvr->sensor->sensor_device->dev,
+		"Physical device disabled.\n");
+	instance_data->enabled = false;
+}
+
 
 /* The Driver probe function - will allocate and initialize the instance
  * data and request the irq and set the instance data as the clients
@@ -378,205 +387,218 @@ i2c_attn_isr(int irq, void *info)
 static int
 rmi_i2c_probe(struct i2c_client *client, const struct i2c_device_id *dev_id)
 {
-
-	struct instance_data *instancedata;
+	struct instance_data *instance_data;
 	int retval = 0;
-	int irqtype = 0;
-
 	struct rmi_i2c_platformdata *platformdata;
 	struct rmi_sensordata *sensordata;
 
 	if (client == NULL) {
-		printk(KERN_ERR "%s: Invalid NULL client received.", __func__);
+		pr_err("%s: Invalid NULL client received.", __func__);
 		return -EINVAL;
 	}
 
-	printk(KERN_DEBUG "%s: Probing i2c RMI device, addr: 0x%02x", __func__, client->addr);
+	platformdata = client->dev.platform_data;
+	if (platformdata == NULL) {
+		dev_err(&client->dev, "%s: CONFIGURATION ERROR - "
+		"platform data is NULL.\n", __func__);
+		retval = -EINVAL;
+	}
+	sensordata = platformdata->sensordata;
 
+	dev_dbg(&client->dev, "%s: Probing i2c RMI device, addr: 0x%02x",
+		  __func__, client->addr);
 
 	/* Allocate and initialize the instance data for this client */
-	instancedata = kzalloc(sizeof(*instancedata), GFP_KERNEL);
-	if (!instancedata) {
+	instance_data = kzalloc(sizeof(*instance_data), GFP_KERNEL);
+	if (!instance_data) {
 		dev_err(&client->dev,
-			"%s: Out of memory trying to allocate instance_data.\n",
+			"%s: Failed to allocate instance_data.\n",
 			__func__);
 		return -ENOMEM;
 	}
 
-	instancedata->rmiphysdrvr.name           = DRIVER_NAME;
-	instancedata->rmiphysdrvr.write          = rmi_i2c_write;
-	instancedata->rmiphysdrvr.read           = rmi_i2c_read;
-	instancedata->rmiphysdrvr.write_multiple = rmi_i2c_write_multiple;
-	instancedata->rmiphysdrvr.read_multiple  = rmi_i2c_read_multiple;
-	instancedata->rmiphysdrvr.module         = THIS_MODULE;
-
+	__mutex_init(&instance_data->page_mutex, "page_mutex",
+		     &instance_data->page_key);
+	instance_data->rmiphysdrvr.name = RMI4_I2C_DRIVER_NAME;
+	instance_data->rmiphysdrvr.write = rmi_i2c_write;
+	instance_data->rmiphysdrvr.read = rmi_i2c_read;
+	instance_data->rmiphysdrvr.write_multiple = rmi_i2c_write_multiple;
+	instance_data->rmiphysdrvr.read_multiple = rmi_i2c_read_multiple;
+	instance_data->rmiphysdrvr.set_attn_handler = set_attn_handler;
+	instance_data->rmiphysdrvr.enable_device = enable_device;
+	instance_data->rmiphysdrvr.disable_device = disable_device;
+	instance_data->rmiphysdrvr.module = THIS_MODULE;
 	/* Set default to polling in case no matching platform data is located
-	for this device. We'll still work but in polling mode since we didn't
-	find any irq info */
-	instancedata->rmiphysdrvr.polling_required = true;
+	   for this device. We'll still work but in polling mode since we didn't
+	   find any irq info */
+	instance_data->rmiphysdrvr.polling_required = true;
 
-	instancedata->page = 0xffff; /* Force a set page the first time */
+	instance_data->page = 0xffff;	/* Force a set page the first time */
+	instance_data->enabled = true;	/* We plan to come up enabled. */
 
-	/* cast to our struct rmi_i2c_platformdata so we know
-	the fields (see rmi_ic2.h) */
-	platformdata = client->dev.platform_data;
-	if (platformdata == NULL) {
-		printk(KERN_ERR "%s: CONFIGURATION ERROR - platform data is NULL.", __func__);
-		return -EINVAL;
-	}
-	sensordata = platformdata->sensordata;
-
-	/* Egregiously horrible delay here that seems to prevent I2C disasters on
-	 * certain broken dev systems.  In most cases, you can safely leave this
-	 * as zero.
+	/* Egregiously horrible delay here that seems to prevent I2C disasters
+	 * on certain broken dev systems.  In most cases, you can safely
+	 * leave this as zero.
 	 */
 	if (platformdata->delay_ms > 0)
 		mdelay(platformdata->delay_ms);
 
-	printk(KERN_DEBUG "%s: sensor addr: 0x%02x irq: 0x%x type: %d",
-		__func__, platformdata->i2c_address, platformdata->irq, platformdata->irq_type);
+	dev_dbg(&client->dev, "%s: sensor addr: 0x%02x irq: %d\n",
+		 __func__, platformdata->i2c_address,
+		 gpio_to_irq(sensordata->attn_gpio_number));
 	if (client->addr != platformdata->i2c_address) {
-		printk(KERN_ERR "%s: CONFIGURATION ERROR - client I2C address 0x%02x doesn't match platform data address 0x%02x.", __func__, client->addr, platformdata->i2c_address);
-		return -EINVAL;
+		dev_err(&client->dev,
+			"%s: CONFIGURATION ERROR - client I2C address 0x%02x "
+			"doesn't match platform data address 0x%02x.\n",
+			__func__, client->addr, platformdata->i2c_address);
+		retval = -EINVAL;
+		goto error_exit;
 	}
 
-	instancedata->instance_no = device_count++;
+	instance_data->instance_no = rmi_next_sensor_id();
 
-	/* set the device name using the instance_no appended
-	to DEVICE_NAME to make a unique name */
-	dev_set_name(&client->dev,
-		"rmi4-i2c%d", instancedata->instance_no);
+	/* set the device name using the instance_no appended to DEVICE_NAME
+	 * to make a unique name */
+	dev_set_name(&client->dev, "%s%d", RMI4_I2C_DEVICE_NAME,
+		     instance_data->instance_no);
 
 	/* Determine if we need to poll (inefficient) or use interrupts.
-	*/
-	if (platformdata->irq) {
-		instancedata->irq = platformdata->irq;
-		switch (platformdata->irq_type) {
-		case IORESOURCE_IRQ_HIGHEDGE:
-			irqtype = IRQF_TRIGGER_RISING;
-			break;
-		case IORESOURCE_IRQ_LOWEDGE:
-			irqtype = IRQF_TRIGGER_FALLING;
-			break;
-		case IORESOURCE_IRQ_HIGHLEVEL:
-			irqtype = IRQF_TRIGGER_HIGH;
-			break;
-		case IORESOURCE_IRQ_LOWLEVEL:
-			irqtype = IRQF_TRIGGER_LOW;
-			break;
-		default:
-			dev_warn(&client->dev,
-				"%s: Invalid IRQ flags in platform data.\n",
-				__func__);
-			kfree(instancedata);
-			return -ENXIO;
-		}
-
-		instancedata->rmiphysdrvr.polling_required = false;
-		instancedata->rmiphysdrvr.irq = instancedata->irq;
+	 */
+	if (sensordata->attn_gpio_number) {
+		instance_data->irq = gpio_to_irq(sensordata->attn_gpio_number);
+		instance_data->attn_polarity = sensordata->attn_polarity;
+		instance_data->attn_gpio = sensordata->attn_gpio_number;
+		instance_data->rmiphysdrvr.polling_required = false;
+		instance_data->rmiphysdrvr.irq = instance_data->irq;
 
 	} else {
-		instancedata->rmiphysdrvr.polling_required = true;
+		instance_data->rmiphysdrvr.polling_required = true;
 		dev_info(&client->dev,
-				"%s: No IRQ info given. Polling required.\n",
-				__func__);
+			 "%s: No IRQ info given. Polling required.\n",
+			 __func__);
 	}
 
 	/* Store the instance data in the i2c_client - we need to do this prior
-	* to calling register_physical_driver since it may use the read, write
-	* functions. If nothing was found then the id fields will be set to 0
-	* for the irq and the default  will be set to polling required so we
-	* will still work but in polling mode. */
-	i2c_set_clientdata(client, instancedata);
+	 * to calling register_physical_driver since it may use the read, write
+	 * functions. If nothing was found then the id fields will be set to 0
+	 * for the irq and the default  will be set to polling required so we
+	 * will still work but in polling mode. */
+	i2c_set_clientdata(client, instance_data
+);
 
 	/* Copy i2c_client pointer into instance_data's i2c_client pointer for
-	later use in rmi4_read, rmi4_write, etc. */
-	instancedata->i2cclient = client;
+	   later use in rmi4_read, rmi4_write, etc. */
+	instance_data->i2cclient = client;
 
-	/* Call the platform setup routine, to do any setup that is required before
-	 * interacting with the device.
+	/* Call the platform setup routine, to do any setup that is required
+	 * before interacting with the device.  When we refined the bus
+	 * architecture, this will be done elsewhere.
 	 */
 	if (sensordata && sensordata->rmi_sensor_setup) {
 		retval = sensordata->rmi_sensor_setup();
 		if (retval) {
-			printk(KERN_ERR "%s: sensor setup failed with code %d.", __func__, retval);
-			return retval;
+			dev_err(&client->dev,
+				"%s: sensor setup failed with code %d.",
+			       __func__, retval);
+			goto error_exit;
 		}
 	}
 
 	/* Register sensor drivers - this will call the detect function that
-	* will then scan the device and determine the supported RMI4 sensors
-	* and functions.
-	*/
-	retval = rmi_register_sensor(&instancedata->rmiphysdrvr, platformdata->sensordata);
+	 * will then scan the device and determine the supported RMI4 sensors
+	 * and functions.
+	 */
+	retval = rmi_register_sensor(&instance_data->rmiphysdrvr,
+				platformdata->sensordata);
 	if (retval) {
-		dev_err(&client->dev, "%s: Failed to Register %s sensor drivers\n",
-				__func__, instancedata->rmiphysdrvr.name);
-		i2c_set_clientdata(client, NULL);
-		kfree(instancedata);
-		return retval;
+		dev_err(&client->dev,
+			"%s: Failed to register %s sensor drivers\n", __func__,
+			instance_data->rmiphysdrvr.name);
+		goto error_exit;
 	}
 
-	if (instancedata->rmiphysdrvr.polling_required == false) {
-		retval = request_irq(instancedata->irq, i2c_attn_isr,
-				irqtype, "rmi_i2c", instancedata);
+	if (instance_data->rmiphysdrvr.polling_required == false) {
+		retval = acquire_attn_irq(instance_data);
 		if (retval) {
-			dev_err(&client->dev, "%s: failed to obtain IRQ %d. Result: %d.",
-				__func__, instancedata->irq, retval);
-			dev_info(&client->dev, "%s: Reverting to polling.\n", __func__);
-			instancedata->rmiphysdrvr.polling_required = true;
-			/* TODO: Need to revert back to polling - create and start timer, turn off interrupts for each fn */
+			dev_warn(&client->dev,
+				"Failed to obtain IRQ %d. Result: %d.",
+				instance_data->irq, retval);
+			dev_info(&client->dev, "%s: Reverting to polling.\n",
+				 __func__);
+			instance_data->rmiphysdrvr.polling_required = true;
+			/* TODO: Need to revert back to polling - create and
+			 * start timer. */
+			retval = 0;
+		}
+
+		retval = gpio_export(instance_data->attn_gpio, false);
+		if (retval) {
+			dev_warn(&client->dev, "%s: WARNING: Failed to "
+				"export ATTN gpio!.", __func__);
+			retval = 0;
 		} else {
-			dev_dbg(&client->dev, "%s: got irq.\n", __func__);
+			retval = gpio_export_link(
+				&instance_data->rmiphysdrvr.sensor->
+				sensor_device->dev, "attn",
+				instance_data->attn_gpio);
+			if (retval) {
+				dev_warn(
+					&instance_data->rmiphysdrvr.sensor->
+					sensor_device->dev, "%s: WARNING: "
+					"Failed to symlink ATTN gpio!.",
+					__func__);
+				retval = 0;
+			} else {
+				dev_info(&instance_data->
+					rmiphysdrvr.sensor->sensor_device->dev,
+					 "%s: Exported GPIO %d.",
+					__func__, instance_data->attn_gpio);
+			}
 		}
 	}
 
 	dev_dbg(&client->dev, "%s: Successfully registered %s sensor driver.\n",
-			__func__, instancedata->rmiphysdrvr.name);
+		__func__, instance_data->rmiphysdrvr.name);
 
-	printk(KERN_INFO "%s: Successfully registered %s sensor driver.\n", __func__, instancedata->rmiphysdrvr.name);
+	return retval;
 
+error_exit:
+	kfree(instance_data);
+	/* return error for clean-up*/
 	return retval;
 }
 
-/* The Driver remove function.  We tear down the instance data and unregister
- * the phys driver in this call.
- */
-static int
-rmi_i2c_remove(struct i2c_client *client)
+static int rmi_i2c_remove(struct i2c_client *client)
 {
-	struct instance_data *instancedata =
-		i2c_get_clientdata(client);
+	struct instance_data *instance_data = i2c_get_clientdata(client);
 
 	dev_dbg(&client->dev, "%s: Unregistering phys driver %s\n", __func__,
-		instancedata->rmiphysdrvr.name);
+		instance_data->rmiphysdrvr.name);
 
-	rmi_unregister_sensors(&instancedata->rmiphysdrvr);
+	rmi_unregister_sensors(&instance_data->rmiphysdrvr);
 
 	dev_dbg(&client->dev, "%s: Unregistered phys driver %s\n",
-			__func__, instancedata->rmiphysdrvr.name);
+		__func__, instance_data->rmiphysdrvr.name);
 
 	/* only free irq if we have an irq - otherwise the instance_data
-	will be 0 for that field */
-	if (instancedata->irq)
-		free_irq(instancedata->irq, instancedata);
+	   will be 0 for that field */
+	if (instance_data->irq)
+		free_irq(instance_data->irq, instance_data);
 
-	kfree(instancedata);
+	kfree(instance_data);
 	dev_dbg(&client->dev, "%s: Remove successful\n", __func__);
 
 	return 0;
 }
 
 #ifdef CONFIG_PM
-static int
-rmi_i2c_suspend(struct i2c_client *client, pm_message_t mesg)
+static int rmi_i2c_suspend(struct i2c_client *client, pm_message_t mesg)
 {
 	/* Touch sleep mode */
 	return 0;
 }
 
-static int
-rmi_i2c_resume(struct i2c_client *client)
+static int rmi_i2c_resume(struct i2c_client *client)
 {
 	/* Re-initialize upon resume */
 	return 0;
@@ -593,35 +615,26 @@ rmi_i2c_resume(struct i2c_client *client)
  *
  */
 static struct i2c_driver rmi_i2c_driver = {
-	.probe		= rmi_i2c_probe,
-	.remove		= rmi_i2c_remove,
-	.suspend	= rmi_i2c_suspend,
-	.resume		= rmi_i2c_resume,
+	.probe = rmi_i2c_probe,
+	.remove = rmi_i2c_remove,
+	.suspend = rmi_i2c_suspend,
+	.resume = rmi_i2c_resume,
 	.driver = {
-		.name  = DRIVER_NAME,
+		.name = RMI4_I2C_DRIVER_NAME,
 		.owner = THIS_MODULE,
 	},
-	.id_table	= rmi_i2c_id_table,
+	.id_table = rmi_i2c_id_table,
 };
 
-/*
- * Register ourselves with i2c Chip Driver.
- *
- */
 static int __init rmi_phys_i2c_init(void)
 {
 	return i2c_add_driver(&rmi_i2c_driver);
 }
 
-/*
- * Un-register ourselves from the i2c Chip Driver.
- *
- */
 static void __exit rmi_phys_i2c_exit(void)
 {
 	i2c_del_driver(&rmi_i2c_driver);
 }
-
 
 module_init(rmi_phys_i2c_init);
 module_exit(rmi_phys_i2c_exit);
