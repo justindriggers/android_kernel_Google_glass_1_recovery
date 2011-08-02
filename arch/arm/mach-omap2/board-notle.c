@@ -94,6 +94,8 @@
 #define MUX_EN_10V                      MUX(USBB1_ULPITLL_CLK)
 #define GPIO_CAMERA                     94 // NB: in v3, this moves to 121 and
 #define MUX_CAMERA                      MUX(USBB1_ULPITLL_DAT6) // ABE_DMIC_DIN2
+#define GPIO_TOUCHPAD_INT_N             32
+#define MUX_TOUCHPAD_INT_N              MUX(GPMC_AD8)
 
 // Notle v2 wifi
 #define GPIO_BCM_WLAN_HOST_WAKE         170
@@ -842,7 +844,7 @@ static struct rmi_sensor_suspend_custom_ops synaptics_custom_ops = {
 static struct rmi_sensordata __initdata synaptics_sensordata = {
         .rmi_sensor_setup = 0,
         .rmi_sensor_teardown = 0,
-        .attn_gpio_number = 0,
+        .attn_gpio_number = GPIO_TOUCHPAD_INT_N,
         .attn_polarity = 0,
         .custom_suspend_ops = &synaptics_custom_ops,
         .perfunctiondata = 0,
@@ -1090,6 +1092,20 @@ static int __init notle_gps_start(void) {
 late_initcall(notle_gps_start);
 */
 
+static int __init notle_touchpad_init(void) {
+        int r;
+
+        pr_info("%s()+", __func__);
+
+        /* Configuration of requested GPIO line */
+
+        r = gpio_request_one(GPIO_TOUCHPAD_INT_N, GPIOF_IN, "touchpad_int_n");
+        if (!r) {
+                pr_err("Failed to get touchpad_int_n gpio\n");
+        }
+        return r;
+}
+
 static int __init notle_wifi_init(void) {
         int r;
 
@@ -1300,6 +1316,8 @@ static void __init my_mux_init(void) {
                 core_base_addr + MUX_BCM_WLAN_WAKE);
         __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
                 core_base_addr + MUX_CAMERA);
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
+                core_base_addr + MUX_TOUCHPAD_INT_N);
 
 }
 
@@ -1333,6 +1351,11 @@ static void __init notle_init(void)
         err = notle_wifi_init();
         if (err) {
                 pr_err("Wifi initialization failed: %d\n", err);
+        }
+
+        err = notle_touchpad_init();
+        if (err) {
+                pr_err("Touchpad initialization failed: %d\n", err);
         }
 
         err = notle_dvi_init();
