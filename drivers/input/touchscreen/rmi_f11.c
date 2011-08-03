@@ -897,9 +897,9 @@ int FN_11_init(struct rmi_function_device *function_device)
 
 	/* TODO: Initialize these through some normal kernel mechanism.
 	 */
-	instance_data->flip_X = false;
+	instance_data->flip_X = true;
 	instance_data->flip_Y = false;
-	instance_data->swap_axes = false;
+	instance_data->swap_axes = true;
 	instance_data->rel_report_enabled = true;
 	instance_data->offset_X = instance_data->offset_Y = 0;
 	instance_data->clip_X_low = instance_data->clip_Y_low = 0;
