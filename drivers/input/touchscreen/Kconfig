@@ -404,6 +404,10 @@ config SYNA_MULTI_TOUCH
 	bool "Synaptics pointing using multi-touch events"
 	depends on TOUCHSCREEN_SYNAPTICS_RMI4_I2C || TOUCHSCREEN_SYNAPTICS_RMI4_SPI
 
+config SYNA_WAKE_ON_TOUCH
+	bool "Synaptics pointing with interrupts enabled to wake system"
+	depends on TOUCHSCREEN_SYNAPTICS_RMI4_I2C
+
 config TOUCHSCREEN_TNETV107X
 	tristate "TI TNETV107X touchscreen support"
 	depends on ARCH_DAVINCI_TNETV107X

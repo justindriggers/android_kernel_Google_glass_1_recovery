@@ -1100,7 +1100,7 @@ static int __init notle_touchpad_init(void) {
         /* Configuration of requested GPIO line */
 
         r = gpio_request_one(GPIO_TOUCHPAD_INT_N, GPIOF_IN, "touchpad_int_n");
-        if (!r) {
+        if (r) {
                 pr_err("Failed to get touchpad_int_n gpio\n");
         }
         return r;

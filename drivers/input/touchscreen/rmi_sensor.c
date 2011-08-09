@@ -488,6 +488,12 @@ void *rmi_sensor_get_functiondata(struct rmi_sensor_driver *driver,
 /*
  *  final implementation of suspend/early_suspend function
  */
+#ifdef CONFIG_SYNA_WAKE_ON_TOUCH
+static int rmi_sensor_suspend(struct device *dev, pm_message_t state)
+{
+        return 0;
+}
+#else
 static int rmi_sensor_suspend(struct device *dev, pm_message_t state)
 {
 	struct rmi_sensor_device *sensor_device =
@@ -592,10 +598,17 @@ exit:
 	mutex_unlock(&sensor_drvr->sensor_device->setup_suspend_flag);
 	return retval;
 }
+#endif
 
 /*
  *  final implementation of resume/late_resume function
  */
+#ifdef CONFIG_SYNA_WAKE_ON_TOUCH
+static int rmi_sensor_resume(struct device *dev)
+{
+        return 0;
+}
+#else
 static int rmi_sensor_resume(struct device *dev)
 {
 	struct rmi_sensor_device *sensor_device =
@@ -640,6 +653,7 @@ static int rmi_sensor_resume(struct device *dev)
 	mutex_unlock(&sensor_drvr->sensor_device->setup_suspend_flag);
 	return 0;
 }
+#endif
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 /*

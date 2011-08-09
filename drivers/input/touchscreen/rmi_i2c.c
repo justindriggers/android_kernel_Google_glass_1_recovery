@@ -294,6 +294,12 @@ acquire_attn_irq(struct instance_data *instance_data)
 	dev_dbg(&instance_data->rmiphysdrvr.sensor->sensor_device->dev,
 		"got ATTN irq.\n");
 
+#ifdef CONFIG_SYNA_WAKE_ON_TOUCH
+        retval = irq_set_irq_wake(instance_data->irq, 1);
+        if (retval)
+                return retval;
+#endif
+
 	if (gpio_get_value(instance_data->attn_gpio) ==
 			instance_data->attn_polarity &&
 			instance_data->rmiphysdrvr.attention) {
