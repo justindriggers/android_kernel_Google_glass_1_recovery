@@ -181,8 +181,9 @@ int omap4_prm_deassert_hardreset(void __iomem *rstctrl_reg, u8 shift)
 	/* de-assert the reset control line */
 	omap4_prm_rmw_reg_bits(mask, 0, rstctrl_reg);
 	/* wait the status to be set */
+        // TODO(abliss): our ipu currently takes too long to reset.
 	omap_test_timeout(omap4_prm_read_bits_shift(rstst_reg, mask),
-			  MAX_MODULE_HARDRESET_WAIT, c);
+			  MAX_MODULE_HARDRESET_WAIT * 100, c);
 
 	return (c == MAX_MODULE_HARDRESET_WAIT) ? -EBUSY : 0;
 }

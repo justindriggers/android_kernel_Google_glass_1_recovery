@@ -152,6 +152,10 @@
 #define PHYS_ADDR_DUCATI_MEM    (PHYS_ADDR_SMC_MEM - PHYS_ADDR_DUCATI_SIZE - \
                                  OMAP_ION_HEAP_SECURE_INPUT_SIZE)
 
+#ifndef CONFIG_NOTLE_I2C4_SENSORS
+#define CONFIG_NOTLE_I2C4_SENSORS 0
+#endif
+
 static struct gpio_led gpio_leds[] = {
 	{
 		.name			= "notleboard::status1",
@@ -498,6 +502,13 @@ static struct regulator_init_data notle_vaux1 = {
 	.consumer_supplies      = notle_vaux_supply,
 };
 
+
+static struct regulator_consumer_supply notle_cam2_supply[] = {
+  {
+    .supply = "cam2pwr",
+  },
+};
+
 // Voltage for sensors (mag, acc, gyro, light sensor, camera)
 static struct regulator_init_data notle_vaux2 = {
 	.constraints = {
@@ -507,9 +518,12 @@ static struct regulator_init_data notle_vaux2 = {
 		.valid_modes_mask	= REGULATOR_MODE_NORMAL
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
-					| REGULATOR_CHANGE_STATUS,
+					| REGULATOR_CHANGE_STATUS
+					| REGULATOR_CHANGE_VOLTAGE,
 		.always_on		= true,
 	},
+        .num_consumer_supplies = 1,
+        .consumer_supplies = notle_cam2_supply,
 };
 
 // Voltage for display LED?
@@ -986,6 +1000,9 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 };
 
 static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
+    // NOTE(abliss): currently, this i2c bus can support EITHER the sensors OR
+    // the camera
+#if CONFIG_NOTLE_I2C4_SENSORS
 #ifdef CONFIG_MPU_SENSORS_MPU6050B1
         {
 		I2C_BOARD_INFO("mpu6050B1", 0x68),
@@ -1023,6 +1040,12 @@ static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
 	{
 		I2C_BOARD_INFO("notle_himax", 0x48),
 	},
+#endif
+	{
+		I2C_BOARD_INFO("ov9726", 0x10),
+		.flags = I2C_CLIENT_WAKE,
+	},
+
 };
 
 
