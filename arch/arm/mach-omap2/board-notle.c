@@ -28,6 +28,7 @@
 #include <linux/usb/otg.h>
 #include <linux/i2c.h>
 #include <linux/i2c/twl.h>
+#include <linux/memblock.h>
 #include <linux/pwm.h>
 #include <linux/pwm_backlight.h>
 #include <linux/reboot.h>
@@ -57,6 +58,7 @@
 #include <plat/common.h>
 #include <plat/usb.h>
 #include <plat/mmc.h>
+#include <plat/remoteproc.h>
 #include <plat/omap-serial.h>
 #include <plat/dmtimer-pwm.h>
 
@@ -64,6 +66,7 @@
 #include <video/omap-panel-generic-dpi.h>
 
 #include "timer-gp.h"
+#include "omap4_ion.h"
 #include "hsmmc.h"
 #include "control.h"
 #include "mux.h"
@@ -135,6 +138,13 @@
 #define GPIO_BCM_WLAN_WAKE                      88
 #define GPIO_BCM_WLAN_HOST_WAKE                 86
 */
+
+#define PHYS_ADDR_SMC_SIZE      (SZ_1M * 3)
+#define PHYS_ADDR_SMC_MEM       (0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
+#define OMAP_ION_HEAP_SECURE_INPUT_SIZE (SZ_1M * 30)
+#define PHYS_ADDR_DUCATI_SIZE   (SZ_1M * 103)
+#define PHYS_ADDR_DUCATI_MEM    (PHYS_ADDR_SMC_MEM - PHYS_ADDR_DUCATI_SIZE - \
+                                 OMAP_ION_HEAP_SECURE_INPUT_SIZE)
 
 static struct gpio_led gpio_leds[] = {
 	{
@@ -1374,6 +1384,7 @@ static void __init notle_init(void)
 
         register_reboot_notifier(&notle_reboot_notifier);
         notle_i2c_init();
+        omap4_register_ion();
 
         platform_add_devices(notle_devices, ARRAY_SIZE(notle_devices));
         omap_serial_board_init(omap_serial_port_info);
@@ -1416,10 +1427,26 @@ static void __init notle_map_io(void)
         omap44xx_map_common_io();
 }
 
+static void __init notle_reserve(void)
+{
+        /* do the static reservations first */
+        memblock_remove(PHYS_ADDR_SMC_MEM, PHYS_ADDR_SMC_SIZE);
+        memblock_remove(PHYS_ADDR_DUCATI_MEM, PHYS_ADDR_DUCATI_SIZE);
+        /* ipu needs to recognize secure input buffer area as well */
+        omap_ipu_set_static_mempool(PHYS_ADDR_DUCATI_MEM, PHYS_ADDR_DUCATI_SIZE +
+                                    OMAP_ION_HEAP_SECURE_INPUT_SIZE);
+
+#ifdef CONFIG_ION_OMAP
+        omap_ion_init();
+#else
+        omap_reserve();
+#endif
+}
+
 MACHINE_START(NOTLE, "OMAP4430")
 	/* Maintainer: David Anders - Texas Instruments Inc */
 	.boot_params	= 0x80000100,
-	.reserve	= omap_reserve,
+	.reserve	= notle_reserve,
 	.map_io		= notle_map_io,
 	.init_early	= notle_init_early,
 	.init_irq	= gic_init_irq,
