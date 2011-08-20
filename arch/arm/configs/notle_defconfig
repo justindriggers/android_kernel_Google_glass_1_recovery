@@ -82,7 +82,8 @@ CONFIG_SMP=y
 CONFIG_NR_CPUS=2
 CONFIG_PREEMPT=y
 CONFIG_HOTPLUG_CPU=y
-CONFIG_CMDLINE="console=ttyO2,115200n8 mem=1024M init=/init vram=32M omapfb.vram=0:16M androidboot.console=ttyO2 androidboot.carrier=wifi-only product_type=w cpuidle_sysfs_switch"
+CONFIG_CMDLINE="console=ttyO2,115200n8 mem=1G init=/init vram=32M omapfb.vram=0:16M androidboot.console=ttyO2 androidboot.carrier=wifi-only product_type=w"
+CONFIG_CMDLINE_EXTEND=y
 CONFIG_CPU_FREQ=y
 CONFIG_CPU_FREQ_DEFAULT_GOV_POWERSAVE=y
 CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
