@@ -29,6 +29,7 @@
 #include <linux/i2c.h>
 #include <linux/i2c/twl.h>
 #include <linux/memblock.h>
+#include <linux/omapfb.h>
 #include <linux/pwm.h>
 #include <linux/pwm_backlight.h>
 #include <linux/reboot.h>
@@ -63,6 +64,7 @@
 #include <plat/usb.h>
 #include <plat/mmc.h>
 #include <plat/remoteproc.h>
+#include <plat/vram.h>
 #include <plat/omap-serial.h>
 #include <plat/dmtimer-pwm.h>
 
@@ -1379,6 +1381,19 @@ static int notle_notifier_call(struct notifier_block *this,
         return NOTIFY_DONE;
 }
 
+/* TODO: This is copied from panda board file.  What size should we use? */
+#define NOTLE_FB_RAM_SIZE               SZ_16M /* 1920x1080*4 * 2 */
+static struct omapfb_platform_data notle_fb_pdata = {
+        .mem_desc = {
+                .region_cnt = 1,
+                .region = {
+                        [0] = {
+                                .size = NOTLE_FB_RAM_SIZE,
+                        },
+                },
+        },
+};
+
 static struct notifier_block notle_reboot_notifier = {
         .notifier_call = notle_notifier_call,
 };
@@ -1401,6 +1416,9 @@ static void __init notle_init(void)
         omap_serial_board_init(omap_serial_port_info);
         omap4_twl6030_hsmmc_init(mmc);
         usb_musb_init(&musb_board_data);
+
+        omap_vram_set_sdram_vram(NOTLE_FB_RAM_SIZE, 0);
+        omapfb_set_platform_data(&notle_fb_pdata);
 
         err = omap_audio_init();
         if (err) {
