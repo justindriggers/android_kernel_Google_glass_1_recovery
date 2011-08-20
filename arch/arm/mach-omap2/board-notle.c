@@ -34,8 +34,12 @@
 #include <linux/reboot.h>
 #include <linux/rfkill-gpio.h>
 
+#ifdef CONFIG_INPUT_L3G4200D
 #include <linux/i2c/l3g4200d.h>
+#endif
+#ifdef CONFIG_INPUT_LSM303DLHC
 #include <linux/i2c/lsm303dlhc.h>
+#endif
 #include <linux/i2c/ltr506.h>
 
 #ifdef CONFIG_MPU_SENSORS_MPU6050B1
@@ -909,7 +913,9 @@ static struct mpu_platform_data mpu6050_data = {
                                  0, 0, -1 },
         },
 };
-#else
+#endif
+
+#ifdef CONFIG_INPUT_L3G4200D
 static struct l3g4200d_gyr_platform_data notle_l3g4200d_data = {
         .min_interval = 1,                // Minimum poll interval in ms.
 	.poll_interval = 10,              /* poll interval (in ms) to pass
@@ -931,7 +937,9 @@ static struct l3g4200d_gyr_platform_data notle_l3g4200d_data = {
 	.negate_y = 1,
 	.axis_map_z = 2,
 };
+#endif
 
+#ifdef CONFIG_INPUT_LSM303DLHC
 static struct lsm303dlhc_acc_platform_data notle_lsm303dlh_acc_data = {
         .min_interval = 1,     // Minimum poll interval in ms.
         .poll_interval = 10,   // Poll interval in ms.
@@ -972,13 +980,16 @@ static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
 	//	.irq = OMAP44XX_IRQ_SYS_1N,
 		.platform_data = &mpu6050_data,
         },
-#else
+#endif
+#ifdef CONFIG_INPUT_L3G4200D
 	{
 		I2C_BOARD_INFO("l3g4200d_gyr", 0x68),
 		.flags = I2C_CLIENT_WAKE,
 	//	.irq = OMAP44XX_IRQ_SYS_1N,
 		.platform_data = &notle_l3g4200d_data,
 	},
+#endif
+#ifdef CONFIG_INPUT_LSM303DLHC
 	{
 		I2C_BOARD_INFO("lsm303dlhc_acc", 0x18),
 		.flags = I2C_CLIENT_WAKE,
