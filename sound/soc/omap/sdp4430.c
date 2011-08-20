@@ -545,7 +545,7 @@ static int sdp4430_twl6040_init(struct snd_soc_pcm_runtime *rtd)
 				hs_jack_pins);
 
 	if (machine_is_omap_4430sdp() || machine_is_omap_tabletblaze()
-		|| machine_is_omap4_panda())
+		|| machine_is_omap4_panda() || machine_is_notle())
 		twl6040_hs_jack_detect(codec, &hs_jack, SND_JACK_HEADSET);
 	else
 		snd_soc_jack_report(&hs_jack, SND_JACK_HEADSET, SND_JACK_HEADSET);
