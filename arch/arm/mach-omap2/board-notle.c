@@ -65,10 +65,10 @@
 #include "timer-gp.h"
 #include "hsmmc.h"
 #include "control.h"
-#include "common-board-devices.h"
 #include "mux.h"
-#include "cm1_44xx.h"
 #include "pm.h"
+#include "common-board-devices.h"
+#include "cm1_44xx.h"
 
 #define MUX(x) OMAP4_CTRL_MODULE_PAD_##x##_OFFSET
 
