@@ -310,7 +310,7 @@ static int lsm303dlhc_mag_get_data(struct lsm303dlhc_mag_data *mag,
 
 	// Subtract the 600 milligauss fixed offset from the y value.
 	// TODO(braun): Make the sensor report the proper value without the offset.
-	xyz[1] -= 600;
+	xyz[0] += 600;
 
 	return err;
 }
