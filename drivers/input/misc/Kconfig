@@ -569,4 +569,11 @@ config INPUT_L3G4200D
           This driver implements the i2c communication to a 3-axis
           gyroscope.
 
+config INPUT_LTR506ALS
+        tristate "Lite-On ambient light sensor driver"
+        depends on INPUT_POLLDEV
+        help
+          This driver implements the i2c communication to the ambient
+          light sensor driver.
+
 endif
