@@ -54,6 +54,7 @@
 
 #include <mach/hardware.h>
 #include <mach/omap4-common.h>
+#include <mach/dmm.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
@@ -1449,6 +1450,7 @@ static void __init notle_init(void)
         omap_serial_board_init(omap_serial_port_info);
         omap4_twl6030_hsmmc_init(mmc);
         usb_musb_init(&musb_board_data);
+        omap_dmm_init();
 
         omap_vram_set_sdram_vram(NOTLE_FB_RAM_SIZE, 0);
         omapfb_set_platform_data(&notle_fb_pdata);
