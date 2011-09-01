@@ -157,7 +157,7 @@
                                  OMAP_ION_HEAP_SECURE_INPUT_SIZE)
 
 #ifndef CONFIG_NOTLE_I2C4_SENSORS
-#define CONFIG_NOTLE_I2C4_SENSORS 0
+#define CONFIG_NOTLE_I2C4_SENSORS 1
 #endif
 
 static struct gpio_led gpio_leds[] = {
