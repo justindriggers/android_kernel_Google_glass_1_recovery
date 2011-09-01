@@ -149,7 +149,10 @@
 #define PHYS_ADDR_SMC_SIZE      (SZ_1M * 3)
 #define PHYS_ADDR_SMC_MEM       (0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
 #define OMAP_ION_HEAP_SECURE_INPUT_SIZE (SZ_1M * 30)
-#define PHYS_ADDR_DUCATI_SIZE   (SZ_1M * 105)
+// NOTE(abliss): This should move to 105 to keep up with panda, but that seems
+// to break currently.  When it does, we probably also need to change the value
+// in omap4_ion.c.
+#define PHYS_ADDR_DUCATI_SIZE   (SZ_1M * 103)
 #define PHYS_ADDR_DUCATI_MEM    (PHYS_ADDR_SMC_MEM - PHYS_ADDR_DUCATI_SIZE - \
                                  OMAP_ION_HEAP_SECURE_INPUT_SIZE)
 
