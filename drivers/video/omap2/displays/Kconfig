@@ -36,6 +36,13 @@ config PANEL_TAAL
         help
           Taal DSI command mode panel from TPO.
 
+config PANEL_TC358762
+	tristate "Toshiba TC358762 DSI-to-DPI Bridge"
+	depends on OMAP2_DSS_DSI
+	help
+	  Support for Toshiba TC358762 De-serializer chip
+	  to convert DSI output by OMAP2 DSS to DPI.
+
 config PANEL_TPO_TD043MTEA1
         tristate "TPO TD043MTEA1 LCD Panel"
         depends on OMAP2_DSS_DPI && SPI

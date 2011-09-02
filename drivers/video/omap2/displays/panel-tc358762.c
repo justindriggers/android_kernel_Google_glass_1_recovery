@@ -1,0 +1,697 @@
+/*
+ * Toshiba TC358762 DSI-to-DPI Bridge chip driver
+ *
+ * Copyright (C) Texas Instruments
+ * Author: Tomi Valkeinen <tomi.valkeinen@ti.com>
+ *
+ * Based on original version from Jerry Alexander <x0135174@ti.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 as published by
+ * the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#define DEBUG
+
+#include <linux/module.h>
+#include <linux/delay.h>
+#include <linux/err.h>
+#include <linux/jiffies.h>
+#include <linux/sched.h>
+#include <linux/backlight.h>
+#include <linux/fb.h>
+#include <linux/interrupt.h>
+#include <linux/gpio.h>
+#include <linux/slab.h>
+#include <linux/mutex.h>
+
+#include <video/omapdss.h>
+#include <video/omap-panel-tc358762.h>
+#include <video/mipi_display.h>
+
+#include "panel-tc358762.h"
+
+struct tc762_i2c {
+        struct i2c_client *client;
+};
+static struct tc762_i2c *i2c_data;
+
+static const struct omap_video_timings tc358762_timings = {
+        .x_res                = 1024,
+        .y_res                = 768,
+        .pixel_clock          = 65183,
+        .hfp                  = 282,
+        .hsw                  = 6,
+        .hbp                  = 32,
+        .vfp                  = 15,
+        .vsw                  = 8,
+        .vbp                  = 15,
+};
+
+#if 0
+// These values seem to all be hardcoded in this version of the DSI driver.
+static const struct omap_dss_dsi_videomode_data videomode_data = {
+        .hsa                  = 1,
+        .hfp                  = 211,
+        .hbp                  = 26,
+        .vsa                  = 8,
+        .vfp                  = 15,
+        .vbp                  = 15,
+
+        .vp_de_pol            = true,
+        .vp_vsync_pol         = true,
+        .vp_hsync_pol         = false,
+        .vp_hsync_end         = false,
+        .vp_vsync_end         = false,
+
+        .blanking_mode        = 0,
+        .hsa_blanking_mode    = 1,
+        .hfp_blanking_mode    = 1,
+        .hbp_blanking_mode    = 1,
+
+        .ddr_clk_always_on    = true,
+        .window_sync          = 4,
+};
+#endif
+
+/* device private data structure */
+struct tc358762_data {
+        struct mutex lock;
+
+        struct omap_dss_device *dssdev;
+
+//        int config_channel;
+        int pixel_channel;
+};
+
+static struct tc358762_board_data *get_board_data(struct omap_dss_device *dssdev)
+{
+        return (struct tc358762_board_data *)dssdev->data;
+}
+
+static int tc358762_read_register(struct omap_dss_device *dssdev, u16 reg, u32 *val)
+{
+        struct tc358762_data *tc_drv_data = dev_get_drvdata(&dssdev->dev);
+        u8 buf[4];
+        u32 value;
+        int r = 0;
+        return 0;
+
+//        r = dsi_vc_generic_read(dssdev, tc_drv_data->config_channel, reg, buf, 4);
+        if (r < 0) {
+                dev_err(&dssdev->dev, "gen read failed\n");
+                return r;
+        }
+
+        value = buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24);
+
+        dev_dbg(&dssdev->dev, "reg read %x, val = %08x\n", reg, value);
+
+        if (val)
+          *val = value;
+
+        return 0;
+}
+
+static int tc358762_write_register(struct omap_dss_device *dssdev, u16 reg,
+                u32 value)
+{
+        u8 buf[6];
+        int r;
+
+#if 0
+        struct tc358762_data *tc_drv_data = dev_get_drvdata(&dssdev->dev);
+        buf[0] = (reg >> 0) & 0xff;
+        buf[1] = (reg >> 8) & 0xff;
+        buf[2] = (value >> 0) & 0xff;
+        buf[3] = (value >> 8) & 0xff;
+        buf[4] = (value >> 16) & 0xff;
+        buf[5] = (value >> 24) & 0xff;
+
+        /* Send commands via DSI */
+        r = dsi_vc_generic_write_nosync(dssdev, tc_drv_data->config_channel, buf, 6);
+        if (r)
+                dev_err(&dssdev->dev, "reg write reg(%x) val(%x) failed: %d\n",
+                               reg, value, r);
+        return r;
+#else
+        /* Send commands via I2C */
+        struct i2c_msg msgs[1];
+
+        if (!i2c_data || !i2c_data->client) {
+                printk(KERN_ERR "No I2C data set for tc'762\n");
+                return -1;
+        }
+
+        buf[0] = (reg >> 8) & 0xff;
+        buf[1] = (reg >> 0) & 0xff;
+        buf[2] = (value >> 0) & 0xff;
+        buf[3] = (value >> 8) & 0xff;
+        buf[4] = (value >> 16) & 0xff;
+        buf[5] = (value >> 24) & 0xff;
+
+        msgs[0].addr = 0xb;
+        msgs[0].flags = 0;
+        msgs[0].len = sizeof(buf);
+        msgs[0].buf = buf;
+
+        r = i2c_transfer(i2c_data->client->adapter, msgs, 1);
+        if (r < 0) {
+          printk(KERN_ERR "tc'762 write failed");
+          return r;
+        }
+#endif
+
+        return 0;
+}
+
+/****************************
+********* DEBUG *************
+****************************/
+static void dump_regs(struct omap_dss_device *dssdev)
+{
+#define DUMPREG(r) do {                               \
+  u32 val = 0;                                        \
+  int ret = tc358762_read_register(dssdev, r, &val);       \
+  if (ret) {                                          \
+    printk("%-35s : Read Error (%i)\n", #r, ret);     \
+  } else {                                            \
+    printk("%-35s : %08x\n", #r, val);                \
+  }                                                   \
+} while (0);                                          \
+
+        printk(KERN_ALERT "TC'762 Toshiba Registers\n");
+
+        printk(KERN_ALERT "DSI D-PHY Layer Registers\n");
+        DUMPREG(D0W_DPHYCONTTX);
+        DUMPREG(CLW_DPHYCONTRX);
+        DUMPREG(D0W_DPHYCONTRX);
+        DUMPREG(D1W_DPHYCONTRX);
+        DUMPREG(COM_DPHYCONTRX);
+        DUMPREG(MON_DPHYRX);
+        DUMPREG(CLW_CNTRL);
+        DUMPREG(D0W_CNTRL);
+        DUMPREG(D1W_CNTRL);
+        DUMPREG(DFTMODE_CNTRL);
+
+        printk(KERN_ALERT "DSI PPI Layer Registers\n");
+        DUMPREG(PPI_STARTPPI);
+        DUMPREG(PPI_BUSYPPI);
+        DUMPREG(PPI_LINEINITCNT);
+        DUMPREG(PPI_LPTXTIMECNT);
+        DUMPREG(PPI_CLS_ATMR);
+        DUMPREG(PPI_D0S_ATMR);
+        DUMPREG(PPI_D1S_ATMR);
+        DUMPREG(PPI_D0S_CLRSIPOCOUNT);
+        DUMPREG(PPI_D1S_CLRSIPOCOUNT);
+        DUMPREG(CLS_PRE);
+        DUMPREG(D0S_PRE);
+        DUMPREG(D1S_PRE);
+        DUMPREG(CLS_PREP);
+        DUMPREG(D0S_PREP);
+        DUMPREG(D1S_PREP);
+        DUMPREG(CLS_ZERO);
+        DUMPREG(D0S_ZERO);
+        DUMPREG(D1S_ZERO);
+        DUMPREG(PPI_CLRFLG);
+        DUMPREG(PPI_CLRSIPO);
+        DUMPREG(PPI_HSTimeout);
+        DUMPREG(PPI_HSTimeoutEnable);
+
+        printk(KERN_ALERT "DSI Protocol Layer Registers\n");
+        DUMPREG(DSI_STARTDSI);
+        DUMPREG(DSI_BUSYDSI);
+        DUMPREG(DSI_LANEENABLE);
+        DUMPREG(DSI_LANESTATUS0);
+        DUMPREG(DSI_LANESTATUS1);
+        DUMPREG(DSI_INTSTATUS);
+        DUMPREG(DSI_INTMASK);
+        DUMPREG(DSI_INTCLR);
+        DUMPREG(DSI_LPTXTO);
+        DUMPREG(DSI_MODE);
+        DUMPREG(DSI_PAYLOAD0);
+        DUMPREG(DSI_PAYLOAD1);
+        DUMPREG(DSI_BTASTAT);
+        DUMPREG(DSI_BTACLR);
+
+        printk(KERN_ALERT "DSI General Registers\n");
+        DUMPREG(DSIERRCNT);
+        DUMPREG(DSISIGMOD);
+
+        printk(KERN_ALERT "DSI Application Layer Registers\n");
+        DUMPREG(APLCTRL);
+        DUMPREG(APLSTAT);
+        DUMPREG(APLERR);
+        DUMPREG(PWRMOD);
+        DUMPREG(RDPKTLN);
+        DUMPREG(PXLFMT);
+        DUMPREG(MEMWRCMD);
+
+        printk(KERN_ALERT "LCDC/DPI Host Registers\n");
+        DUMPREG(LCDCTRL_PORT);
+        DUMPREG(HSR_HBPR);
+        DUMPREG(HDISPR_HFPR);
+        DUMPREG(VSR_VBPR);
+        DUMPREG(VDISPR_VFPR);
+        DUMPREG(VFUEN);
+
+        printk(KERN_ALERT "System Controller Registers\n");
+        DUMPREG(SYSSTAT);
+        DUMPREG(SYSCTRL);
+        DUMPREG(SYSPLL1);
+        DUMPREG(SYSPLL2);
+        DUMPREG(SYSPLL3);
+        DUMPREG(SYSPMCTRL);
+
+        printk(KERN_ALERT "GPIO Registers\n");
+        DUMPREG(GPIOC);
+        DUMPREG(GPIOO);
+        DUMPREG(GPIOI);
+
+        printk(KERN_ALERT "Chip Revision Registers\n");
+        DUMPREG(IDREG);
+
+        printk(KERN_ALERT "Debug Registers\n");
+        DUMPREG(DEBUG00);
+
+        printk(KERN_ALERT "Command Queue\n");
+        DUMPREG(WCMDQUE);
+        DUMPREG(RCMDQUE);
+#undef DUMPREG
+}
+EXPORT_SYMBOL(dump_regs);
+
+
+
+static void tc358762_get_timings(struct omap_dss_device *dssdev,
+                struct omap_video_timings *timings)
+{
+        *timings = dssdev->panel.timings;
+}
+
+static void tc358762_set_timings(struct omap_dss_device *dssdev,
+                struct omap_video_timings *timings)
+{
+}
+
+static int tc358762_check_timings(struct omap_dss_device *dssdev,
+                struct omap_video_timings *timings)
+{
+        if (tc358762_timings.x_res != timings->x_res ||
+                        tc358762_timings.y_res != timings->y_res ||
+                        tc358762_timings.pixel_clock != timings->pixel_clock ||
+                        tc358762_timings.hsw != timings->hsw ||
+                        tc358762_timings.hfp != timings->hfp ||
+                        tc358762_timings.hbp != timings->hbp ||
+                        tc358762_timings.vsw != timings->vsw ||
+                        tc358762_timings.vfp != timings->vfp ||
+                        tc358762_timings.vbp != timings->vbp)
+                return -EINVAL;
+
+        return 0;
+}
+
+static void tc358762_get_resolution(struct omap_dss_device *dssdev,
+                u16 *xres, u16 *yres)
+{
+        *xres = tc358762_timings.x_res;
+        *yres = tc358762_timings.y_res;
+}
+
+static int tc358762_hw_reset(struct omap_dss_device *dssdev)
+{
+        struct tc358762_board_data *board_data = get_board_data(dssdev);
+
+        printk(KERN_INFO "Performing HW RESET on tc'762\n");
+
+        if (board_data == NULL || board_data->reset_gpio == -1)
+                return 0;
+
+        if (board_data->pre_reset) board_data->pre_reset();
+
+        msleep(1000);
+
+        /* reset the panel */
+        gpio_set_value(board_data->reset_gpio, 0);
+        /* assert reset */
+        udelay(100);
+        gpio_set_value(board_data->reset_gpio, 1);
+
+        /* wait after releasing reset */
+        msleep(100);
+
+        if (board_data->post_reset) board_data->post_reset();
+
+        return 0;
+}
+
+static int tc358762_probe(struct omap_dss_device *dssdev)
+{
+        struct tc358762_data *tc_drv_data;
+        int r = 0;
+
+        dev_dbg(&dssdev->dev, "tc358762_probe\n");
+
+        dssdev->panel.config = OMAP_DSS_LCD_TFT;
+        dssdev->panel.timings = tc358762_timings;
+//        dssdev->panel.dsi_vm_data = videomode_data;
+        dssdev->ctrl.pixel_size = 24;
+
+        dssdev->panel.acbi = 0;
+        dssdev->panel.acb = 40;
+
+        tc_drv_data = kzalloc(sizeof(*tc_drv_data), GFP_KERNEL);
+        if (!tc_drv_data) {
+                r = -ENOMEM;
+                goto err0;
+        }
+
+        tc_drv_data->dssdev = dssdev;
+
+        mutex_init(&tc_drv_data->lock);
+
+        dev_set_drvdata(&dssdev->dev, tc_drv_data);
+
+#ifndef NO_PIXELS
+        r = omap_dsi_request_vc(dssdev, &tc_drv_data->pixel_channel);
+        if (r) {
+                dev_err(&dssdev->dev, "failed to get virtual channel for"
+                        " transmitting pixel data\n");
+                goto err0;
+        }
+
+        r = omap_dsi_set_vc_id(dssdev, tc_drv_data->pixel_channel, 0);
+        if (r) {
+                dev_err(&dssdev->dev, "failed to set VC_ID for pixel data"
+                        " virtual channel\n");
+                goto err1;
+        }
+#endif
+
+#if 0
+        r = omap_dsi_request_vc(dssdev, &tc_drv_data->config_channel);
+        if (r) {
+                dev_err(&dssdev->dev, "failed to get virtual channel for"
+                        "configuring bridge\n");
+                goto err1;
+        }
+
+        r = omap_dsi_set_vc_id(dssdev, tc_drv_data->config_channel, 0);
+        if (r) {
+                dev_err(&dssdev->dev, "failed to set VC_ID for config"
+                        " channel \n");
+                goto err2;
+        }
+#endif
+
+        dev_dbg(&dssdev->dev, "tc358762_probe done\n");
+
+        return 0;
+err2:
+//        omap_dsi_release_vc(dssdev, tc_drv_data->config_channel);
+err1:
+#ifndef NO_PIXELS
+        omap_dsi_release_vc(dssdev, tc_drv_data->pixel_channel);
+#endif
+err0:
+        kfree(tc_drv_data);
+
+        return r;
+}
+
+static void tc358762_remove(struct omap_dss_device *dssdev)
+{
+        struct tc358762_data *tc_drv_data = dev_get_drvdata(&dssdev->dev);
+
+#ifndef NO_PIXELS
+        omap_dsi_release_vc(dssdev, tc_drv_data->pixel_channel);
+#endif
+//        omap_dsi_release_vc(dssdev, tc_drv_data->config_channel);
+
+        kfree(tc_drv_data);
+}
+
+static struct
+{
+        u16 reg;
+        u32 data;
+} tc358762_init_seq[] = {
+        { SYSPMCTRL,                 0x00000000 },
+        /* Delay for 5 ms to allow the '762 to come out of sleep mode. */
+        { DELAY_INIT_SEQ,                     5 },
+        { DSI_LANEENABLE,            0x00000003 },
+        { PPI_D0S_CLRSIPOCOUNT,      0x00000005 },
+        { PPI_D0S_ATMR,              0x00000000 },
+        { PPI_STARTPPI,              0x00000001 },
+        { DSI_STARTDSI,              0x00000001 },
+        { LCDCTRL_PORT,              LCDCTRL_DPI_ENABLE |
+                                     LCDCTRL_RGB666_PACKED },
+        { VFUEN,                     0x00000001 },
+};
+
+static int tc358762_write_init_config(struct omap_dss_device *dssdev)
+{
+        int i;
+        int r;
+
+        for (i = 0; i < ARRAY_SIZE(tc358762_init_seq); ++i) {
+                u16 reg = tc358762_init_seq[i].reg;
+                u32 data = tc358762_init_seq[i].data;
+
+                if (reg == DELAY_INIT_SEQ) {
+                  msleep(data);
+                  continue;
+                }
+
+                r = tc358762_write_register(dssdev, reg, data);
+                if (r) {
+                        dev_err(&dssdev->dev, "failed to write initial config"
+                                " (write) %d\n", i);
+                        return r;
+                }
+        }
+
+        return 0;
+}
+
+static int tc358762_power_on(struct omap_dss_device *dssdev)
+{
+        struct tc358762_data *tc_drv_data = dev_get_drvdata(&dssdev->dev);
+        int r;
+
+        dev_dbg(&dssdev->dev, "power_on\n");
+
+        if (dssdev->platform_enable)
+                dssdev->platform_enable(dssdev);
+
+        r = omapdss_dsi_display_enable(dssdev);
+        if (r) {
+                dev_err(&dssdev->dev, "failed to enable DSI\n");
+                goto err_disp_enable;
+        }
+
+#ifndef NO_PIXELS
+        omapdss_dsi_vc_enable_hs(dssdev, tc_drv_data->pixel_channel, true);
+        dsi_videomode_panel_preinit(dssdev, tc_drv_data->pixel_channel);
+#endif
+        /* reset tc358762 bridge */
+        tc358762_hw_reset(dssdev);
+
+        /* configure D2L chip DSI-RX configuration registers */
+        r = tc358762_write_init_config(dssdev);
+        if (r)
+                goto err_write_init;
+
+/*
+        tc358762_read_register(dssdev, SYSSTAT, NULL);
+
+        dsi_vc_send_bta_sync(dssdev, tc_drv_data->config_channel);
+        dsi_vc_send_bta_sync(dssdev, tc_drv_data->config_channel);
+        dsi_vc_send_bta_sync(dssdev, tc_drv_data->config_channel);
+
+        tc358762_read_register(dssdev, SYSSTAT, NULL);
+*/
+//        omapdss_dsi_vc_enable_hs(dssdev, tc_drv_data->config_channel, true);
+
+#ifndef NO_PIXELS
+        dsi_video_mode_enable(dssdev, MIPI_DSI_PACKED_PIXEL_STREAM_24,
+                tc_drv_data->pixel_channel);
+#endif
+
+        dev_dbg(&dssdev->dev, "power_on done\n");
+
+        return r;
+
+err_write_init:
+        omapdss_dsi_display_disable(dssdev, false, false);
+err_disp_enable:
+        if (dssdev->platform_disable)
+                dssdev->platform_disable(dssdev);
+
+        return r;
+}
+
+static void tc358762_power_off(struct omap_dss_device *dssdev)
+{
+        struct tc358762_data *tc_drv_data = dev_get_drvdata(&dssdev->dev);
+
+#ifndef NO_PIXELS
+        dsi_video_mode_disable(dssdev, tc_drv_data->pixel_channel);
+#endif
+
+        omapdss_dsi_display_disable(dssdev, false, false);
+
+        if (dssdev->platform_disable)
+                dssdev->platform_disable(dssdev);
+}
+
+static void tc358762_disable(struct omap_dss_device *dssdev)
+{
+        struct tc358762_data *tc_drv_data = dev_get_drvdata(&dssdev->dev);
+
+        dev_dbg(&dssdev->dev, "disable\n");
+
+        if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE)
+        {
+                mutex_lock(&tc_drv_data->lock);
+                dsi_bus_lock(dssdev);
+
+                tc358762_power_off(dssdev);
+
+                dsi_bus_unlock(dssdev);
+                mutex_unlock(&tc_drv_data->lock);
+        }
+
+        dssdev->state = OMAP_DSS_DISPLAY_DISABLED;
+}
+
+static int tc358762_enable(struct omap_dss_device *dssdev)
+{
+        struct tc358762_data *tc_drv_data = dev_get_drvdata(&dssdev->dev);
+        int r = 0;
+
+        dev_dbg(&dssdev->dev, "enable\n");
+
+        if (dssdev->state != OMAP_DSS_DISPLAY_DISABLED)
+                return -EINVAL;
+
+        mutex_lock(&tc_drv_data->lock);
+        dsi_bus_lock(dssdev);
+
+        r = tc358762_power_on(dssdev);
+
+        dsi_bus_unlock(dssdev);
+
+        if (r) {
+                dev_dbg(&dssdev->dev, "enable failed\n");
+                dssdev->state = OMAP_DSS_DISPLAY_DISABLED;
+        } else {
+                dssdev->state = OMAP_DSS_DISPLAY_ACTIVE;
+        }
+
+        mutex_unlock(&tc_drv_data->lock);
+
+        return r;
+}
+
+static struct omap_dss_driver tc358762_driver = {
+        .probe                 = tc358762_probe,
+        .remove                = tc358762_remove,
+
+        .enable                = tc358762_enable,
+        .disable               = tc358762_disable,
+
+        .get_resolution        = tc358762_get_resolution,
+        .get_recommended_bpp   = omapdss_default_get_recommended_bpp,
+
+        .get_timings           = tc358762_get_timings,
+        .set_timings           = tc358762_set_timings,
+        .check_timings         = tc358762_check_timings,
+
+        .driver                = {
+                .name                  = "tc358762",
+                .owner                 = THIS_MODULE,
+        },
+};
+
+static int __devinit i2c_probe(struct i2c_client *client,
+                               const struct i2c_device_id *id)
+{
+        i2c_data = kzalloc(sizeof(struct tc762_i2c), GFP_KERNEL);
+        if (i2c_data == NULL)
+                return -ENOMEM;
+
+        /* store i2c_client pointer on private data structure */
+        i2c_data->client = client;
+
+        /* store private data structure pointer on i2c_client structure */
+        i2c_set_clientdata(client, i2c_data);
+
+        /* init mutex */
+//        mutex_init(&sd1->xfer_lock);
+
+        return 0;
+}
+
+/* driver remove function */
+static int __devexit i2c_remove(struct i2c_client *client)
+{
+        struct tc762_i2c *drv_data = i2c_get_clientdata(client);
+
+        /* remove client data */
+        i2c_set_clientdata(client, NULL);
+
+        /* free private data memory */
+        i2c_data = NULL;
+        kfree(drv_data);
+
+        return 0;
+}
+
+static const struct i2c_device_id i2c_idtable[] = {
+        {"tc358762-i2c", 0},
+        {},
+};
+
+static struct i2c_driver i2c_driver = {
+        .probe = i2c_probe,
+        .remove = __exit_p(i2c_remove),
+        .id_table = i2c_idtable,
+        .driver = {
+                   .name  = "tc358762-i2c",
+                   .owner = THIS_MODULE,
+        },
+};
+
+static int __init tc358762_init(void)
+{
+        int r = 0;
+        r = i2c_add_driver(&i2c_driver);
+        if (r < 0) {
+                printk(KERN_WARNING "tc'762 i2c driver registration failed\n");
+                return r;
+        }
+
+        omap_dss_register_driver(&tc358762_driver);;
+        return 0;
+}
+
+static void __exit tc358762_exit(void)
+{
+        omap_dss_unregister_driver(&tc358762_driver);
+        i2c_del_driver(&i2c_driver);
+}
+
+module_init(tc358762_init);
+module_exit(tc358762_exit);
+
+MODULE_DESCRIPTION("TC358762 DSI-2-DPI Bridge Driver");
+MODULE_LICENSE("GPL");
