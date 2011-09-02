@@ -16,7 +16,10 @@
  * published by the Free Software Foundation.
  */
 
+#define NOTLE_DSI
+
 #include "board-notle.h"
+
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
@@ -76,6 +79,7 @@
 
 #include <video/omapdss.h>
 #include <video/omap-panel-generic-dpi.h>
+#include <video/omap-panel-tc358762.h>
 
 #include "timer-gp.h"
 #include "omap4_ion.h"
@@ -236,6 +240,7 @@ static void __init notle_init_early(void)
 
 static int display_set_config(void);
 
+#ifndef NOTLE_DSI
 /* Display DVI */
 static int notle_enable_dvi(struct omap_dss_device *dssdev)
 {
@@ -265,6 +270,48 @@ struct omap_dss_device notle_dvi_device = {
 	.reset_gpio		= GPIO_LCD_RESET_N,
 	.channel		= OMAP_DSS_CHANNEL_LCD2,
 };
+#else
+
+static struct tc358762_board_data dsi_panel = {
+        .reset_gpio     = 53,
+};
+
+static struct omap_dss_device notle_dsi_device = {
+        .name                   = "lcd",
+        .driver_name            = "tc358762",
+        .type                   = OMAP_DISPLAY_TYPE_DSI,
+        .data                   = &dsi_panel,
+        .phy.dsi                = {
+                .type           = OMAP_DSS_DSI_TYPE_VIDEO_MODE,
+                .clk_lane       = 1,
+                .clk_pol        = 0,
+                .data1_lane     = 2,
+                .data1_pol      = 0,
+        },
+        .clocks                 = {
+                .dispc                  = {
+                        .channel                = {
+                                .lck_div                = 1,        /* Logic Clock = 172.8 MHz */
+                                .pck_div                = 2,        /* Pixel Clock = 34.56 MHz */
+                                .lcd_clk_src            = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
+                        },
+                        .dispc_fclk_src        = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
+                },
+                .dsi                    = {
+                        .regm                   = 184,  /* DSI_PLL_REGM */
+                        .regn                   = 10,   /* DSI_PLL_REGN */
+                        .regm_dispc             = 6,    /* PLL_CLK1 (M4) */
+                        .regm_dsi               = 9,    /* PLL_CLK2 (M5) */
+
+                        .lp_clk_div             = 5,    /* LP Clock = 8.64 MHz */
+                        .dsi_fclk_src           = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DSI,
+                },
+        },
+        .panel                  = {
+        },
+        .channel                = OMAP_DSS_CHANNEL_LCD,
+};
+#endif
 
 static struct i2c_client *himax_client;
 
@@ -349,6 +396,41 @@ static const struct i2c_device_id himax_id[] = {
 
 MODULE_DEVICE_TABLE(i2c, notle_id);
 
+#ifdef NOTLE_DSI
+int __init notle_dsi_init(void) {
+        u32 reg;
+        int r;
+
+        /* Enable 2 lanes in DSI1 module, disable pull down */
+        reg = omap4_ctrl_pad_readl(OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_DSIPHY);
+        reg &= ~OMAP4_DSI1_LANEENABLE_MASK;
+        reg |= 0x1f << OMAP4_DSI1_LANEENABLE_SHIFT;
+        reg &= ~OMAP4_DSI1_PIPD_MASK;
+        reg |= 0x1f << OMAP4_DSI1_PIPD_SHIFT;
+        omap4_ctrl_pad_writel(reg, OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_DSIPHY);
+
+
+        /* Enable DISPLAY_ENB gpio */
+        r = gpio_request_one(GPIO_EN_10V, GPIOF_OUT_INIT_HIGH, "enable_10V");
+        if (r) {
+                pr_err("Failed to get enable_10V gpio\n");
+                goto err;
+        }
+
+        r = gpio_request_one(dsi_panel.reset_gpio, GPIOF_OUT_INIT_HIGH, "display_reset");
+        if (r) {
+                pr_err("Failed to get display_reset gpio\n");
+                goto err1;
+        }
+
+        return 0;
+err1:
+        gpio_free(GPIO_EN_10V);
+err:
+        return r;
+}
+
+#else
 static struct i2c_driver notle_driver = {
         .driver = {
                 .name = "notle_himax",
@@ -382,15 +464,24 @@ int __init notle_dvi_init(void)
 err:
 	return r;
 }
+#endif
 
 static struct omap_dss_device *notle_dss_devices[] = {
-	&notle_dvi_device,
+#ifndef NOTLE_DSI
+        &notle_dvi_device,
+#else
+        &notle_dsi_device,
+#endif
 };
 
 static struct omap_dss_board_info notle_dss_data = {
 	.num_devices	= ARRAY_SIZE(notle_dss_devices),
 	.devices	= notle_dss_devices,
+#ifdef NOTLE_DSI
+        .default_device = &notle_dsi_device,
+#else
 	.default_device	= &notle_dvi_device,
+#endif
 };
 
 static struct omap_musb_board_data musb_board_data = {
@@ -549,11 +640,21 @@ static struct regulator_init_data notle_vaux2 = {
         .consumer_supplies = notle_cam2_supply,
 };
 
+static struct regulator_consumer_supply notle_vcxio_supply[] = {
+	REGULATOR_SUPPLY("vdds_dsi", "omapdss_dss"),
+	REGULATOR_SUPPLY("vdds_dsi", "omapdss_dsi1"),
+};
+
 // Voltage for display LED?
 static struct regulator_init_data notle_vaux3 = {
 	.constraints = {
+#ifdef NOTLE_DSI
+		.min_uV			= 1200000,
+		.max_uV			= 1200000,
+#else
 		.min_uV			= 2800000,
 		.max_uV			= 2800000,
+#endif
 		.apply_uV		= true,
 		.valid_modes_mask	= REGULATOR_MODE_NORMAL
 					| REGULATOR_MODE_STANDBY,
@@ -561,6 +662,8 @@ static struct regulator_init_data notle_vaux3 = {
 					| REGULATOR_CHANGE_STATUS,
 		.always_on		= true,
 	},
+	.num_consumer_supplies	= ARRAY_SIZE(notle_vcxio_supply),
+	.consumer_supplies	= notle_vcxio_supply,
 };
 
 /* Voltage for SD card */
@@ -888,12 +991,12 @@ static struct rmi_i2c_platformdata __initdata synaptics_platformdata = {
 static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
         {
-                I2C_BOARD_INFO("rmi4_ts", 0x20),
-                .platform_data = &synaptics_platformdata,
+       //         I2C_BOARD_INFO("rmi4_ts", 0x20),
+         //       .platform_data = &synaptics_platformdata,
         },
 #endif
         {
-                I2C_BOARD_INFO("stmpe32m28", 0x48),
+        //        I2C_BOARD_INFO("stmpe32m28", 0x48),
         },
 };
 
@@ -1014,6 +1117,9 @@ static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
 #endif
 #ifdef CONFIG_INPUT_L3G4200D
 	{
+		I2C_BOARD_INFO("tc358762-i2c", 0x0b),
+	},
+	{
 		I2C_BOARD_INFO("l3g4200d_gyr", 0x68),
 		.flags = I2C_CLIENT_WAKE,
 	//	.irq = OMAP44XX_IRQ_SYS_1N,
@@ -1059,8 +1165,8 @@ static int __init notle_i2c_init(void)
 	omap_register_i2c_bus(2, 400, NULL, 0);
 	omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
 			ARRAY_SIZE(notle_i2c_3_boardinfo));
-	omap_register_i2c_bus(4, 400, notle_i2c_4_boardinfo,
-			ARRAY_SIZE(notle_i2c_4_boardinfo));
+	omap_register_i2c_bus(4, 400, notle_i2c_4_boardinfo, 1);
+//			ARRAY_SIZE(notle_i2c_4_boardinfo));
 	return 0;
 }
 
@@ -1421,6 +1527,14 @@ static void __init notle_init(void)
                 pr_err("Touchpad initialization failed: %d\n", err);
         }
 
+#ifdef NOTLE_DSI
+        err = notle_dsi_init();
+        if (!err) {
+                omap_display_init(&notle_dss_data);
+        } else {
+                pr_err("DSI initialization failed: %d\n", err);
+        }
+#else
         err = notle_dvi_init();
         if (!err) {
                 omap_display_init(&notle_dss_data);
@@ -1428,6 +1542,7 @@ static void __init notle_init(void)
                 pr_err("DVI initialization failed: %d\n", err);
         }
 
+#endif
         omap_enable_smartreflex_on_init();
 }
 
