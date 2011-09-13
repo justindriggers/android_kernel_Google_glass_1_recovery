@@ -592,7 +592,9 @@ static struct regulator_init_data notle_vana = {
 	.constraints = {
 		.min_uV			= 2100000,
 		.max_uV			= 2100000,
-		.apply_uV		= true,
+                /* Fixed voltage regulators do not have a set_voltage() hook
+                 * therefore cannot have the voltage set. */
+		.apply_uV		= false,
 		.valid_modes_mask	= REGULATOR_MODE_NORMAL
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
@@ -605,7 +607,9 @@ static struct regulator_init_data notle_vcxio = {
 	.constraints = {
 		.min_uV			= 1800000,
 		.max_uV			= 1800000,
-		.apply_uV		= true,
+                /* Fixed voltage regulators do not have a set_voltage() hook
+                 * therefore cannot have the voltage set. */
+		.apply_uV		= false,
 		.valid_modes_mask	= REGULATOR_MODE_NORMAL
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
@@ -618,7 +622,9 @@ static struct regulator_init_data notle_vdac = {
 	.constraints = {
 		.min_uV			= 1800000,
 		.max_uV			= 1800000,
-		.apply_uV		= true,
+                /* Fixed voltage regulators do not have a set_voltage() hook
+                 * therefore cannot have the voltage set. */
+		.apply_uV		= false,
 		.valid_modes_mask	= REGULATOR_MODE_NORMAL
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
