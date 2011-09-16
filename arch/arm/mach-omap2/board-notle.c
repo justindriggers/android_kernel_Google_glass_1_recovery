@@ -52,7 +52,9 @@
 #include <linux/regulator/fixed.h>
 #include <linux/regulator/machine.h>
 
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
 #include "../../../drivers/input/touchscreen/rmi_i2c.h"
+#endif
 
 #include <mach/hardware.h>
 #include <mach/omap4-common.h>
@@ -880,6 +882,7 @@ static struct i2c_board_info __initdata notle_i2c_boardinfo[] = {
 	},
 };
 
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
 static struct rmi_sensor_suspend_custom_ops synaptics_custom_ops = {
         .rmi_sensor_custom_suspend = 0,
         .rmi_sensor_custom_resume = 0,
@@ -901,12 +904,15 @@ static struct rmi_i2c_platformdata __initdata synaptics_platformdata = {
 //       .irq = 0x00,
         .sensordata = &synaptics_sensordata,
 };
+#endif
 
 static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
         {
                 I2C_BOARD_INFO("rmi4_ts", 0x20),
                 .platform_data = &synaptics_platformdata,
         },
+#endif
         {
                 I2C_BOARD_INFO("stmpe32m28", 0x48),
         },
