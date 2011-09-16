@@ -16,6 +16,7 @@
  * published by the Free Software Foundation.
  */
 
+#include "board-notle.h"
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
@@ -80,27 +81,18 @@
 #include "omap4_ion.h"
 #include "hsmmc.h"
 #include "control.h"
-#include "mux.h"
 #include "pm.h"
 #include "common-board-devices.h"
 #include "prm-regbits-44xx.h"
 #include "prm44xx.h"
 #include "cm1_44xx.h"
 
-#define MUX(x) OMAP4_CTRL_MODULE_PAD_##x##_OFFSET
-
 #define GPIO_GREEN_LED                  7
 #define MUX_GREEN_LED                   MUX(FREF_CLK4_REQ)
 #define GPIO_YELLOW_LED                 8
 #define MUX_YELLOW_LED                  MUX(FREF_CLK4_OUT)
-#define GPIO_WL_RST_N                   43
-#define MUX_WL_RST_N                    MUX(GPMC_A19)
-#define GPIO_BT_RST_N                   151
-#define MUX_BT_RST_N                    MUX(MCSPI4_CLK)
 #define GPIO_AUDIO_HEADSET              44
 #define MUX_AUDIO_HEADSET               MUX(GPMC_A20)
-#define GPIO_WL_BT_REG_ON               48
-#define MUX_WL_BT_REG_ON                MUX(GPMC_A24)
 #define GPIO_GPS_ON_OFF                 49
 #define MUX_GPS_ON_OFF                  MUX(GPMC_A25)
 #define GPIO_GPS_RESET_N                52
@@ -115,32 +107,9 @@
 #define MUX_CAMERA                      MUX(USBB1_ULPITLL_DAT6) // ABE_DMIC_DIN2
 #define GPIO_TOUCHPAD_INT_N             32
 #define MUX_TOUCHPAD_INT_N              MUX(GPMC_AD8)
-
-// Notle v2 wifi
-#define GPIO_BCM_WLAN_HOST_WAKE         170
-#define MUX_BCM_WLAN_HOST_WAKE          MUX(USBB2_HSIC_STROBE)
-#define GPIO_BCM_BT_HOST_WAKE           154
-#define MUX_BCM_BT_HOST_WAKE            MUX(MCSPI4_CS0)
-#define GPIO_BCM_WLAN_WAKE              97
-#define MUX_BCM_WLAN_WAKE               MUX(USBB1_HSIC_STROBE)
-#define GPIO_BCM_BT_WAKE                36
-#define MUX_BCM_BT_WAKE                 MUX(GPMC_AD12)
-
-#if 0
-// Notle v1 wifi
-#define GPIO_BCM_WLAN_HOST_WAKE         86
-#define MUX_BCM_WLAN_HOST_WAKE          MUX(USBB1_ULPITLL_DIR)
-#define GPIO_BCM_BT_HOST_WAKE           87
-#define MUX_BCM_BT_HOST_WAKE            MUX(USBB1_ULPITLL_NXT)
-#define GPIO_BCM_WLAN_WAKE              88
-#define MUX_BCM_WLAN_WAKE               MUX(USBB1_ULPITLL_DAT0)
-#define GPIO_BCM_BT_WAKE                91
-#define MUX_BCM_BT_WAKE                 MUX(USBB1_ULPITLL_DAT3)
-#endif
-
 #define MUX_BACKLIGHT                   MUX(USBB1_ULPITLL_DAT5)
 #define PWM_TIMER                       9
-
+// Wifi defines go in board-notle.h.
 /*
 #define GPIO_HUB_POWER		                1
 #define ELTON_DVI_TFP410_POWER_DOWN_GPIO        53
@@ -163,8 +132,10 @@
                                  OMAP_ION_HEAP_SECURE_INPUT_SIZE)
 
 #ifndef CONFIG_NOTLE_I2C4_SENSORS
-#define CONFIG_NOTLE_I2C4_SENSORS 1
+#define CONFIG_NOTLE_I2C4_SENSORS 0
 #endif
+
+extern int tuna_wlan_init(void);
 
 static struct gpio_led gpio_leds[] = {
 	{
@@ -190,28 +161,6 @@ static struct platform_device leds_gpio = {
 	.dev	= {
 		.platform_data	= &gpio_led_info,
 	},
-};
-
-/* The broadcom 4329 driver makes calls like this to get the irq for the device:
-
-        wifi_irqres = platform_get_resource_byname(pdev, IORESOURCE_IRQ, "bcm4329_wlan_irq");
-...
-        *irq_flags_ptr = wifi_irqres->flags & IRQF_TRIGGER_MASK;
-        return (int)wifi_irqres->start;
-
-   Does this name go in the .name field of the resource or the platform_device?
-*/
-
-static struct resource notle_wifi_resources = {
-        .name = "bcm4329_wlan_irq",
-        .flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL | IORESOURCE_IRQ_SHAREABLE,
-};
-
-static struct platform_device notle_wifi_device = {
-	.name	= "bcm4329_wlan",
-	.id	= -1,
-        .num_resources = 1,
-        .resource = &notle_wifi_resources,
 };
 
 static void __init notle_init_early(void)
@@ -427,9 +376,9 @@ static struct omap2_hsmmc_info mmc[] = {
                     // TODO(abliss): | MMC_CAP_POWER_OFF_CARD, 
                 .gpio_wp        = -EINVAL,
                 .gpio_cd        = -EINVAL,
-//                .ocr_mask       = MMC_VDD_165_195,
-                .ocr_mask       = MMC_VDD_29_30,
+                .ocr_mask	= MMC_VDD_165_195 | MMC_VDD_20_21,
                 .nonremovable   = true,
+		.mmc_data	= &tuna_wifi_data,
         },
 	{}	/* Terminator */
 };
@@ -487,7 +436,6 @@ static __init void omap4_twl6030_hsmmc_set_late_init(struct device *dev)
 static int __init omap4_twl6030_hsmmc_init(struct omap2_hsmmc_info *controllers)
 {
 	struct omap2_hsmmc_info *c;
-
 	omap2_hsmmc_init(controllers);
 	for (c = controllers; c->mmc; c++) {
 		omap4_twl6030_hsmmc_set_late_init(c->dev);
@@ -659,41 +607,6 @@ static struct regulator_init_data omap4_notle_clk32kg = {
         },
 };
 
-static struct regulator_consumer_supply notle_vmmc5_supply[] = {
-        {
-                .supply = "vmmc",
-                .dev_name = "omap_hsmmc.4",
-        },
-};
-
-/* Voltage for bcm4329 card */
-static struct regulator_init_data notle_vmmc5 = {
-        .constraints = {
-                .valid_ops_mask         = REGULATOR_CHANGE_STATUS,
-                .always_on              = true,
-        },
-        .num_consumer_supplies  = 1,
-        .consumer_supplies      = notle_vmmc5_supply,
-};
-
-static struct fixed_voltage_config notle_vwlan = {
-        .supply_name = "vbcm4329",
-        .microvolts = 3000000, /* 3 v */
-        .gpio = GPIO_WL_BT_REG_ON,
-        .startup_delay = 70000, /* 70 msec */
-        .enable_high = 1,
-        .enabled_at_boot = 0,
-        .init_data = &notle_vmmc5,
-};
-
-static struct platform_device notle_vwlan_device = {
-        .name = "reg-fixed-voltage",
-        .id = -1,
-        .dev = {
-                .platform_data = &notle_vwlan,
-        },
-};
-
 static struct omap_uart_port_info omap_serial_port_info[] = {
         { /* ttyO0 unused */
                 .use_dma        = 0,
@@ -818,7 +731,6 @@ static struct platform_device gpio_keys = {
 
 static struct platform_device *notle_devices[] __initdata = {
         &leds_gpio,
-        &notle_vwlan_device,
         &gpio_keys,
 };
 
@@ -920,6 +832,7 @@ static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
         },
 };
 
+#if CONFIG_NOTLE_I2C4_SENSORS
 /*
  * i2c-4 
  */
@@ -1021,6 +934,8 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 };
 #endif
 
+#endif //CONFIG_NOTLE_I2C4_SENSORS
+
 static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
     // NOTE(abliss): currently, this i2c bus can support EITHER the sensors OR
     // the camera
@@ -1064,7 +979,7 @@ static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
 	{
 		I2C_BOARD_INFO("notle_himax", 0x48),
 	},
-#endif
+#endif //CONFIG_NOTLE_I2C4_SENSORS
 	{
 		I2C_BOARD_INFO("ov9726", 0x10),
 		.flags = I2C_CLIENT_WAKE,
@@ -1207,106 +1122,16 @@ static int __init notle_touchpad_init(void) {
         return r;
 }
 
-static int __init notle_wifi_init(void) {
-        int r;
-
-        if (!machine_is_notle())
-                return 0;
-
-        pr_info("%s()+", __func__);
-
-        /* Configuration of requested GPIO lines */
-
-        r = gpio_request_one(GPIO_BCM_WLAN_HOST_WAKE, GPIOF_IN, "wlan_host_wake");
-        if (r) {
-                pr_err("Failed to get wlan_host_wake gpio\n");
-                goto error;
-        }
-
-        r = gpio_request_one(GPIO_BCM_WLAN_WAKE, GPIOF_IN, "wlan_wake");
-        if (r) {
-                pr_err("Failed to get wlan_wake gpio\n");
-                goto error1;
-        }
-
-        r = gpio_request_one(GPIO_BCM_BT_HOST_WAKE, GPIOF_IN, "bt_host_wake");
-        if (r) {
-                pr_err("Failed to get bt_host_wake gpio\n");
-                goto error2;
-        }
-
-        r = gpio_request_one(GPIO_BCM_BT_WAKE, GPIOF_OUT_INIT_HIGH, "bt_wake");
-        gpio_set_value(GPIO_BCM_BT_WAKE, 1);
-        if (r) {
-                pr_err("Failed to get bt_wake gpio\n");
-                goto error3;
-        }
-
-        r = gpio_request_one(GPIO_WL_RST_N, GPIOF_OUT_INIT_LOW, "wlan_reset");
-        if (r) {
-                pr_err("Failed to get wlan_reset gpio\n");
-                goto error4;
-        }
-        gpio_set_value(GPIO_WL_RST_N, 1);
-
-        r = gpio_to_irq(GPIO_BCM_WLAN_HOST_WAKE);
-        if (r < 0) {
-                pr_err("Failed to allocate irq for gpio %i\n", GPIO_BCM_WLAN_HOST_WAKE);
-                goto error5;
-        }
-
-        notle_wifi_resources.start = notle_wifi_resources.end = r;
-
-        r = gpio_to_irq(GPIO_BCM_BT_HOST_WAKE);
-        if (r < 0) {
-                pr_err("Failed to allocate irq for gpio %i\n", GPIO_BCM_BT_HOST_WAKE);
-                goto error5;
-        }
-        r = platform_device_register(&notle_wifi_device);
-        if (r) {
-                pr_err("Failed to register platform device\n");
-                goto error5;
-        }
-
-        // TODO(abliss): wire up BT host wake IRQ for power management
-        r = platform_device_register(&bluetooth_rfkill_device);
-        if (r) {
-                pr_err("Failed to register BT rfkill device\n");
-                goto error5;
-        }
-
-
-        pr_info("%s()-: 0", __func__);
-        return 0;
-
-error5:
-        gpio_free(GPIO_WL_RST_N);
-error4:
-        gpio_free(GPIO_BCM_BT_WAKE);
-error3:
-        gpio_free(GPIO_BCM_BT_HOST_WAKE);
-error2:
-        gpio_free(GPIO_BCM_WLAN_WAKE);
-error1:
-        gpio_free(GPIO_BCM_WLAN_HOST_WAKE);
-error:
-        pr_info("%s()-: %i", __func__, r);
-        return r;
-}
 
 #ifndef BACKLIGHT_HACK
 static void notle_dmtimer_pwm_enable(void) {
-        unsigned int core_base_addr = 0xfc100000;
-
         // pwm timer output:
-        __raw_writew(OMAP_MUX_MODE1, core_base_addr + MUX_BACKLIGHT);
+        __raw_writew(OMAP_MUX_MODE1, CORE_BASE_ADDR + MUX_BACKLIGHT);
 }
 
 static void notle_dmtimer_pwm_disable(void) {
-        unsigned int core_base_addr = 0xfc100000;
-
         // pwm timer output:
-        __raw_writew(OMAP_MUX_MODE7 | OMAP_PULL_ENA, core_base_addr + MUX_BACKLIGHT);
+        __raw_writew(OMAP_MUX_MODE7 | OMAP_PULL_ENA, CORE_BASE_ADDR + MUX_BACKLIGHT);
 }
 
 static struct dmtimer_pwm_ops notle_dmtimer_pwm_ops = {
@@ -1346,7 +1171,6 @@ late_initcall(notle_pwm_backlight_init);
 static int notle_backlight_hack(void) {
         // *** Adjust this value to set the backlight brightness. ***
         float brightness = .01;
-        unsigned int core_base_addr = 0xfc100000;
         struct omap_dm_timer* notle_pwm_timer;
         const unsigned int sys_clock_hz = 19200000;
         // This wants to be high enough we don't see flicker,
@@ -1375,7 +1199,7 @@ static int notle_backlight_hack(void) {
         omap_dm_timer_set_load_start(notle_pwm_timer, 1, max - denom);
         omap_dm_timer_set_match(notle_pwm_timer, 1, max - num);
 
-        __raw_writew(OMAP_MUX_MODE1, core_base_addr + MUX_BACKLIGHT);
+        __raw_writew(OMAP_MUX_MODE1, CORE_BASE_ADDR + MUX_BACKLIGHT);
         pr_info("Set brightness to %i via BACKLIGHT_HACK\n", (int)(brightness * 100));
         return 0;
 }
@@ -1387,7 +1211,6 @@ static void __init my_mux_init(void) {
         // Move this code to board_mux constants when we're convinced it works:
 
         // Example code for writing mux values, bypassing omap4_mux_init code:
-        unsigned int core_base_addr = 0xfc100000;
         unsigned int wkup_base_addr = 0xfc31e000;
 
         // gpio's in the first bank of 32 use the wkup base:
@@ -1398,28 +1221,23 @@ static void __init my_mux_init(void) {
         // Others use the core base:
         // output gpio's:
         __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_AUDIO_HEADSET);
-        __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_GPS_ON_OFF);
-        __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_GPS_RESET_N);
-        __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_LCD_RESET_N);
-        __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_AUDIO_POWERON);
-        __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_EN_10V);
-        __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_BCM_BT_WAKE);
-        __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_BT_RST_N);
+        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_GPS_ON_OFF);
+        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_GPS_RESET_N);
+        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_LCD_RESET_N);
+        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_AUDIO_POWERON);
+        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_EN_10V);
+        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_BT_RST_N);
 
         // Set display backlight to be pulled low when we start.
-        __raw_writew(OMAP_MUX_MODE7 | OMAP_PULL_ENA, core_base_addr + MUX_BACKLIGHT);
+        __raw_writew(OMAP_MUX_MODE7 | OMAP_PULL_ENA, CORE_BASE_ADDR + MUX_BACKLIGHT);
 
         // input gpio's:
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN,
+                CORE_BASE_ADDR + MUX_BCM_WLAN_HOST_WAKE);
         __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-                core_base_addr + MUX_BCM_WLAN_HOST_WAKE);
+                CORE_BASE_ADDR + MUX_CAMERA);
         __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-                core_base_addr + MUX_BCM_BT_HOST_WAKE);
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-                core_base_addr + MUX_BCM_WLAN_WAKE);
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-                core_base_addr + MUX_CAMERA);
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-                core_base_addr + MUX_TOUCHPAD_INT_N);
+                CORE_BASE_ADDR + MUX_TOUCHPAD_INT_N);
 
 }
 
@@ -1507,9 +1325,14 @@ static void __init notle_init(void)
                 pr_err("GPS initialization failed: %d\n", err);
         }
 
-        err = notle_wifi_init();
+        err = notle_wlan_init();
         if (err) {
                 pr_err("Wifi initialization failed: %d\n", err);
+        }
+
+        err = platform_device_register(&bluetooth_rfkill_device);
+        if (err) {
+                pr_err("Failed to register BT rfkill device\n");
         }
 
         err = notle_touchpad_init();

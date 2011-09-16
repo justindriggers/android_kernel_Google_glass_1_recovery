@@ -12,17 +12,16 @@ CONFIG_OMAP2_DSS=y
 CONFIG_FB_OMAP2=y
 CONFIG_PANEL_GENERIC_DPI=y
 
-# Wireless
-# NOTE(abliss): I know this looks weird! But it is the only way that works
-# with the nexus-custom bcm4329 driver drop from broadcom.
-CONFIG_BCM4329=n
-# CONFIG_BCM4329_FW_PATH="/system/etc/firmware/fw_bcm4329.bin"
-# CONFIG_BCM4329_NVRAM_PATH="/system/etc/firmware/bcm4329.cal"
-CONFIG_BCMDHD=m
+CONFIG_BCMDHD=y
 CONFIG_BCMDHD_FW_PATH="/system/etc/firmware/fw_bcm4329.bin"
-CONFIG_BCMDHD_NVRAM_PATH="/system/etc/firmware/bcm4329.cal"
-CONFIG_BCMDHD_WEXT=y
+#CONFIG_BCMDHD_NVRAM_PATH="/system/etc/firmware/bcm4329.cal"
+#CONFIG_BCMDHD_WEXT=y
 CONFIG_WIFI_CONTROL_FUNC=y
+CONFIG_NL80211_TESTMODE=y
+CONFIG_CFG80211_DEFAULT_PS=y
+# Choose one of these two, and communicate your choice to the wpa_supplicant
+#CONFIG_WIRELESS_EXT=y
+CONFIG_CFG80211=y
 
 # InvenSense IMU
 # Add these to add InvenSense and subtrace ST sensors

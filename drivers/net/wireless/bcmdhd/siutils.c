@@ -710,7 +710,10 @@ void *
 si_setcore(si_t *sih, uint coreid, uint coreunit)
 {
 	uint idx;
-
+        if (sih == NULL) {
+		SI_ERROR(("%s: sih is NULL!\n", __FUNCTION__));
+                return (NULL);
+        }
 	idx = si_findcoreidx(sih, coreid, coreunit);
 	if (!GOODIDX(idx))
 		return (NULL);
