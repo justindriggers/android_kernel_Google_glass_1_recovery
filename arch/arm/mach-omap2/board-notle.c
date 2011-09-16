@@ -41,7 +41,9 @@
 #ifdef CONFIG_INPUT_LSM303DLHC
 #include <linux/i2c/lsm303dlhc.h>
 #endif
+#ifdef CONFIG_INPUT_LTR506ALS
 #include <linux/i2c/ltr506als.h>
+#endif
 
 #ifdef CONFIG_MPU_SENSORS_MPU6050B1
 #include <linux/mpu.h>
@@ -996,6 +998,7 @@ static struct lsm303dlhc_mag_platform_data notle_lsm303dlh_mag_data = {
 };
 #endif
 
+#ifdef CONFIG_INPUT_LTR506ALS
 static struct ltr506_platform_data notle_ltr506als_data = {
         .pfd_levels = { 0,0,0,0,0 },
         .pfd_als_lowthresh = 0,
@@ -1008,6 +1011,7 @@ static struct ltr506_platform_data notle_ltr506als_data = {
         /* Interrupt */
         .pfd_gpio_int_no = 0,
 };
+#endif
 
 static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
     // NOTE(abliss): currently, this i2c bus can support EITHER the sensors OR
@@ -1042,11 +1046,13 @@ static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
 		.platform_data = &notle_lsm303dlh_mag_data,
 	},
 #endif
+#ifdef CONFIG_INPUT_LTR506ALS
 	{
 		I2C_BOARD_INFO("ltr506als", 0x1d),
 		.flags = I2C_CLIENT_WAKE,
 		.platform_data = &notle_ltr506als_data,
 	},
+#endif
 	{
 		I2C_BOARD_INFO("notle_himax", 0x48),
 	},
