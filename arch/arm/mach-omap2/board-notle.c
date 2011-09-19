@@ -1123,8 +1123,8 @@ static int omap_audio_init(void) {
 		goto error;
 	}
 
-	/ * TODO(petermalkin): remove this line for the product compile. */
-	/ * Do not expose GPIO to /sys filesystem for security purposes. */
+	/* TODO(petermalkin): remove this line for the product compile. */
+	/* Do not expose GPIO to /sys filesystem for security purposes. */
 	r = gpio_export(GPIO_AUDIO_HEADSET, false);
 	if (r) {
 		pr_err("Unable to export audio_headset gpio_44\n");
