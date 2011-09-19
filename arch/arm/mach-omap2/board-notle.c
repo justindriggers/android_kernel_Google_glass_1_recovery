@@ -97,6 +97,8 @@
 #define MUX_WL_RST_N                    MUX(GPMC_A19)
 #define GPIO_BT_RST_N                   151
 #define MUX_BT_RST_N                    MUX(MCSPI4_CLK)
+#define GPIO_AUDIO_HEADSET              44
+#define MUX_AUDIO_HEADSET               MUX(GPMC_A20)
 #define GPIO_WL_BT_REG_ON               48
 #define MUX_WL_BT_REG_ON                MUX(GPMC_A24)
 #define GPIO_GPS_ON_OFF                 49
@@ -1105,22 +1107,40 @@ static int omap_audio_init(void) {
 
 	/* Configuration of requested GPIO lines */
 
-        r = gpio_request_one(GPIO_AUDIO_POWERON, GPIOF_OUT_INIT_HIGH,
-                "audio_poweron");
-        if (r) {
-                pr_err("Failed to get audio_poweron gpio\n");
-                goto error;
-        }
+	r = gpio_request_one(GPIO_AUDIO_POWERON, GPIOF_OUT_INIT_HIGH,
+		"audio_poweron");
+	if (r) {
+		pr_err("Failed to get audio_poweron gpio_44\n");
+		goto error;
+	}
+
+	/* GPIO that enables a MUX outside omap to use usb headset */
+
+	r = gpio_request_one(GPIO_AUDIO_HEADSET, GPIOF_OUT_INIT_LOW,
+		"gpio_audio_headset");
+	if (r) {
+		pr_err("Failed to get audio_headset gpio_44\n");
+		goto error;
+	}
+
+	/ * TODO(petermalkin): remove this line for the product compile. */
+	/ * Do not expose GPIO to /sys filesystem for security purposes. */
+	r = gpio_export(GPIO_AUDIO_HEADSET, false);
+	if (r) {
+		pr_err("Unable to export audio_headset gpio_44\n");
+	}
 
 	/* Set ABE DPLL to a correct value so that Notle clock */
 	/* does not mess up Phoenix audio */
 	omap4430_cm_clksel_dpll_abe_register = OMAP4430_CM1_BASE + OMAP4430_CM1_CKGEN_INST + OMAP4_CM_CLKSEL_DPLL_ABE_OFFSET;
 	omap_writel(0x82ee00, omap4430_cm_clksel_dpll_abe_register);
 
-        return 0;
+	omap_mux_init_signal("sys_nirq2.sys_nirq2", \
+		OMAP_PIN_INPUT_PULLUP);
+	return 0;
 
 error:
-        return r;
+	return r;
 }
 
 static int notle_gps_init(void) {
@@ -1377,6 +1397,7 @@ static void __init my_mux_init(void) {
 
         // Others use the core base:
         // output gpio's:
+        __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_AUDIO_HEADSET);
         __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_GPS_ON_OFF);
         __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_GPS_RESET_N);
         __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_LCD_RESET_N);
