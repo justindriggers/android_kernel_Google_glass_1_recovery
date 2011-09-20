@@ -1220,7 +1220,7 @@ static void __init my_mux_init(void) {
 
         // Others use the core base:
         // output gpio's:
-        __raw_writew(OMAP_MUX_MODE3, core_base_addr + MUX_AUDIO_HEADSET);
+        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_AUDIO_HEADSET);
         __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_GPS_ON_OFF);
         __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_GPS_RESET_N);
         __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_LCD_RESET_N);
