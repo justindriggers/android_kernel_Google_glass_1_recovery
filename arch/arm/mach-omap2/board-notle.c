@@ -288,25 +288,47 @@ static struct omap_dss_device notle_dsi_device = {
                 .data1_lane     = 2,
                 .data1_pol      = 0,
         },
+#ifdef SLOW_CLOCK
         .clocks                 = {
                 .dispc                  = {
                         .channel                = {
                                 .lck_div                = 1,        /* Logic Clock = 172.8 MHz */
-                                .pck_div                = 2,        /* Pixel Clock = 34.56 MHz */
+                                .pck_div                = 45,       /* Pixel Clock = 34.56 MHz */
                                 .lcd_clk_src            = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
                         },
                         .dispc_fclk_src        = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
                 },
                 .dsi                    = {
-                        .regm                   = 184,  /* DSI_PLL_REGM */
-                        .regn                   = 10,   /* DSI_PLL_REGN */
-                        .regm_dispc             = 6,    /* PLL_CLK1 (M4) */
-                        .regm_dsi               = 9,    /* PLL_CLK2 (M5) */
+                        .regm                   = 8,  /* DSI_PLL_REGM */
+                        .regn                   = 8,  /* DSI_PLL_REGN */
+                        .regm_dispc             = 1,  /* PLL_CLK1 (M4) */
+                        .regm_dsi               = 1,  /* PLL_CLK2 (M5) */
 
-                        .lp_clk_div             = 5,    /* LP Clock = 8.64 MHz */
+                        .lp_clk_div             = 4,  /* LP Clock = 8.64 MHz */
                         .dsi_fclk_src           = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DSI,
                 },
         },
+#else
+        .clocks                 = {
+                .dispc                  = {
+                        .channel                = {
+                                .lck_div                = 1,        /* Logic Clock = 172.8 MHz */
+                                .pck_div                = 9,        /* Pixel Clock = 34.56 MHz */
+                                .lcd_clk_src            = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
+                        },
+                        .dispc_fclk_src        = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
+                },
+                .dsi                    = {
+                        .regm                   = 192,  /* DSI_PLL_REGM */
+                        .regn                   = 8,   /* DSI_PLL_REGN */
+                        .regm_dispc             = 5,    /* PLL_CLK1 (M4) */
+                        .regm_dsi               = 5,    /* PLL_CLK2 (M5) */
+
+                        .lp_clk_div             = 13,    /* LP Clock = 8.64 MHz */
+                        .dsi_fclk_src           = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DSI,
+                },
+        },
+#endif
         .panel                  = {
         },
         .channel                = OMAP_DSS_CHANNEL_LCD,
@@ -404,9 +426,12 @@ int __init notle_dsi_init(void) {
         /* Enable 2 lanes in DSI1 module, disable pull down */
         reg = omap4_ctrl_pad_readl(OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_DSIPHY);
         reg &= ~OMAP4_DSI1_LANEENABLE_MASK;
-        reg |= 0x1f << OMAP4_DSI1_LANEENABLE_SHIFT;
+        reg |= 0x3 << OMAP4_DSI1_LANEENABLE_SHIFT;
         reg &= ~OMAP4_DSI1_PIPD_MASK;
+        reg &= ~OMAP4_DSI2_PIPD_MASK;
         reg |= 0x1f << OMAP4_DSI1_PIPD_SHIFT;
+        reg |= 0x1f << OMAP4_DSI2_PIPD_SHIFT;
+        pr_info("Writing 0x%08x to CONTROL_DSIPHY\n", reg);
         omap4_ctrl_pad_writel(reg, OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_DSIPHY);
 
 
@@ -1105,6 +1130,9 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 #endif //CONFIG_NOTLE_I2C4_SENSORS
 
 static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
+	{
+		I2C_BOARD_INFO("tc358762-i2c", 0x0b),
+	},
     // NOTE(abliss): currently, this i2c bus can support EITHER the sensors OR
     // the camera
 #if CONFIG_NOTLE_I2C4_SENSORS
@@ -1116,9 +1144,6 @@ static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
         },
 #endif
 #ifdef CONFIG_INPUT_L3G4200D
-	{
-		I2C_BOARD_INFO("tc358762-i2c", 0x0b),
-	},
 	{
 		I2C_BOARD_INFO("l3g4200d_gyr", 0x68),
 		.flags = I2C_CLIENT_WAKE,
