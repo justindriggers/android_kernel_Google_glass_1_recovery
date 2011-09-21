@@ -379,11 +379,11 @@ module_param(dhd_idletime, int, 0);
 
 /* Use polling */
 // TODO(abliss): get interrupts to work
-uint dhd_poll = TRUE;
+uint dhd_poll = FALSE;
 module_param(dhd_poll, uint, 0);
 
 /* Use interrupts */
-uint dhd_intr = FALSE;
+uint dhd_intr = TRUE;
 module_param(dhd_intr, uint, 0);
 
 /* SDIO Drive Strength (in milliamps) */
