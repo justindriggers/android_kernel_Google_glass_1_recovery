@@ -44,43 +44,62 @@ struct tc762_i2c {
 };
 static struct tc762_i2c *i2c_data;
 
+/* DISPC timings */
+#ifdef SLOW_CLOCK
 static const struct omap_video_timings tc358762_timings = {
-        .x_res                = 1024,
-        .y_res                = 768,
-        .pixel_clock          = 65183,
-        .hfp                  = 282,
-        .hsw                  = 6,
-        .hbp                  = 32,
-        .vfp                  = 15,
-        .vsw                  = 8,
-        .vbp                  = 15,
+        .x_res                    = 480,
+        .y_res                    = 320,
+        .pixel_clock              = 25600,
+        .hfp                      = 26, //48,
+        .hsw                      = 5, //32,
+        .hbp                      = 1, //80,
+        .vfp                      = 3,
+        .vsw                      = 4,
+        .vbp                      = 7,
 };
-
-#if 0
-// These values seem to all be hardcoded in this version of the DSI driver.
-static const struct omap_dss_dsi_videomode_data videomode_data = {
-        .hsa                  = 1,
-        .hfp                  = 211,
-        .hbp                  = 26,
-        .vsa                  = 8,
-        .vfp                  = 15,
-        .vbp                  = 15,
-
-        .vp_de_pol            = true,
-        .vp_vsync_pol         = true,
-        .vp_hsync_pol         = false,
-        .vp_hsync_end         = false,
-        .vp_vsync_end         = false,
-
-        .blanking_mode        = 0,
-        .hsa_blanking_mode    = 1,
-        .hfp_blanking_mode    = 1,
-        .hbp_blanking_mode    = 1,
-
-        .ddr_clk_always_on    = true,
-        .window_sync          = 4,
+#else
+static const struct omap_video_timings tc358762_timings = {
+        .x_res                    = 480,
+        .y_res                    = 320,
+        .pixel_clock              = 25600,
+        .hfp                      = 26,
+        .hsw                      = 5,
+        .hbp                      = 1,
+        .vfp                      = 3,
+        .vsw                      = 4,
+        .vbp                      = 7,
 };
 #endif
+
+/* DSI timings */
+static const struct omap_dss_dsi_videomode_data videomode_data = {
+        .hfp                      = 106,
+        .hsa                      = 68,
+        .hbp                      = 172,
+        .vfp                      = 3,
+        .vsa                      = 4,
+        .vbp                      = 7,
+
+        .vp_de_pol                = 0,
+        .vp_vsync_pol             = 0,
+        .vp_hsync_pol             = 0,
+        .vp_hsync_start           = true,
+        .vp_hsync_end             = true,
+        .vp_vsync_start           = true,
+        .vp_vsync_end             = true,
+        .vp_eot_enable            = true,
+
+        .blanking_mode            = 0,
+        .hsa_blanking_mode        = 0,
+        .hfp_blanking_mode        = 0,
+        .hbp_blanking_mode        = 0,
+
+        .ddr_clk_always_on        = true,
+        .window_sync              = 4,
+
+        .enter_hs_mode_latency    = 4,
+        .exit_hs_mode_latency     = 3,
+};
 
 /* device private data structure */
 struct tc358762_data {
@@ -88,7 +107,6 @@ struct tc358762_data {
 
         struct omap_dss_device *dssdev;
 
-//        int config_channel;
         int pixel_channel;
 };
 
@@ -337,15 +355,13 @@ static int tc358762_hw_reset(struct omap_dss_device *dssdev)
 
         if (board_data->pre_reset) board_data->pre_reset();
 
-        msleep(1000);
+        msleep(200);
 
         /* reset the panel */
         gpio_set_value(board_data->reset_gpio, 0);
-        /* assert reset */
         udelay(100);
         gpio_set_value(board_data->reset_gpio, 1);
 
-        /* wait after releasing reset */
         msleep(100);
 
         if (board_data->post_reset) board_data->post_reset();
@@ -362,8 +378,8 @@ static int tc358762_probe(struct omap_dss_device *dssdev)
 
         dssdev->panel.config = OMAP_DSS_LCD_TFT;
         dssdev->panel.timings = tc358762_timings;
-//        dssdev->panel.dsi_vm_data = videomode_data;
-        dssdev->ctrl.pixel_size = 24;
+        dssdev->panel.dsi_vm_data = videomode_data;
+        dssdev->ctrl.pixel_size = 18;
 
         dssdev->panel.acbi = 0;
         dssdev->panel.acb = 40;
@@ -380,7 +396,6 @@ static int tc358762_probe(struct omap_dss_device *dssdev)
 
         dev_set_drvdata(&dssdev->dev, tc_drv_data);
 
-#ifndef NO_PIXELS
         r = omap_dsi_request_vc(dssdev, &tc_drv_data->pixel_channel);
         if (r) {
                 dev_err(&dssdev->dev, "failed to get virtual channel for"
@@ -394,7 +409,6 @@ static int tc358762_probe(struct omap_dss_device *dssdev)
                         " virtual channel\n");
                 goto err1;
         }
-#endif
 
 #if 0
         r = omap_dsi_request_vc(dssdev, &tc_drv_data->config_channel);
@@ -418,9 +432,7 @@ static int tc358762_probe(struct omap_dss_device *dssdev)
 err2:
 //        omap_dsi_release_vc(dssdev, tc_drv_data->config_channel);
 err1:
-#ifndef NO_PIXELS
         omap_dsi_release_vc(dssdev, tc_drv_data->pixel_channel);
-#endif
 err0:
         kfree(tc_drv_data);
 
@@ -431,9 +443,7 @@ static void tc358762_remove(struct omap_dss_device *dssdev)
 {
         struct tc358762_data *tc_drv_data = dev_get_drvdata(&dssdev->dev);
 
-#ifndef NO_PIXELS
         omap_dsi_release_vc(dssdev, tc_drv_data->pixel_channel);
-#endif
 //        omap_dsi_release_vc(dssdev, tc_drv_data->config_channel);
 
         kfree(tc_drv_data);
@@ -462,6 +472,8 @@ static int tc358762_write_init_config(struct omap_dss_device *dssdev)
         int i;
         int r;
 
+        pr_info("Writing init config to tc'762\n");
+
         for (i = 0; i < ARRAY_SIZE(tc358762_init_seq); ++i) {
                 u16 reg = tc358762_init_seq[i].reg;
                 u32 data = tc358762_init_seq[i].data;
@@ -475,7 +487,7 @@ static int tc358762_write_init_config(struct omap_dss_device *dssdev)
                 if (r) {
                         dev_err(&dssdev->dev, "failed to write initial config"
                                 " (write) %d\n", i);
-                        return r;
+//                        return r;
                 }
         }
 
@@ -498,40 +510,28 @@ static int tc358762_power_on(struct omap_dss_device *dssdev)
                 goto err_disp_enable;
         }
 
-#ifndef NO_PIXELS
         omapdss_dsi_vc_enable_hs(dssdev, tc_drv_data->pixel_channel, true);
         dsi_videomode_panel_preinit(dssdev, tc_drv_data->pixel_channel);
-#endif
+
         /* reset tc358762 bridge */
         tc358762_hw_reset(dssdev);
 
         /* configure D2L chip DSI-RX configuration registers */
         r = tc358762_write_init_config(dssdev);
         if (r)
-                goto err_write_init;
+               goto err_write_init;
 
-/*
-        tc358762_read_register(dssdev, SYSSTAT, NULL);
-
-        dsi_vc_send_bta_sync(dssdev, tc_drv_data->config_channel);
-        dsi_vc_send_bta_sync(dssdev, tc_drv_data->config_channel);
-        dsi_vc_send_bta_sync(dssdev, tc_drv_data->config_channel);
-
-        tc358762_read_register(dssdev, SYSSTAT, NULL);
-*/
-//        omapdss_dsi_vc_enable_hs(dssdev, tc_drv_data->config_channel, true);
-
-#ifndef NO_PIXELS
-        dsi_video_mode_enable(dssdev, MIPI_DSI_PACKED_PIXEL_STREAM_24,
+        dsi_video_mode_enable(dssdev, MIPI_DSI_PACKED_PIXEL_STREAM_18,
                 tc_drv_data->pixel_channel);
-#endif
 
         dev_dbg(&dssdev->dev, "power_on done\n");
+        pr_info("tc'762 power on done\n");
 
         return r;
 
 err_write_init:
         omapdss_dsi_display_disable(dssdev, false, false);
+
 err_disp_enable:
         if (dssdev->platform_disable)
                 dssdev->platform_disable(dssdev);
@@ -543,10 +543,7 @@ static void tc358762_power_off(struct omap_dss_device *dssdev)
 {
         struct tc358762_data *tc_drv_data = dev_get_drvdata(&dssdev->dev);
 
-#ifndef NO_PIXELS
         dsi_video_mode_disable(dssdev, tc_drv_data->pixel_channel);
-#endif
-
         omapdss_dsi_display_disable(dssdev, false, false);
 
         if (dssdev->platform_disable)
