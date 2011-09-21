@@ -1,5 +1,5 @@
 /*
- * Board support file for OMAP4430 based EltonBoard.
+ * Board support file for OMAP4430 based NotleBoard.
  *
  * Copyright (C) 2010 Texas Instruments
  *
@@ -99,8 +99,10 @@
 #define MUX_GPS_RESET_N                 MUX(GPMC_NCS2)
 #define GPIO_LCD_RESET_N                53
 #define MUX_LCD_RESET_N                 MUX(GPMC_NCS3)
-#define GPIO_AUDIO_POWERON              62
-#define MUX_AUDIO_POWERON               MUX(GPMC_WAIT1)
+#define GPIO_AUDIO_POWERON_DOG          62
+#define MUX_AUDIO_POWERON_DOG           MUX(GPMC_WAIT1)
+#define GPIO_AUDIO_POWERON_EMU          127
+#define MUX_AUDIO_POWERON_EMU           MUX(HDQ_SIO)
 #define GPIO_EN_10V                     84
 #define MUX_EN_10V                      MUX(USBB1_ULPITLL_CLK)
 #define GPIO_CAMERA                     94 // NB: in v3, this moves to 121 and
@@ -112,9 +114,9 @@
 // Wifi defines go in board-notle.h.
 /*
 #define GPIO_HUB_POWER		                1
-#define ELTON_DVI_TFP410_POWER_DOWN_GPIO        53
+#define NOTLE_DVI_TFP410_POWER_DOWN_GPIO        53
 #define GPIO_HUB_NRESET		                62
-#define ELTON_EN_10V                            84
+#define NOTLE_EN_10V                            84
 #define GPIO_BCM_BT_WAKE                        91
 #define GPIO_BCM_BT_HOST_WAKE                   87
 #define GPIO_BCM_WLAN_WAKE                      88
@@ -136,6 +138,69 @@
 #endif
 
 extern int tuna_wlan_init(void);
+
+// Notle board version detection gpios
+#define GPIO_ID2                        42
+#define MUX_ID2                         MUX(GPMC_A18)
+#define GPIO_ID1                        40
+#define MUX_ID1                         MUX(GPMC_A16)
+#define GPIO_ID0                        34
+#define MUX_ID0                         MUX(GPMC_AD10)
+
+typedef enum {
+        UNVERSIONED = 7,
+        V1_DOG      = 7,
+        V3_EMU      = 0,
+        V4_FLY      = 1,
+        V5_GNU      = 2
+} notle_version;
+
+/* Read board version from GPIO */
+static void notle_version_init(void)
+{
+        int r;
+
+        r = gpio_request_one(GPIO_ID2, GPIOF_IN, "id2");
+        if (r) {
+                pr_err("Failed to get gpio %d for id2 pin of board version\n", GPIO_ID2);
+        }
+
+        r = gpio_request_one(GPIO_ID1, GPIOF_IN, "id1");
+        if (r) {
+                pr_err("Failed to get gpio %d for id1 pin of board version\n", GPIO_ID1);
+        }
+
+        r = gpio_request_one(GPIO_ID0, GPIOF_IN, "id0");
+        if (r) {
+                pr_err("Failed to get gpio %d for id0 pin of board version\n", GPIO_ID0);
+        }
+}
+
+static notle_version notle_version_read(void)
+{
+        unsigned int bVer = UNVERSIONED;
+
+        bVer = gpio_get_value(GPIO_ID0) | (gpio_get_value(GPIO_ID1) << 1)
+                       | (gpio_get_value(GPIO_ID2) << 2);
+
+        return (notle_version) bVer;
+}
+
+static char * notle_version_str(notle_version board_ver)
+{
+        switch (board_ver)
+        {
+        case V1_DOG:
+                return "V1 DOG or earlier";
+        case V3_EMU:
+                return "V3 EMU";
+        case V4_FLY:
+                return "V4 FLY";
+        case V5_GNU:
+                return "V5 GNU";
+        }
+        return "UNVERSIONED";
+}
 
 static struct gpio_led gpio_leds[] = {
 	{
@@ -1017,45 +1082,49 @@ static struct omap_board_mux empty_board_mux[] __initdata = {
 #endif
 
 static int omap_audio_init(void) {
-	int r;
-	u32 omap4430_cm_clksel_dpll_abe_register;
+        int r;
+        u32 omap4430_cm_clksel_dpll_abe_register;
+        notle_version board_ver;
+        int audio_power_on_gpio = GPIO_AUDIO_POWERON_EMU;
 
-	/* Configuration of requested GPIO lines */
+        /* Set the correct audio power on GPIO based on board revision */
+        board_ver = notle_version_read();
 
-	r = gpio_request_one(GPIO_AUDIO_POWERON, GPIOF_OUT_INIT_HIGH,
-		"audio_poweron");
-	if (r) {
-		pr_err("Failed to get audio_poweron gpio_44\n");
-		goto error;
-	}
+        /* TODO(petermalkin) Whenever we get rid of i2c errors, remove the manual GPIO settings */
+        /*      and put back the setting for the twl6030 driver to set poweron pin for audio    */
+        /*      like this: audio_power_on_gpio = AUDIO_GPIO_62;                            */
+        if (board_ver == V1_DOG) {
+                __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_AUDIO_POWERON_DOG);
+                r = gpio_request_one(GPIO_AUDIO_POWERON_DOG, GPIOF_OUT_INIT_HIGH, "audio_poweron");
+        }
+        twl6040_codec.audpwron_gpio = audio_power_on_gpio;
 
-	/* GPIO that enables a MUX outside omap to use usb headset */
+        /* GPIO that enables a MUX outside omap to use usb headset */
+        r = gpio_request_one(GPIO_AUDIO_HEADSET, GPIOF_OUT_INIT_LOW,
+                "gpio_audio_headset");
+        if (r) {
+                pr_err("Failed to get audio_headset gpio_%d\n", GPIO_AUDIO_HEADSET);
+                goto error;
+        }
 
-	r = gpio_request_one(GPIO_AUDIO_HEADSET, GPIOF_OUT_INIT_LOW,
-		"gpio_audio_headset");
-	if (r) {
-		pr_err("Failed to get audio_headset gpio_44\n");
-		goto error;
-	}
+        /* TODO(petermalkin): remove this line for the product compile. */
+        /* Do not expose GPIO to /sys filesystem for security purposes. */
+        r = gpio_export(GPIO_AUDIO_HEADSET, false);
+        if (r) {
+                pr_err("Unable to export audio_headset gpio_%d\n", GPIO_AUDIO_HEADSET);
+        }
 
-	/* TODO(petermalkin): remove this line for the product compile. */
-	/* Do not expose GPIO to /sys filesystem for security purposes. */
-	r = gpio_export(GPIO_AUDIO_HEADSET, false);
-	if (r) {
-		pr_err("Unable to export audio_headset gpio_44\n");
-	}
+        /* Set ABE DPLL to a correct value so that Notle clock */
+        /* does not mess up Phoenix audio */
+        omap4430_cm_clksel_dpll_abe_register = OMAP4430_CM1_BASE + OMAP4430_CM1_CKGEN_INST + OMAP4_CM_CLKSEL_DPLL_ABE_OFFSET;
+        omap_writel(0x82ee00, omap4430_cm_clksel_dpll_abe_register);
 
-	/* Set ABE DPLL to a correct value so that Notle clock */
-	/* does not mess up Phoenix audio */
-	omap4430_cm_clksel_dpll_abe_register = OMAP4430_CM1_BASE + OMAP4430_CM1_CKGEN_INST + OMAP4_CM_CLKSEL_DPLL_ABE_OFFSET;
-	omap_writel(0x82ee00, omap4430_cm_clksel_dpll_abe_register);
-
-	omap_mux_init_signal("sys_nirq2.sys_nirq2", \
-		OMAP_PIN_INPUT_PULLUP);
-	return 0;
+        omap_mux_init_signal("sys_nirq2.sys_nirq2", \
+                OMAP_PIN_INPUT_PULLUP);
+        return 0;
 
 error:
-	return r;
+        return r;
 }
 
 static int notle_gps_init(void) {
@@ -1224,7 +1293,6 @@ static void __init my_mux_init(void) {
         __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_GPS_ON_OFF);
         __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_GPS_RESET_N);
         __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_LCD_RESET_N);
-        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_AUDIO_POWERON);
         __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_EN_10V);
         __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_BT_RST_N);
 
@@ -1238,6 +1306,14 @@ static void __init my_mux_init(void) {
                 CORE_BASE_ADDR + MUX_CAMERA);
         __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
                 CORE_BASE_ADDR + MUX_TOUCHPAD_INT_N);
+
+        // board version gpio's:
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
+                CORE_BASE_ADDR + MUX_ID2);
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
+                CORE_BASE_ADDR + MUX_ID1);
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
+                CORE_BASE_ADDR + MUX_ID0);
 
 }
 
@@ -1296,11 +1372,21 @@ static void __init notle_init(void)
 {
         int package = OMAP_PACKAGE_CBS;
         int err;
+        notle_version board_ver;
 
         if (omap_rev() == OMAP4430_REV_ES1_0)
                 package = OMAP_PACKAGE_CBL;
         omap4_mux_init(empty_board_mux, empty_board_mux, package);
         my_mux_init();
+
+        notle_version_init();
+        board_ver = notle_version_read();
+        printk("Notle board revision: %s", notle_version_str(board_ver));
+
+        err = omap_audio_init();
+        if (err) {
+                pr_err("Audio initialization failed: %d\n", err);
+        }
 
         register_reboot_notifier(&notle_reboot_notifier);
         notle_i2c_init();
@@ -1314,11 +1400,6 @@ static void __init notle_init(void)
 
         omap_vram_set_sdram_vram(NOTLE_FB_RAM_SIZE, 0);
         omapfb_set_platform_data(&notle_fb_pdata);
-
-        err = omap_audio_init();
-        if (err) {
-                pr_err("Audio initialization failed: %d\n", err);
-        }
 
         err = notle_gps_init();
         if (err) {
