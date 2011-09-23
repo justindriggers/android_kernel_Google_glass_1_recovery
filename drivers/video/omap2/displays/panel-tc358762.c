@@ -111,7 +111,7 @@ static int tc358762_write_register(struct omap_dss_device *dssdev, u16 reg,
         struct i2c_msg msgs[1];
 
         if (!i2c_data || !i2c_data->client) {
-                printk(KERN_ERR "No I2C data set for tc'762\n");
+                dev_err(&dssdev->dev, "No I2C data set for tc'762\n");
                 return -1;
         }
 
@@ -129,8 +129,8 @@ static int tc358762_write_register(struct omap_dss_device *dssdev, u16 reg,
 
         r = i2c_transfer(i2c_data->client->adapter, msgs, 1);
         if (r < 0) {
-          printk(KERN_ERR "tc'762 write failed");
-          return r;
+                dev_err(&dssdev->dev, "Failed i2c write to tc'762\n");
+                return r;
         }
 
         return 0;
@@ -294,10 +294,11 @@ static int tc358762_hw_reset(struct omap_dss_device *dssdev)
 {
         struct tc358762_board_data *board_data = get_board_data(dssdev);
 
-        printk(KERN_INFO "Performing HW RESET on tc'762\n");
-
-        if (board_data == NULL || board_data->reset_gpio == -1)
+        if (board_data == NULL || board_data->reset_gpio == -1) {
+                dev_err(&dssdev->dev, "Failed to reset tc'762, no reset_gpio "
+                        "configured.\n");
                 return 0;
+        }
 
         msleep(200);
 
@@ -407,8 +408,9 @@ static int tc358762_write_init_config(struct omap_dss_device *dssdev)
 
                 r = tc358762_write_register(dssdev, reg, data);
                 if (r) {
-                        dev_err(&dssdev->dev, "failed to write initial config"
-                                " (write) %d\n", i);
+                        dev_err(&dssdev->dev, "Failed to write initial config"
+                                " to tc'762 while writing 0x%08x to 0x%04x\n",
+                                data, reg);
                         return r;
                 }
         }
@@ -428,7 +430,7 @@ static int tc358762_power_on(struct omap_dss_device *dssdev)
 
         r = omapdss_dsi_display_enable(dssdev);
         if (r) {
-                dev_err(&dssdev->dev, "failed to enable DSI\n");
+                dev_err(&dssdev->dev, "Failed to enable DSI for tc'762\n");
                 goto err_disp_enable;
         }
 
@@ -439,19 +441,14 @@ static int tc358762_power_on(struct omap_dss_device *dssdev)
         tc358762_hw_reset(dssdev);
 
         /* configure D2L chip DSI-RX configuration registers */
-        r = tc358762_write_init_config(dssdev);
-        if (r)
-               goto err_write_init;
+        tc358762_write_init_config(dssdev);
 
         dsi_video_mode_enable(dssdev, MIPI_DSI_PACKED_PIXEL_STREAM_18,
                 tc_drv_data->pixel_channel);
 
         dev_dbg(&dssdev->dev, "power_on done\n");
 
-        return r;
-
-err_write_init:
-        omapdss_dsi_display_disable(dssdev, false, false);
+        return 0;
 
 err_disp_enable:
         if (dssdev->platform_disable)
@@ -463,6 +460,12 @@ err_disp_enable:
 static void tc358762_power_off(struct omap_dss_device *dssdev)
 {
         struct tc358762_data *tc_drv_data = dev_get_drvdata(&dssdev->dev);
+        struct tc358762_board_data *board_data = get_board_data(dssdev);
+
+        /* Hold the chip in reset while it's powered off. */
+        if (board_data && board_data->reset_gpio > -1) {
+                gpio_set_value(board_data->reset_gpio, 0);
+        }
 
         dsi_video_mode_disable(dssdev, tc_drv_data->pixel_channel);
         omapdss_dsi_display_disable(dssdev, false, false);
