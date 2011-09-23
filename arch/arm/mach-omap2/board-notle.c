@@ -288,32 +288,11 @@ static struct omap_dss_device notle_dsi_device = {
                 .data1_lane     = 2,
                 .data1_pol      = 0,
         },
-#ifdef SLOW_CLOCK
         .clocks                 = {
                 .dispc                  = {
                         .channel                = {
                                 .lck_div                = 1,        /* Logic Clock = 172.8 MHz */
-                                .pck_div                = 45,       /* Pixel Clock = 34.56 MHz */
-                                .lcd_clk_src            = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
-                        },
-                        .dispc_fclk_src        = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
-                },
-                .dsi                    = {
-                        .regm                   = 8,  /* DSI_PLL_REGM */
-                        .regn                   = 8,  /* DSI_PLL_REGN */
-                        .regm_dispc             = 1,  /* PLL_CLK1 (M4) */
-                        .regm_dsi               = 1,  /* PLL_CLK2 (M5) */
-
-                        .lp_clk_div             = 4,  /* LP Clock = 8.64 MHz */
-                        .dsi_fclk_src           = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DSI,
-                },
-        },
-#else
-        .clocks                 = {
-                .dispc                  = {
-                        .channel                = {
-                                .lck_div                = 1,        /* Logic Clock = 172.8 MHz */
-                                .pck_div                = 9,        /* Pixel Clock = 34.56 MHz */
+                                .pck_div                = 6,        /* Pixel Clock = 34.56 MHz */
                                 .lcd_clk_src            = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
                         },
                         .dispc_fclk_src        = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
@@ -321,14 +300,13 @@ static struct omap_dss_device notle_dsi_device = {
                 .dsi                    = {
                         .regm                   = 192,  /* DSI_PLL_REGM */
                         .regn                   = 8,   /* DSI_PLL_REGN */
-                        .regm_dispc             = 5,    /* PLL_CLK1 (M4) */
+                        .regm_dispc             = 6,    /* PLL_CLK1 (M4) */
                         .regm_dsi               = 5,    /* PLL_CLK2 (M5) */
 
                         .lp_clk_div             = 13,    /* LP Clock = 8.64 MHz */
                         .dsi_fclk_src           = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DSI,
                 },
         },
-#endif
         .panel                  = {
         },
         .channel                = OMAP_DSS_CHANNEL_LCD,
@@ -442,7 +420,7 @@ int __init notle_dsi_init(void) {
                 goto err;
         }
 
-        r = gpio_request_one(dsi_panel.reset_gpio, GPIOF_OUT_INIT_HIGH, "display_reset");
+        r = gpio_request_one(dsi_panel.reset_gpio, GPIOF_OUT_INIT_LOW, "display_reset");
         if (r) {
                 pr_err("Failed to get display_reset gpio\n");
                 goto err1;
