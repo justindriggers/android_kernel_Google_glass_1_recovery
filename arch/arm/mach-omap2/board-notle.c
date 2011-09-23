@@ -992,12 +992,12 @@ static struct rmi_i2c_platformdata __initdata synaptics_platformdata = {
 static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
         {
-       //         I2C_BOARD_INFO("rmi4_ts", 0x20),
-         //       .platform_data = &synaptics_platformdata,
+                I2C_BOARD_INFO("rmi4_ts", 0x20),
+                .platform_data = &synaptics_platformdata,
         },
 #endif
         {
-        //        I2C_BOARD_INFO("stmpe32m28", 0x48),
+                I2C_BOARD_INFO("stmpe32m28", 0x48),
         },
 };
 
@@ -1166,8 +1166,8 @@ static int __init notle_i2c_init(void)
 	omap_register_i2c_bus(2, 400, NULL, 0);
 	omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
 			ARRAY_SIZE(notle_i2c_3_boardinfo));
-	omap_register_i2c_bus(4, 400, notle_i2c_4_boardinfo, 1);
-//			ARRAY_SIZE(notle_i2c_4_boardinfo));
+	omap_register_i2c_bus(4, 400, notle_i2c_4_boardinfo,
+			ARRAY_SIZE(notle_i2c_4_boardinfo));
 	return 0;
 }
 
