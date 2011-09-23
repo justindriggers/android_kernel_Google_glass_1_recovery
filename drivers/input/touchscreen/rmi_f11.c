@@ -118,6 +118,19 @@
 #define HAS_Z_TUNING_MASK		0x01
 #define HAS_ALGORITHM_SECTION_MASK	0x02
 
+/* Control registers */
+#define REPORTING_MODE_OFFSET		0
+#define REPORTING_MODE_SHIFT		0
+#define REPORTING_MODE_MASK		0x03
+#define DELTA_X_THRESH_OFFSET		2
+#define DELTA_Y_THRESH_OFFSET		3
+
+/* Right now we only handle the first few control registers, and that
+ * only partially.
+ */
+#define CONTROL_REGISTER_SIZE		12
+
+
 /* Data registers. */
 #define X_HIGH_BITS_OFFSET		0
 #define Y_HIGH_BITS_OFFSET		1
@@ -233,6 +246,22 @@ static ssize_t rmi_fn_11_relreport_store(struct device *dev,
 					 struct device_attribute *attr,
 					 const char *buf, size_t count);
 
+static ssize_t rmi_fn_11_deltapos_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf);
+
+static ssize_t rmi_fn_11_deltapos_store(struct device *dev,
+					 struct device_attribute *attr,
+					 const char *buf, size_t count);
+
+static ssize_t rmi_fn_11_reportmode_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf);
+
+static ssize_t rmi_fn_11_reportmode_store(struct device *dev,
+					 struct device_attribute *attr,
+					 const char *buf, size_t count);
+
 static ssize_t rmi_fn_11_maxPos_show(struct device *dev,
 				     struct device_attribute *attr, char *buf);
 
@@ -247,6 +276,10 @@ static struct device_attribute attrs[] = {
 	       rmi_fn_11_swap_show, rmi_fn_11_swap_store),	/* RW attr */
 	__ATTR(relreport, 0666,
 	       rmi_fn_11_relreport_show, rmi_fn_11_relreport_store),	/* RW */
+	__ATTR(deltapos, 0666,
+	       rmi_fn_11_deltapos_show, rmi_fn_11_deltapos_store),	/* RW */
+	__ATTR(reportmode, 0666,
+	       rmi_fn_11_reportmode_show, rmi_fn_11_reportmode_store),	/* RW */
 	__ATTR(maxPos, 0444,
 	       rmi_fn_11_maxPos_show, rmi_store_error)	/* R0 attr */
 };
@@ -533,6 +566,7 @@ static void compute_finger_data_size(struct rmi_function_info *rmifninfo,
 	}
 
 	instance_data->finger_data_buffer_size = data_buffer_size;
+	pr_info("%s: Computed finger data buffer size of %d.\n", __func__, data_buffer_size);
 }
 
 /* Reading and parsing the F11 query registers is a big hairy wad.  There's a
@@ -566,7 +600,38 @@ static int read_query_registers(struct rmi_function_info *rmifninfo)
 	return 0;
 }
 
-enum finger_state get_finger_state(unsigned char finger,
+static int read_control_registers(struct rmi_function_info *rmifninfo)
+{
+	int retval = 0;
+	struct f11_instance_data *instance_data = rmifninfo->fndata;
+	unsigned char control_address =
+		rmifninfo->function_descriptor.control_base_addr;
+	u8 buf[CONTROL_REGISTER_SIZE];
+
+	retval = rmi_read_multiple(rmifninfo->sensor, control_address,
+		buf, sizeof(buf));
+	if (retval < 0)
+		return retval;
+
+	instance_data->control_registers->report_mode =
+		(buf[REPORTING_MODE_OFFSET] >> REPORTING_MODE_SHIFT)
+		& REPORTING_MODE_MASK;
+	instance_data->control_registers->delta_X_pos_threshold =
+		buf[DELTA_X_THRESH_OFFSET];
+	instance_data->control_registers->delta_Y_pos_threshold =
+		buf[DELTA_Y_THRESH_OFFSET];
+	instance_data->control_registers->sensor_max_X_pos =
+	    (((int)buf[7] & 0x0F) << 8) + buf[6];
+	instance_data->control_registers->sensor_max_Y_pos =
+	    (((int)buf[9] & 0x0F) << 8) + buf[8];
+	pr_debug("%s: Max X %d Max Y %d", __func__,
+		 instance_data->control_registers->sensor_max_X_pos,
+		 instance_data->control_registers->sensor_max_Y_pos);
+
+	return 0;
+}
+
+static enum finger_state get_finger_state(unsigned char finger,
 				     unsigned char *buffer)
 {
 	int finger_byte = finger / FINGER_STATES_PER_BYTE;
@@ -775,7 +840,25 @@ static void handle_absolute_reports(struct rmi_function_info *rmifninfo)
 	* any send a button up. */
 	if ((finger_down_count == 0) && instance_data->wasdown) {
 		instance_data->wasdown = false;
+
+#if defined(CONFIG_SYNA_MULTI_TOUCH)
+#if defined(ABS_MT_PRESSURE)
+		input_report_abs(function_device->input, ABS_MT_PRESSURE, 0);
+#endif
+		input_report_abs(function_device->input, ABS_MT_TOUCH_MAJOR, 0);
+		input_report_abs(function_device->input, ABS_MT_TOUCH_MINOR, 0);
+		input_report_abs(function_device->input, ABS_MT_POSITION_X,
+				instance_data->old_X);
+		input_report_abs(function_device->input, ABS_MT_POSITION_Y,
+				instance_data->old_Y);
+		input_report_abs(function_device->input, ABS_MT_TRACKING_ID, 1);
 		input_mt_sync(function_device->input);
+#endif
+
+		input_report_abs(function_device->input, ABS_X,
+				instance_data->old_X);
+		input_report_abs(function_device->input, ABS_Y,
+				instance_data->old_Y);
 		instance_data->old_X = instance_data->old_Y = 0;
 		pr_debug("%s: Finger up.", __func__);
 	}
@@ -983,7 +1066,6 @@ EXPORT_SYMBOL(FN_11_init);
 
 int FN_11_detect(struct rmi_function_info *rmifninfo)
 {
-	unsigned char control_buffer[12]; /* TODO: Compute size correctly. */
 	int retval = 0;
 	struct f11_instance_data *instance_data;
 
@@ -1042,20 +1124,12 @@ int FN_11_detect(struct rmi_function_info *rmifninfo)
 		retval = -ENOMEM;
 		goto error_exit;
 	}
-	retval = rmi_read_multiple(rmifninfo->sensor,
-			      rmifninfo->function_descriptor.control_base_addr,
-			      control_buffer, sizeof(control_buffer));
+	retval = read_control_registers(rmifninfo);
 	if (retval) {
 		pr_err("%s: Failed to read F11 control registers.", __func__);
 		goto error_exit;
 	}
-	instance_data->control_registers->sensor_max_X_pos =
-	    (((int)control_buffer[7] & 0x0F) << 8) + control_buffer[6];
-	instance_data->control_registers->sensor_max_Y_pos =
-	    (((int)control_buffer[9] & 0x0F) << 8) + control_buffer[8];
-	pr_debug("%s: Max X %d Max Y %d", __func__,
-		 instance_data->control_registers->sensor_max_X_pos,
-		 instance_data->control_registers->sensor_max_Y_pos);
+
 	return 0;
 
 error_exit:
@@ -1070,6 +1144,89 @@ error_exit:
 	return retval;
 }
 EXPORT_SYMBOL(FN_11_detect);
+
+static ssize_t rmi_fn_11_reportmode_show(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	struct rmi_function_device *fn = dev_get_drvdata(dev);
+	struct f11_instance_data *instance_data = fn->rfi->fndata;
+
+	return snprintf(buf, PAGE_SIZE, "%u\n",
+		instance_data->control_registers->report_mode);
+}
+
+static ssize_t rmi_fn_11_reportmode_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf,
+				size_t count)
+{
+	struct rmi_function_device *fn = dev_get_drvdata(dev);
+	struct f11_instance_data *instance_data = fn->rfi->fndata;
+	int retval;
+	u8 reg_buf[1];
+	enum reporting_mode new_mode;
+
+	if (sscanf(buf, "%u", &new_mode) != 1)
+		return -EINVAL;
+	if (new_mode < 0 || new_mode > 7)
+		return -EINVAL;
+	instance_data->control_registers->report_mode = new_mode;
+
+	retval = rmi_read_multiple(fn->rfi->sensor, fn->rfi->function_descriptor.control_base_addr + REPORTING_MODE_OFFSET, reg_buf, sizeof(reg_buf));
+	if (retval < 0)
+		return retval;
+
+	reg_buf[0] = (reg_buf[0] & ~(REPORTING_MODE_MASK << REPORTING_MODE_SHIFT)) |
+		(new_mode << REPORTING_MODE_SHIFT);
+
+	retval = rmi_write_multiple(fn->rfi->sensor, fn->rfi->function_descriptor.control_base_addr + REPORTING_MODE_OFFSET, reg_buf, sizeof(reg_buf));
+	if (retval < 0)
+		return retval;
+
+	return count;
+}
+
+static ssize_t rmi_fn_11_deltapos_show(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	struct rmi_function_device *fn = dev_get_drvdata(dev);
+	struct f11_instance_data *instance_data = fn->rfi->fndata;
+
+	return snprintf(buf, PAGE_SIZE, "%u %u\n",
+		instance_data->control_registers->delta_X_pos_threshold,
+		instance_data->control_registers->delta_Y_pos_threshold);
+}
+
+static ssize_t rmi_fn_11_deltapos_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf,
+				size_t count)
+{
+	struct rmi_function_device *fn = dev_get_drvdata(dev);
+	struct f11_instance_data *instance_data = fn->rfi->fndata;
+	int retval;
+	u8 reg_buf[2];
+	unsigned int new_delta_X;
+	unsigned int new_delta_Y;
+
+	if (sscanf(buf, "%u %u", &new_delta_X, &new_delta_Y) != 2)
+		return -EINVAL;
+	reg_buf[0] = instance_data->control_registers->delta_X_pos_threshold =
+			new_delta_X;
+	reg_buf[1] = instance_data->control_registers->delta_Y_pos_threshold =
+		new_delta_Y;
+
+	retval = rmi_write_multiple(fn->rfi->sensor,
+		fn->rfi->function_descriptor.control_base_addr +
+		DELTA_X_THRESH_OFFSET, reg_buf, sizeof(reg_buf));
+	if (retval < 0)
+		return retval;
+
+	return count;
+}
+
 
 static ssize_t rmi_fn_11_maxPos_show(struct device *dev,
 				struct device_attribute *attr,

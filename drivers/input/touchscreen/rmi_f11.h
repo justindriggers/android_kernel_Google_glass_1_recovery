@@ -84,17 +84,24 @@ struct rmi_F11_sensor_query {
 	unsigned char abs_data_size;
 };
 
+enum reporting_mode {
+	continuous = 0,
+	reduced = 1,
+	state_change = 2,
+	presence_change = 3
+};
+
 struct rmi_F11_control {
 	bool relative_ballistics;
 	bool relative_position_filter;
 	bool absolute_position_filter;
-	unsigned char reporting_mode;
+	enum reporting_mode report_mode;
 	bool manually_tracked_finger;
 	bool manually_tracked_finger_enable;
 	unsigned char motion_sensitivity;
 	unsigned char palm_detect_threshold;
-	unsigned char delta_X_pos_threshold;
-	unsigned char delta_Y_pos_threshold;
+	u8 delta_X_pos_threshold;
+	u8 delta_Y_pos_threshold;
 	unsigned char velocity;
 	unsigned char acceleration;
 	unsigned short sensor_max_X_pos;
