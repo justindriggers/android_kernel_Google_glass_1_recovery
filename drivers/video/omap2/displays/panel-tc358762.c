@@ -19,8 +19,6 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#define DEBUG
-
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/err.h>
@@ -45,31 +43,17 @@ struct tc762_i2c {
 static struct tc762_i2c *i2c_data;
 
 /* DISPC timings */
-#ifdef SLOW_CLOCK
 static const struct omap_video_timings tc358762_timings = {
-        .x_res                    = 480,
-        .y_res                    = 320,
+        .x_res                    = 320,
+        .y_res                    = 240,
         .pixel_clock              = 25600,
-        .hfp                      = 26, //48,
-        .hsw                      = 5, //32,
-        .hbp                      = 1, //80,
-        .vfp                      = 3,
-        .vsw                      = 4,
+        .hfp                      = 44,
+        .hsw                      = 4,
+        .hbp                      = 112,
+        .vfp                      = 2,
+        .vsw                      = 5,
         .vbp                      = 7,
 };
-#else
-static const struct omap_video_timings tc358762_timings = {
-        .x_res                    = 480,
-        .y_res                    = 320,
-        .pixel_clock              = 25600,
-        .hfp                      = 26,
-        .hsw                      = 5,
-        .hbp                      = 1,
-        .vfp                      = 3,
-        .vsw                      = 4,
-        .vbp                      = 7,
-};
-#endif
 
 /* DSI timings */
 static const struct omap_dss_dsi_videomode_data videomode_data = {
@@ -79,6 +63,8 @@ static const struct omap_dss_dsi_videomode_data videomode_data = {
         .vfp                      = 3,
         .vsa                      = 4,
         .vbp                      = 7,
+
+        .line_buffer              = 0,
 
         .vp_de_pol                = 0,
         .vp_vsync_pol             = 0,
@@ -115,52 +101,12 @@ static struct tc358762_board_data *get_board_data(struct omap_dss_device *dssdev
         return (struct tc358762_board_data *)dssdev->data;
 }
 
-static int tc358762_read_register(struct omap_dss_device *dssdev, u16 reg, u32 *val)
-{
-        struct tc358762_data *tc_drv_data = dev_get_drvdata(&dssdev->dev);
-        u8 buf[4];
-        u32 value;
-        int r = 0;
-        return 0;
-
-//        r = dsi_vc_generic_read(dssdev, tc_drv_data->config_channel, reg, buf, 4);
-        if (r < 0) {
-                dev_err(&dssdev->dev, "gen read failed\n");
-                return r;
-        }
-
-        value = buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24);
-
-        dev_dbg(&dssdev->dev, "reg read %x, val = %08x\n", reg, value);
-
-        if (val)
-          *val = value;
-
-        return 0;
-}
-
 static int tc358762_write_register(struct omap_dss_device *dssdev, u16 reg,
                 u32 value)
 {
         u8 buf[6];
         int r;
 
-#if 0
-        struct tc358762_data *tc_drv_data = dev_get_drvdata(&dssdev->dev);
-        buf[0] = (reg >> 0) & 0xff;
-        buf[1] = (reg >> 8) & 0xff;
-        buf[2] = (value >> 0) & 0xff;
-        buf[3] = (value >> 8) & 0xff;
-        buf[4] = (value >> 16) & 0xff;
-        buf[5] = (value >> 24) & 0xff;
-
-        /* Send commands via DSI */
-        r = dsi_vc_generic_write_nosync(dssdev, tc_drv_data->config_channel, buf, 6);
-        if (r)
-                dev_err(&dssdev->dev, "reg write reg(%x) val(%x) failed: %d\n",
-                               reg, value, r);
-        return r;
-#else
         /* Send commands via I2C */
         struct i2c_msg msgs[1];
 
@@ -186,11 +132,11 @@ static int tc358762_write_register(struct omap_dss_device *dssdev, u16 reg,
           printk(KERN_ERR "tc'762 write failed");
           return r;
         }
-#endif
 
         return 0;
 }
 
+#if 0
 /****************************
 ********* DEBUG *************
 ****************************/
@@ -306,7 +252,7 @@ static void dump_regs(struct omap_dss_device *dssdev)
 #undef DUMPREG
 }
 EXPORT_SYMBOL(dump_regs);
-
+#endif
 
 
 static void tc358762_get_timings(struct omap_dss_device *dssdev,
@@ -353,8 +299,6 @@ static int tc358762_hw_reset(struct omap_dss_device *dssdev)
         if (board_data == NULL || board_data->reset_gpio == -1)
                 return 0;
 
-        if (board_data->pre_reset) board_data->pre_reset();
-
         msleep(200);
 
         /* reset the panel */
@@ -362,9 +306,7 @@ static int tc358762_hw_reset(struct omap_dss_device *dssdev)
         udelay(100);
         gpio_set_value(board_data->reset_gpio, 1);
 
-        msleep(100);
-
-        if (board_data->post_reset) board_data->post_reset();
+        msleep(10);
 
         return 0;
 }
@@ -410,27 +352,10 @@ static int tc358762_probe(struct omap_dss_device *dssdev)
                 goto err1;
         }
 
-#if 0
-        r = omap_dsi_request_vc(dssdev, &tc_drv_data->config_channel);
-        if (r) {
-                dev_err(&dssdev->dev, "failed to get virtual channel for"
-                        "configuring bridge\n");
-                goto err1;
-        }
-
-        r = omap_dsi_set_vc_id(dssdev, tc_drv_data->config_channel, 0);
-        if (r) {
-                dev_err(&dssdev->dev, "failed to set VC_ID for config"
-                        " channel \n");
-                goto err2;
-        }
-#endif
-
         dev_dbg(&dssdev->dev, "tc358762_probe done\n");
 
         return 0;
-err2:
-//        omap_dsi_release_vc(dssdev, tc_drv_data->config_channel);
+
 err1:
         omap_dsi_release_vc(dssdev, tc_drv_data->pixel_channel);
 err0:
@@ -444,7 +369,6 @@ static void tc358762_remove(struct omap_dss_device *dssdev)
         struct tc358762_data *tc_drv_data = dev_get_drvdata(&dssdev->dev);
 
         omap_dsi_release_vc(dssdev, tc_drv_data->pixel_channel);
-//        omap_dsi_release_vc(dssdev, tc_drv_data->config_channel);
 
         kfree(tc_drv_data);
 }
@@ -472,8 +396,6 @@ static int tc358762_write_init_config(struct omap_dss_device *dssdev)
         int i;
         int r;
 
-        pr_info("Writing init config to tc'762\n");
-
         for (i = 0; i < ARRAY_SIZE(tc358762_init_seq); ++i) {
                 u16 reg = tc358762_init_seq[i].reg;
                 u32 data = tc358762_init_seq[i].data;
@@ -487,7 +409,7 @@ static int tc358762_write_init_config(struct omap_dss_device *dssdev)
                 if (r) {
                         dev_err(&dssdev->dev, "failed to write initial config"
                                 " (write) %d\n", i);
-//                        return r;
+                        return r;
                 }
         }
 
@@ -525,7 +447,6 @@ static int tc358762_power_on(struct omap_dss_device *dssdev)
                 tc_drv_data->pixel_channel);
 
         dev_dbg(&dssdev->dev, "power_on done\n");
-        pr_info("tc'762 power on done\n");
 
         return r;
 
