@@ -16,8 +16,6 @@
  * published by the Free Software Foundation.
  */
 
-#define NOTLE_DSI
-
 #include "board-notle.h"
 
 #include <linux/kernel.h>
@@ -240,7 +238,7 @@ static void __init notle_init_early(void)
 
 static int display_set_config(void);
 
-#ifndef NOTLE_DSI
+#ifndef CONFIG_OMAP2_DSS_DSI
 /* Display DVI */
 static int notle_enable_dvi(struct omap_dss_device *dssdev)
 {
@@ -396,7 +394,7 @@ static const struct i2c_device_id himax_id[] = {
 
 MODULE_DEVICE_TABLE(i2c, notle_id);
 
-#ifdef NOTLE_DSI
+#ifdef CONFIG_OMAP2_DSS_DSI
 int __init notle_dsi_init(void) {
         u32 reg;
         int r;
@@ -470,7 +468,7 @@ err:
 #endif
 
 static struct omap_dss_device *notle_dss_devices[] = {
-#ifndef NOTLE_DSI
+#ifndef CONFIG_OMAP2_DSS_DSI
         &notle_dvi_device,
 #else
         &notle_dsi_device,
@@ -480,7 +478,7 @@ static struct omap_dss_device *notle_dss_devices[] = {
 static struct omap_dss_board_info notle_dss_data = {
 	.num_devices	= ARRAY_SIZE(notle_dss_devices),
 	.devices	= notle_dss_devices,
-#ifdef NOTLE_DSI
+#ifdef CONFIG_OMAP2_DSS_DSI
         .default_device = &notle_dsi_device,
 #else
 	.default_device	= &notle_dvi_device,
@@ -651,7 +649,7 @@ static struct regulator_consumer_supply notle_vcxio_supply[] = {
 // Voltage for display LED?
 static struct regulator_init_data notle_vaux3 = {
 	.constraints = {
-#ifdef NOTLE_DSI
+#ifdef CONFIG_OMAP2_DSS_DSI
 		.min_uV			= 1200000,
 		.max_uV			= 1200000,
 #else
@@ -1530,7 +1528,7 @@ static void __init notle_init(void)
                 pr_err("Touchpad initialization failed: %d\n", err);
         }
 
-#ifdef NOTLE_DSI
+#ifdef CONFIG_OMAP2_DSS_DSI
         err = notle_dsi_init();
         if (!err) {
                 omap_display_init(&notle_dss_data);
