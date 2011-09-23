@@ -66,7 +66,7 @@ static const struct omap_dss_dsi_videomode_data videomode_data = {
 
         .line_buffer              = 0,
 
-        .vp_de_pol                = 0,
+        .vp_de_pol                = 1,
         .vp_vsync_pol             = 0,
         .vp_hsync_pol             = 0,
         .vp_hsync_start           = true,
