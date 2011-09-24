@@ -107,8 +107,10 @@
 #define MUX_AUDIO_POWERON_EMU           MUX(HDQ_SIO)
 #define GPIO_EN_10V                     84
 #define MUX_EN_10V                      MUX(USBB1_ULPITLL_CLK)
-#define GPIO_CAMERA                     94 // NB: in v3, this moves to 121 and
-#define MUX_CAMERA                      MUX(USBB1_ULPITLL_DAT6) // ABE_DMIC_DIN2
+#define GPIO_CAMERA_DOG                 94
+#define MUX_CAMERA_DOG                  MUX(USBB1_ULPITLL_DAT6)
+#define GPIO_CAMERA_EMU                 121
+#define MUX_CAMERA_EMU                  MUX(ABE_DMIC_DIN2)
 #define GPIO_TOUCHPAD_INT_N             32
 #define MUX_TOUCHPAD_INT_N              MUX(GPMC_AD8)
 #define MUX_BACKLIGHT                   MUX(USBB1_ULPITLL_DAT5)
@@ -874,14 +876,15 @@ static struct platform_device bluetooth_rfkill_device = {
         },
 };
 
-// Translate hardware buttons to keys -- we have only one
+// Translate hardware buttons to keys -- we have only one.  Note that
+// GPIO_CAMERA_DOG may be overwritten by GPIO_CAMERA_EMU below.
 static struct gpio_keys_button notle_button_table[] = {
     [0] = {
-		.code   = KEY_CAMERA,	\
-		.gpio   = GPIO_CAMERA,	\
-		.desc   = "Camera",	\
-		.type   = EV_KEY,	\
-		.wakeup = 1,		\
+                .code   = KEY_CAMERA,           \
+                .gpio   = GPIO_CAMERA_DOG,      \
+                .desc   = "Camera",             \
+                .type   = EV_KEY,               \
+                .wakeup = 1,                    \
     },
 };
 
@@ -1327,6 +1330,10 @@ static int __init notle_pwm_backlight_init(void) {
         }
 
         backlight_data.pwm_id = pwm->pwm_id;
+        if (notle_version_read() == V3_EMU) {
+          // Emu has a dimmer display; increase the max brightness.
+          backlight_data.uth_brightness = 0x0F;
+        }
         r = platform_device_register(&backlight_device);
         if (r) {
                 pr_err("Failed to register backlight platform device\n");
@@ -1406,13 +1413,6 @@ static void __init my_mux_init(void) {
         // Set display backlight to be pulled low when we start.
         __raw_writew(OMAP_MUX_MODE7 | OMAP_PULL_ENA, CORE_BASE_ADDR + MUX_BACKLIGHT);
 
-        // input gpio's:
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN,
-                CORE_BASE_ADDR + MUX_BCM_WLAN_HOST_WAKE);
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-                CORE_BASE_ADDR + MUX_CAMERA);
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-                CORE_BASE_ADDR + MUX_TOUCHPAD_INT_N);
 
         // board version gpio's:
         __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
@@ -1421,6 +1421,17 @@ static void __init my_mux_init(void) {
                 CORE_BASE_ADDR + MUX_ID1);
         __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
                 CORE_BASE_ADDR + MUX_ID0);
+
+        // input gpio's:
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN,
+                CORE_BASE_ADDR + MUX_BCM_WLAN_HOST_WAKE);
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
+            CORE_BASE_ADDR + MUX_CAMERA_EMU);
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
+            CORE_BASE_ADDR + MUX_CAMERA_DOG);
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
+                CORE_BASE_ADDR + MUX_TOUCHPAD_INT_N);
+
 
 }
 
@@ -1498,6 +1509,10 @@ static void __init notle_init(void)
         register_reboot_notifier(&notle_reboot_notifier);
         notle_i2c_init();
         omap4_register_ion();
+
+        if (board_ver == V3_EMU) {
+          notle_button_table[0].gpio = GPIO_CAMERA_EMU;
+        }
 
         platform_add_devices(notle_devices, ARRAY_SIZE(notle_devices));
         omap_serial_board_init(omap_serial_port_info);
