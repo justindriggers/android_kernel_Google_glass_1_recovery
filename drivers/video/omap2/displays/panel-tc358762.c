@@ -37,6 +37,9 @@
 
 #include "panel-tc358762.h"
 
+static int tc358762_power_on(struct omap_dss_device *dssdev);
+static void tc358762_power_off(struct omap_dss_device *dssdev);
+
 struct tc762_i2c {
         struct i2c_client *client;
 };
@@ -92,8 +95,374 @@ struct tc358762_data {
         struct mutex lock;
 
         struct omap_dss_device *dssdev;
+        struct kobject kobj;
 
         int pixel_channel;
+};
+
+/*** SYSFS interface ***/
+static ssize_t tc358762_dispc_hfp_show(struct tc358762_data *tc_data, char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.timings.hfp);
+}
+static ssize_t tc358762_dispc_hbp_show(struct tc358762_data *tc_data, char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.timings.hbp);
+}
+static ssize_t tc358762_dispc_hsw_show(struct tc358762_data *tc_data, char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.timings.hsw);
+}
+static ssize_t tc358762_dispc_vfp_show(struct tc358762_data *tc_data, char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.timings.vfp);
+}
+static ssize_t tc358762_dispc_vbp_show(struct tc358762_data *tc_data, char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.timings.vbp);
+}
+static ssize_t tc358762_dispc_vsw_show(struct tc358762_data *tc_data, char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.timings.vsw);
+}
+static ssize_t tc358762_dispc_hfp_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        tc_data->dssdev->panel.timings.hfp = value;
+        return size;
+}
+static ssize_t tc358762_dispc_hbp_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        tc_data->dssdev->panel.timings.hbp = value;
+        return size;
+}
+static ssize_t tc358762_dispc_hsw_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        tc_data->dssdev->panel.timings.hsw = value;
+        return size;
+}
+static ssize_t tc358762_dispc_vfp_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        tc_data->dssdev->panel.timings.vfp = value;
+        return size;
+}
+static ssize_t tc358762_dispc_vbp_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        tc_data->dssdev->panel.timings.vbp = value;
+        return size;
+}
+static ssize_t tc358762_dispc_vsw_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        tc_data->dssdev->panel.timings.vsw = value;
+        return size;
+}
+
+/* DSI vm timings */
+static ssize_t tc358762_dsi_vm_de_pol_show(struct tc358762_data *tc_data,
+                                                char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.dsi_vm_data.vp_de_pol);
+}
+static ssize_t tc358762_dsi_vm_hsync_pol_show(struct tc358762_data *tc_data,
+                                                char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.dsi_vm_data.vp_hsync_pol);
+}
+static ssize_t tc358762_dsi_vm_vsync_pol_show(struct tc358762_data *tc_data,
+                                                char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.dsi_vm_data.vp_vsync_pol);
+}
+static ssize_t tc358762_dsi_vm_line_buffer_show(struct tc358762_data *tc_data,
+                                                char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.dsi_vm_data.line_buffer);
+}
+static ssize_t tc358762_dsi_vm_window_sync_show(struct tc358762_data *tc_data,
+                                                char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.dsi_vm_data.window_sync);
+}
+static ssize_t tc358762_dsi_vm_hfp_show(struct tc358762_data *tc_data,
+                                        char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.dsi_vm_data.hfp);
+}
+static ssize_t tc358762_dsi_vm_hbp_show(struct tc358762_data *tc_data,
+                                        char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.dsi_vm_data.hbp);
+}
+static ssize_t tc358762_dsi_vm_hsa_show(struct tc358762_data *tc_data,
+                                        char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.dsi_vm_data.hsa);
+}
+static ssize_t tc358762_dsi_vm_vfp_show(struct tc358762_data *tc_data,
+                                        char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.dsi_vm_data.vfp);
+}
+static ssize_t tc358762_dsi_vm_vbp_show(struct tc358762_data *tc_data,
+                                        char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.dsi_vm_data.vbp);
+}
+static ssize_t tc358762_dsi_vm_vsa_show(struct tc358762_data *tc_data,
+                                        char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        tc_data->dssdev->panel.dsi_vm_data.vsa);
+}
+static ssize_t tc358762_dsi_vm_de_pol_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        value = !!value;
+        tc_data->dssdev->panel.dsi_vm_data.vp_de_pol = value;
+        return size;
+}
+static ssize_t tc358762_dsi_vm_hsync_pol_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        value = !!value;
+        tc_data->dssdev->panel.dsi_vm_data.vp_hsync_pol = value;
+        return size;
+}
+static ssize_t tc358762_dsi_vm_vsync_pol_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        value = !!value;
+        tc_data->dssdev->panel.dsi_vm_data.vp_vsync_pol = value;
+        return size;
+}
+static ssize_t tc358762_dsi_vm_line_buffer_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        if (value < 0 || value > 2)
+                return -EINVAL;
+        tc_data->dssdev->panel.dsi_vm_data.line_buffer = value;
+        return size;
+}
+static ssize_t tc358762_dsi_vm_window_sync_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        tc_data->dssdev->panel.dsi_vm_data.window_sync = value;
+        return size;
+}
+static ssize_t tc358762_dsi_vm_hfp_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        tc_data->dssdev->panel.dsi_vm_data.hfp = value;
+        return size;
+}
+static ssize_t tc358762_dsi_vm_hbp_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        tc_data->dssdev->panel.dsi_vm_data.hbp = value;
+        return size;
+}
+static ssize_t tc358762_dsi_vm_hsa_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        tc_data->dssdev->panel.dsi_vm_data.hsa = value;
+        return size;
+}
+static ssize_t tc358762_dsi_vm_vfp_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        tc_data->dssdev->panel.dsi_vm_data.vfp = value;
+        return size;
+}
+static ssize_t tc358762_dsi_vm_vbp_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        tc_data->dssdev->panel.dsi_vm_data.vbp = value;
+        return size;
+}
+static ssize_t tc358762_dsi_vm_vsa_store(struct tc358762_data *tc_data,
+                                     const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        tc_data->dssdev->panel.dsi_vm_data.vsa = value;
+        return size;
+}
+
+static ssize_t tc358762_sysfs_reset(struct tc358762_data *tc_data,
+                                    const char *buf, size_t size) {
+        tc358762_power_off(tc_data->dssdev);
+        msleep(200);
+        tc358762_power_on(tc_data->dssdev);
+        return size;
+}
+
+struct tc358762_attribute {
+        struct attribute attr;
+        ssize_t (*show)(struct tc358762_data *, char *);
+        ssize_t (*store)(struct tc358762_data *, const char *, size_t);
+};
+
+#define OVERLAY_ATTR(_name, _mode, _show, _store) \
+        struct tc358762_attribute tc358762_attr_##_name = \
+        __ATTR(_name, _mode, _show, _store)
+
+
+static OVERLAY_ATTR(reset, S_IWUSR, NULL, tc358762_sysfs_reset);
+
+static OVERLAY_ATTR(dispc_hfp, S_IRUGO|S_IWUSR,
+                tc358762_dispc_hfp_show, tc358762_dispc_hfp_store);
+static OVERLAY_ATTR(dispc_hbp, S_IRUGO|S_IWUSR,
+                tc358762_dispc_hbp_show, tc358762_dispc_hbp_store);
+static OVERLAY_ATTR(dispc_hsw, S_IRUGO|S_IWUSR,
+                tc358762_dispc_hsw_show, tc358762_dispc_hsw_store);
+static OVERLAY_ATTR(dispc_vfp, S_IRUGO|S_IWUSR,
+                tc358762_dispc_vfp_show, tc358762_dispc_vfp_store);
+static OVERLAY_ATTR(dispc_vbp, S_IRUGO|S_IWUSR,
+                tc358762_dispc_vbp_show, tc358762_dispc_vbp_store);
+static OVERLAY_ATTR(dispc_vsw, S_IRUGO|S_IWUSR,
+                tc358762_dispc_vsw_show, tc358762_dispc_vsw_store);
+
+static OVERLAY_ATTR(dsi_vm_de_pol, S_IRUGO|S_IWUSR,
+                tc358762_dsi_vm_de_pol_show,
+                tc358762_dsi_vm_de_pol_store);
+static OVERLAY_ATTR(dsi_vm_hsync_pol, S_IRUGO|S_IWUSR,
+                tc358762_dsi_vm_hsync_pol_show,
+                tc358762_dsi_vm_hsync_pol_store);
+static OVERLAY_ATTR(dsi_vm_vsync_pol, S_IRUGO|S_IWUSR,
+                tc358762_dsi_vm_vsync_pol_show,
+                tc358762_dsi_vm_vsync_pol_store);
+static OVERLAY_ATTR(dsi_vm_line_buffer, S_IRUGO|S_IWUSR,
+                tc358762_dsi_vm_line_buffer_show,
+                tc358762_dsi_vm_line_buffer_store);
+static OVERLAY_ATTR(dsi_vm_window_sync, S_IRUGO|S_IWUSR,
+                tc358762_dsi_vm_window_sync_show,
+                tc358762_dsi_vm_window_sync_store);
+static OVERLAY_ATTR(dsi_vm_hfp, S_IRUGO|S_IWUSR,
+                tc358762_dsi_vm_hfp_show, tc358762_dsi_vm_hfp_store);
+static OVERLAY_ATTR(dsi_vm_hbp, S_IRUGO|S_IWUSR,
+                tc358762_dsi_vm_hbp_show, tc358762_dsi_vm_hbp_store);
+static OVERLAY_ATTR(dsi_vm_hsa, S_IRUGO|S_IWUSR,
+                tc358762_dsi_vm_hsa_show, tc358762_dsi_vm_hsa_store);
+static OVERLAY_ATTR(dsi_vm_vfp, S_IRUGO|S_IWUSR,
+                tc358762_dsi_vm_vfp_show, tc358762_dsi_vm_vfp_store);
+static OVERLAY_ATTR(dsi_vm_vbp, S_IRUGO|S_IWUSR,
+                tc358762_dsi_vm_vbp_show, tc358762_dsi_vm_vbp_store);
+static OVERLAY_ATTR(dsi_vm_vsa, S_IRUGO|S_IWUSR,
+                tc358762_dsi_vm_vsa_show, tc358762_dsi_vm_vsa_store);
+
+static struct attribute *tc358762_sysfs_attrs[] = {
+        &tc358762_attr_reset.attr,
+        &tc358762_attr_dispc_hfp.attr,
+        &tc358762_attr_dispc_hbp.attr,
+        &tc358762_attr_dispc_hsw.attr,
+        &tc358762_attr_dispc_vfp.attr,
+        &tc358762_attr_dispc_vbp.attr,
+        &tc358762_attr_dispc_vsw.attr,
+        &tc358762_attr_dsi_vm_de_pol.attr,
+        &tc358762_attr_dsi_vm_hsync_pol.attr,
+        &tc358762_attr_dsi_vm_vsync_pol.attr,
+        &tc358762_attr_dsi_vm_line_buffer.attr,
+        &tc358762_attr_dsi_vm_window_sync.attr,
+        &tc358762_attr_dsi_vm_hfp.attr,
+        &tc358762_attr_dsi_vm_hbp.attr,
+        &tc358762_attr_dsi_vm_hsa.attr,
+        &tc358762_attr_dsi_vm_vfp.attr,
+        &tc358762_attr_dsi_vm_vbp.attr,
+        &tc358762_attr_dsi_vm_vsa.attr,
+        NULL
+};
+
+static ssize_t tc358762_attr_show(struct kobject *kobj, struct attribute *attr,
+                char *buf)
+{
+        struct tc358762_data *tc358762;
+        struct tc358762_attribute *tc358762_attr;
+
+        tc358762 = container_of(kobj, struct tc358762_data, kobj);
+        tc358762_attr = container_of(attr, struct tc358762_attribute, attr);
+
+        if (!tc358762_attr->show)
+                return -ENOENT;
+
+        return tc358762_attr->show(tc358762, buf);
+}
+
+static ssize_t tc358762_attr_store(struct kobject *kobj, struct attribute *attr,
+                const char *buf, size_t size)
+{
+        struct tc358762_data *tc358762;
+        struct tc358762_attribute *tc358762_attr;
+
+        tc358762 = container_of(kobj, struct tc358762_data, kobj);
+        tc358762_attr = container_of(attr, struct tc358762_attribute, attr);
+
+        if (!tc358762_attr->store)
+                return -ENOENT;
+
+        return tc358762_attr->store(tc358762, buf, size);
+}
+
+static const struct sysfs_ops tc358762_sysfs_ops = {
+        .show = tc358762_attr_show,
+        .store = tc358762_attr_store,
+};
+
+static struct kobj_type tc358762_ktype = {
+        .sysfs_ops = &tc358762_sysfs_ops,
+        .default_attrs = tc358762_sysfs_attrs,
 };
 
 static struct tc358762_board_data *get_board_data(struct omap_dss_device *dssdev)
@@ -353,6 +722,13 @@ static int tc358762_probe(struct omap_dss_device *dssdev)
                 goto err1;
         }
 
+        r = kobject_init_and_add(&tc_drv_data->kobj, &tc358762_ktype,
+                        &dssdev->manager->kobj, "tc358762");
+        if (r) {
+                dev_err(&dssdev->dev, "failed to create sysfs directory\n");
+                goto err1;
+        }
+
         dev_dbg(&dssdev->dev, "tc358762_probe done\n");
 
         return 0;
@@ -371,6 +747,8 @@ static void tc358762_remove(struct omap_dss_device *dssdev)
 
         omap_dsi_release_vc(dssdev, tc_drv_data->pixel_channel);
 
+        kobject_del(&tc_drv_data->kobj);
+        kobject_put(&tc_drv_data->kobj);
         kfree(tc_drv_data);
 }
 
