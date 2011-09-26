@@ -141,6 +141,9 @@
 #define CONFIG_NOTLE_I2C4_SENSORS 0
 #endif
 
+#define CONFIG_NOTLE_OV9726 0
+#define CONFIG_NOTLE_OV5650 1
+
 extern int tuna_wlan_init(void);
 
 // Notle board version detection gpios
@@ -159,10 +162,20 @@ typedef enum {
         V5_GNU      = 2
 } notle_version;
 
-/* Read board version from GPIO */
+static notle_version NOTLE_VERSION = UNVERSIONED;
+
+/* Read board version from GPIO.  Result in NOTLE_VERSION. */
 static void notle_version_init(void)
 {
         int r;
+
+        // mux board version gpio's:
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
+                CORE_BASE_ADDR + MUX_ID2);
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
+                CORE_BASE_ADDR + MUX_ID1);
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
+                CORE_BASE_ADDR + MUX_ID0);
 
         r = gpio_request_one(GPIO_ID2, GPIOF_IN, "id2");
         if (r) {
@@ -178,17 +191,11 @@ static void notle_version_init(void)
         if (r) {
                 pr_err("Failed to get gpio %d for id0 pin of board version\n", GPIO_ID0);
         }
+        NOTLE_VERSION = gpio_get_value(GPIO_ID0) | (gpio_get_value(GPIO_ID1) << 1)
+            | (gpio_get_value(GPIO_ID2) << 2);
+
 }
 
-static notle_version notle_version_read(void)
-{
-        unsigned int bVer = UNVERSIONED;
-
-        bVer = gpio_get_value(GPIO_ID0) | (gpio_get_value(GPIO_ID1) << 1)
-                       | (gpio_get_value(GPIO_ID2) << 2);
-
-        return (notle_version) bVer;
-}
 
 static char * notle_version_str(notle_version board_ver)
 {
@@ -1155,10 +1162,18 @@ static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
 		I2C_BOARD_INFO("notle_himax", 0x48),
 	},
 #endif //CONFIG_NOTLE_I2C4_SENSORS
+#if CONFIG_NOTLE_OV9726
 	{
 		I2C_BOARD_INFO("ov9726", 0x10),
 		.flags = I2C_CLIENT_WAKE,
 	},
+#endif //CONFIG_NOTLE_OV9726
+#if CONFIG_NOTLE_OV5650
+	{
+		I2C_BOARD_INFO("ov5650", 0x36),
+		.flags = I2C_CLIENT_WAKE,
+	},
+#endif //CONFIG_NOTLE_OV5650
 
 };
 
@@ -1194,16 +1209,15 @@ static struct omap_board_mux empty_board_mux[] __initdata = {
 static int omap_audio_init(void) {
         int r;
         u32 omap4430_cm_clksel_dpll_abe_register;
-        notle_version board_ver;
         int audio_power_on_gpio = GPIO_AUDIO_POWERON_EMU;
 
         /* Set the correct audio power on GPIO based on board revision */
-        board_ver = notle_version_read();
+
 
         /* TODO(petermalkin) Whenever we get rid of i2c errors, remove the manual GPIO settings */
         /*      and put back the setting for the twl6030 driver to set poweron pin for audio    */
         /*      like this: audio_power_on_gpio = AUDIO_GPIO_62;                            */
-        if (board_ver == V1_DOG) {
+        if (NOTLE_VERSION == V1_DOG) {
                 __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_AUDIO_POWERON_DOG);
                 r = gpio_request_one(GPIO_AUDIO_POWERON_DOG, GPIOF_OUT_INIT_HIGH, "audio_poweron");
         }
@@ -1330,9 +1344,11 @@ static int __init notle_pwm_backlight_init(void) {
         }
 
         backlight_data.pwm_id = pwm->pwm_id;
-        if (notle_version_read() == V3_EMU) {
+        if (NOTLE_VERSION == V3_EMU) {
           // Emu has a dimmer display; increase the max brightness.
-          backlight_data.uth_brightness = 0x0F;
+          backlight_data.uth_brightness = 0x80;
+          // Since Emu has no status LEDs, start at ~half brightness so user knows we're booting.
+          backlight_data.dft_brightness = 0x80;
         }
         r = platform_device_register(&backlight_device);
         if (r) {
@@ -1391,6 +1407,7 @@ late_initcall(notle_backlight_hack);
 #endif
 
 static void __init my_mux_init(void) {
+        int flags;
         // Move this code to board_mux constants when we're convinced it works:
 
         // Example code for writing mux values, bypassing omap4_mux_init code:
@@ -1398,40 +1415,39 @@ static void __init my_mux_init(void) {
 
         // gpio's in the first bank of 32 use the wkup base:
         // output gpio's:
-        __raw_writew(OMAP_MUX_MODE3, wkup_base_addr + MUX_GREEN_LED);
-        __raw_writew(OMAP_MUX_MODE3, wkup_base_addr + MUX_YELLOW_LED);
+        flags = OMAP_MUX_MODE3;
+        __raw_writew(flags, wkup_base_addr + MUX_GREEN_LED);
+        __raw_writew(flags, wkup_base_addr + MUX_YELLOW_LED);
 
         // Others use the core base:
         // output gpio's:
-        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_AUDIO_HEADSET);
-        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_GPS_ON_OFF);
-        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_GPS_RESET_N);
-        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_LCD_RESET_N);
-        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_EN_10V);
-        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_BT_RST_N);
+        __raw_writew(flags, CORE_BASE_ADDR + MUX_AUDIO_HEADSET);
+        __raw_writew(flags, CORE_BASE_ADDR + MUX_GPS_ON_OFF);
+        __raw_writew(flags, CORE_BASE_ADDR + MUX_GPS_RESET_N);
+        __raw_writew(flags, CORE_BASE_ADDR + MUX_LCD_RESET_N);
+        __raw_writew(flags, CORE_BASE_ADDR + MUX_EN_10V);
+        __raw_writew(flags, CORE_BASE_ADDR + MUX_BT_RST_N);
 
-        // Set display backlight to be pulled low when we start.
-        __raw_writew(OMAP_MUX_MODE7 | OMAP_PULL_ENA, CORE_BASE_ADDR + MUX_BACKLIGHT);
+        // Set display backlight to be pulled down when we start.
+        flags = OMAP_MUX_MODE7 | OMAP_PULL_ENA;
+        // Emu has no status LEDs, so for now we're flashing full brightness
+        // as an early boot indication.
+        if (NOTLE_VERSION == V3_EMU) {
+                flags |= OMAP_PULL_UP;
+        }
+        __raw_writew(flags, CORE_BASE_ADDR + MUX_BACKLIGHT);
 
 
-        // board version gpio's:
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-                CORE_BASE_ADDR + MUX_ID2);
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-                CORE_BASE_ADDR + MUX_ID1);
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-                CORE_BASE_ADDR + MUX_ID0);
+        flags = OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN;
 
         // input gpio's:
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN,
-                CORE_BASE_ADDR + MUX_BCM_WLAN_HOST_WAKE);
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-            CORE_BASE_ADDR + MUX_CAMERA_EMU);
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-            CORE_BASE_ADDR + MUX_CAMERA_DOG);
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-                CORE_BASE_ADDR + MUX_TOUCHPAD_INT_N);
-
+        __raw_writew(flags, CORE_BASE_ADDR + MUX_BCM_WLAN_HOST_WAKE);
+        if (NOTLE_VERSION == V3_EMU) {
+          __raw_writew(flags, CORE_BASE_ADDR + MUX_CAMERA_EMU);
+        } else {
+          __raw_writew(flags, CORE_BASE_ADDR + MUX_CAMERA_DOG);
+        }
+        __raw_writew(flags, CORE_BASE_ADDR + MUX_TOUCHPAD_INT_N);
 
 }
 
@@ -1490,16 +1506,14 @@ static void __init notle_init(void)
 {
         int package = OMAP_PACKAGE_CBS;
         int err;
-        notle_version board_ver;
 
         if (omap_rev() == OMAP4430_REV_ES1_0)
                 package = OMAP_PACKAGE_CBL;
         omap4_mux_init(empty_board_mux, empty_board_mux, package);
+        notle_version_init();
         my_mux_init();
 
-        notle_version_init();
-        board_ver = notle_version_read();
-        printk("Notle board revision: %s", notle_version_str(board_ver));
+        printk("Notle board revision: %s", notle_version_str(NOTLE_VERSION));
 
         err = omap_audio_init();
         if (err) {
@@ -1510,7 +1524,7 @@ static void __init notle_init(void)
         notle_i2c_init();
         omap4_register_ion();
 
-        if (board_ver == V3_EMU) {
+        if (NOTLE_VERSION == V3_EMU) {
           notle_button_table[0].gpio = GPIO_CAMERA_EMU;
         }
 
