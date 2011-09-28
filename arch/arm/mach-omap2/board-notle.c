@@ -514,14 +514,6 @@ static struct twl4030_usb_data omap4_usbphy_data = {
 };
 
 static struct omap2_hsmmc_info mmc[] = {
-	{
-		.mmc		= 1,
-		.caps		= MMC_CAP_4_BIT_DATA | MMC_CAP_8_BIT_DATA,
-		.gpio_wp	= -EINVAL,
-		.ocr_mask	= MMC_VDD_29_30,
-                .no_off_init    = true,
-                .power_saving   = true,
-	},
 #ifdef NOTDEF
         /* XXX turn on DDR mode when we debug the problem */
                                   MMC_CAP_1_8V_DDR | MMC_CAP_BUS_WIDTH_TEST,
@@ -547,6 +539,17 @@ static struct omap2_hsmmc_info mmc[] = {
                 .nonremovable   = true,
 		.mmc_data	= &tuna_wifi_data,
         },
+        /* This device is only present on Dog devices.  It will be blanked out
+         * below (by setting .mmc to 0) for other versions.
+         */
+	{
+		.mmc		= 1,
+		.caps		= MMC_CAP_4_BIT_DATA | MMC_CAP_8_BIT_DATA,
+		.gpio_wp	= -EINVAL,
+		.ocr_mask	= MMC_VDD_29_30,
+                .no_off_init    = true,
+                .power_saving   = true,
+	},
 	{}	/* Terminator */
 };
 
@@ -1556,6 +1559,12 @@ static void __init notle_init(void)
         }
 
         register_reboot_notifier(&notle_reboot_notifier);
+        if (board_ver != V1_DOG) {
+                // Disable support for sd card on Emu and beyond:
+                mmc[2].mmc = 0;
+                // Also disable vmmc voltage regulator used for sd card:
+                notle_twldata.vmmc = NULL;
+        }
         notle_i2c_init();
         omap4_register_ion();
 
