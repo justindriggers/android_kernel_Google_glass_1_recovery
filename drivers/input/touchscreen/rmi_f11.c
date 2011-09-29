@@ -980,8 +980,13 @@ int FN_11_init(struct rmi_function_device *function_device)
 
 	/* TODO: Initialize these through some normal kernel mechanism.
 	 */
+#ifdef CONFIG_TOUCHSCREEN_FLIP_AXES
+        instance_data->flip_X = false;
+        instance_data->flip_Y = true;
+#else
 	instance_data->flip_X = true;
 	instance_data->flip_Y = false;
+#endif
 	instance_data->swap_axes = true;
 	instance_data->rel_report_enabled = true;
 	instance_data->offset_X = instance_data->offset_Y = 0;
