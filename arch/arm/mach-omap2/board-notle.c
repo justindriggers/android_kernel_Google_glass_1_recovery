@@ -1346,8 +1346,9 @@ static int __init notle_pwm_backlight_init(void) {
         backlight_data.pwm_id = pwm->pwm_id;
         if (NOTLE_VERSION == V3_EMU) {
           // Emu has a dimmer display; increase the max brightness.
-          backlight_data.uth_brightness = 0x80;
-          // Since Emu has no status LEDs, start at ~half brightness so user knows we're booting.
+          backlight_data.uth_brightness = 0xFF;
+          // Since Emu has no status LEDs, start at ~half brightness so user
+          // knows we're booting.
           backlight_data.dft_brightness = 0x80;
         }
         r = platform_device_register(&backlight_device);
