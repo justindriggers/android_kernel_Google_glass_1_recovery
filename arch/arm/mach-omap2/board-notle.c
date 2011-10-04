@@ -27,6 +27,7 @@
 #include <linux/leds.h>
 #include <linux/gpio.h>
 #include <linux/gpio_keys.h>
+#include <linux/hwspinlock.h>
 #include <linux/usb/otg.h>
 #include <linux/i2c.h>
 #include <linux/i2c/twl.h>
@@ -1177,9 +1178,41 @@ static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
 
 };
 
+static void __init omap_i2c_hwspinlock_init(int bus_id, int spinlock_id,
+                                struct omap_i2c_bus_board_data *pdata)
+{
+       /* spinlock_id should be -1 for a generic lock request */
+       if (spinlock_id < 0)
+               pdata->handle = hwspin_lock_request();
+       else
+               pdata->handle = hwspin_lock_request_specific(spinlock_id);
+
+       if (pdata->handle != NULL) {
+               pdata->hwspin_lock_timeout = hwspin_lock_timeout;
+               pdata->hwspin_unlock = hwspin_unlock;
+       } else {
+               pr_err("I2C hwspinlock request failed for bus %d\n", \
+                                                               bus_id);
+       }
+}
+
+static struct omap_i2c_bus_board_data __initdata notle_i2c_1_bus_pdata;
+static struct omap_i2c_bus_board_data __initdata notle_i2c_2_bus_pdata;
+static struct omap_i2c_bus_board_data __initdata notle_i2c_3_bus_pdata;
+static struct omap_i2c_bus_board_data __initdata notle_i2c_4_bus_pdata;
 
 static int __init notle_i2c_init(void)
 {
+        omap_i2c_hwspinlock_init(1, 0, &notle_i2c_1_bus_pdata);
+        omap_i2c_hwspinlock_init(2, 1, &notle_i2c_2_bus_pdata);
+        omap_i2c_hwspinlock_init(3, 2, &notle_i2c_3_bus_pdata);
+        omap_i2c_hwspinlock_init(4, 3, &notle_i2c_4_bus_pdata);
+
+        omap_register_i2c_bus_board_data(1, &notle_i2c_1_bus_pdata);
+        omap_register_i2c_bus_board_data(2, &notle_i2c_2_bus_pdata);
+        omap_register_i2c_bus_board_data(3, &notle_i2c_3_bus_pdata);
+        omap_register_i2c_bus_board_data(4, &notle_i2c_4_bus_pdata);
+
 	omap4_pmic_init("twl6030", &notle_twldata);
 	omap_register_i2c_bus(2, 400, NULL, 0);
 	omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
