@@ -25,6 +25,74 @@
 #include <video/omapdss.h>
 #include <video/omap-panel-notle.h>
 
+struct init_register_value {
+        u8 reg;
+        u8 value;
+};
+
+static struct init_register_value panel_init_regs[] = {
+  { 0x00, 0xC5 },
+  { 0x01, 0xC3 },
+  { 0x02, 0xC3 },
+  { 0x13, 0x45 },
+  { 0x14, 0x80 },
+  { 0x15, 0xAA },
+  { 0x16, 0xAA },
+  { 0x17, 0x08 },
+  { 0x18, 0x88 },
+  { 0x19, 0x12 },
+  { 0x1A, 0xE9 },
+  { 0x21, 0x00 },
+  { 0x22, 0x00 },
+  { 0x23, 0x00 },
+  { 0x24, 0xFF },
+  { 0x25, 0xFF },
+  { 0x26, 0xFF },
+  { 0x27, 0x62 },
+  { 0x28, 0x62 },
+  { 0x29, 0x49 },
+  { 0x2A, 0x9D },
+  { 0x2B, 0x9D },
+  { 0x2C, 0xB6 },
+  { 0x2D, 0x80 },
+  { 0x2E, 0x7B },
+  { 0x2F, 0x67 },
+  { 0x30, 0x7F },
+  { 0x31, 0x84 },
+  { 0x32, 0x98 },
+  { 0x33, 0x95 },
+  { 0x34, 0x90 },
+  { 0x35, 0x79 },
+  { 0x36, 0x6A },
+  { 0x37, 0x6F },
+  { 0x38, 0x86 },
+  { 0x39, 0xA5 },
+  { 0x3A, 0xA1 },
+  { 0x3B, 0x85 },
+  { 0x3C, 0x5A },
+  { 0x3D, 0x5E },
+  { 0x3E, 0x7A },
+  { 0x3F, 0xB7 },
+  { 0x40, 0xB3 },
+  { 0x41, 0x90 },
+  { 0x42, 0x48 },
+  { 0x43, 0x4C },
+  { 0x44, 0x6F },
+  { 0x45, 0xC6 },
+  { 0x46, 0xC8 },
+  { 0x47, 0x93 },
+  { 0x48, 0x39 },
+  { 0x49, 0x37 },
+  { 0x4A, 0x6C },
+  { 0x4B, 0xFF },
+  { 0x4C, 0xDC },
+  { 0x4D, 0xC7 },
+  { 0x4E, 0x00 },
+  { 0x4F, 0x23 },
+  { 0x50, 0x38 },
+  { 0x00, 0x80 },
+};
+
 struct notle_panel_i2c {
         struct i2c_client *fpga_client;
         struct i2c_client *panel_client;
@@ -77,8 +145,35 @@ static inline struct panel_notle_data
         return (struct panel_notle_data *) dssdev->data;
 }
 
-static int notle_panel_power_on(struct omap_dss_device *dssdev) {
+static int panel_write_register(u8 reg, u8 value) {
+        u8 buf[2];
         int r;
+        struct i2c_msg msgs[1];
+
+        if (!i2c_data || !i2c_data->panel_client) {
+                printk(KERN_ERR "No I2C data set for Notle panel init\n");
+                return -1;
+        }
+
+        buf[0] = reg;
+        buf[1] = value;
+
+        msgs[0].addr = i2c_data->panel_client->addr;
+        msgs[0].flags = 0;
+        msgs[0].len = sizeof(buf);
+        msgs[0].buf = buf;
+
+        r = i2c_transfer(i2c_data->panel_client->adapter, msgs, 1);
+        if (r < 0) {
+                printk(KERN_ERR "Failed I2C write to Notle panel\n");
+                return r;
+        }
+
+        return 0;
+}
+
+static int notle_panel_power_on(struct omap_dss_device *dssdev) {
+        int i, r;
         struct panel_notle_data *panel_data = get_panel_data(dssdev);
         struct panel_drv_data *drv_data = dev_get_drvdata(&dssdev->dev);
         struct panel_config *panel_config = drv_data->panel_config;
@@ -106,7 +201,10 @@ static int notle_panel_power_on(struct omap_dss_device *dssdev) {
                 }
         }
 
-        /* TODO(madsci): I2C initialization of FPGA and panel here. */
+        for (i = 0; i < ARRAY_SIZE(panel_init_regs); ++i) {
+                panel_write_register(panel_init_regs[i].reg,
+                                     panel_init_regs[i].value);
+        }
 
         return 0;
 err1:
