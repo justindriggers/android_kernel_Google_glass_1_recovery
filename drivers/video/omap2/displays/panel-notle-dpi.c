@@ -93,6 +93,20 @@ static struct init_register_value panel_init_regs[] = {
   { 0x00, 0x80 },
 };
 
+struct fpga_config {
+  u8 config;
+  u8 red_on_line;
+  u8 green_on_line;
+  u8 blue_on_line;
+};
+
+static struct fpga_config fpga_config = {
+  .config = 0x00,
+  .red_on_line = 0x01,
+  .green_on_line = 0x02,
+  .blue_on_line = 0x03,
+};
+
 struct notle_panel_i2c {
         struct i2c_client *fpga_client;
         struct i2c_client *panel_client;
@@ -172,6 +186,29 @@ static int panel_write_register(u8 reg, u8 value) {
         return 0;
 }
 
+static int fpga_write_config(struct fpga_config *config) {
+        int r;
+        struct i2c_msg msgs[1];
+
+        if (!i2c_data || !i2c_data->fpga_client) {
+                printk(KERN_ERR "No I2C data set for Notle fpga init\n");
+                return -1;
+        }
+
+        msgs[0].addr = i2c_data->fpga_client->addr;
+        msgs[0].flags = 0;
+        msgs[0].len = sizeof(*config);
+        msgs[0].buf = (u8*)config;
+
+        r = i2c_transfer(i2c_data->fpga_client->adapter, msgs, 1);
+        if (r < 0) {
+                printk(KERN_ERR "Failed I2C write to Notle fpga\n");
+                return r;
+        }
+
+        return 0;
+};
+
 static int notle_panel_power_on(struct omap_dss_device *dssdev) {
         int i, r;
         struct panel_notle_data *panel_data = get_panel_data(dssdev);
@@ -205,6 +242,9 @@ static int notle_panel_power_on(struct omap_dss_device *dssdev) {
                 panel_write_register(panel_init_regs[i].reg,
                                      panel_init_regs[i].value);
         }
+
+        /* TODO(madsci): Set up some sysfs attributes to control this config. */
+        fpga_write_config(&fpga_config);
 
         return 0;
 err1:

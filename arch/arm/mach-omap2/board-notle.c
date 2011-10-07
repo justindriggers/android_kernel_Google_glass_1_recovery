@@ -159,8 +159,9 @@ typedef enum {
         UNVERSIONED = 7,
         V1_DOG      = 7,
         V3_EMU      = 0,
-        V4_FLY      = 1,
-        V5_GNU      = 2
+//        V4_FLY      = 1,
+        V5_GNU      = 2,
+        V4_FLY      = 4,
 } notle_version;
 
 static notle_version NOTLE_VERSION = UNVERSIONED;
@@ -377,7 +378,7 @@ static struct omap_dss_device notle_dsi_device = {
                 },
                 .dsi                    = {
                         .regm                   = 142,  /* DSI_PLL_REGM */
-                        .regn                   = 8,   /* DSI_PLL_REGN */
+                        .regn                   = 8,    /* DSI_PLL_REGN */
                         .regm_dispc             = 4,    /* PLL_CLK1 (M4) */
                         .regm_dsi               = 4,    /* PLL_CLK2 (M5) */
 
@@ -685,16 +686,41 @@ static struct regulator_consumer_supply notle_vcxio_supply[] = {
 	REGULATOR_SUPPLY("vdds_dsi", "omapdss_dsi1"),
 };
 
-// Voltage for display LED?
-static struct regulator_init_data notle_vaux3 = {
+// Voltage for display
+static struct regulator_init_data dog_vaux3 = {
 	.constraints = {
-#ifdef CONFIG_OMAP2_DSS_DSI
-		.min_uV			= 1200000,
-		.max_uV			= 1200000,
-#else
 		.min_uV			= 2800000,
 		.max_uV			= 2800000,
-#endif
+		.apply_uV		= true,
+		.valid_modes_mask	= REGULATOR_MODE_NORMAL
+					| REGULATOR_MODE_STANDBY,
+		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
+					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
+	},
+	.num_consumer_supplies	= ARRAY_SIZE(notle_vcxio_supply),
+	.consumer_supplies	= notle_vcxio_supply,
+};
+
+static struct regulator_init_data emu_vaux3 = {
+	.constraints = {
+		.min_uV			= 1200000,
+		.max_uV			= 1200000,
+		.apply_uV		= true,
+		.valid_modes_mask	= REGULATOR_MODE_NORMAL
+					| REGULATOR_MODE_STANDBY,
+		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
+					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
+	},
+	.num_consumer_supplies	= ARRAY_SIZE(notle_vcxio_supply),
+	.consumer_supplies	= notle_vcxio_supply,
+};
+
+static struct regulator_init_data fly_vaux3 = {
+	.constraints = {
+		.min_uV			= 1500000,
+		.max_uV			= 1500000,
 		.apply_uV		= true,
 		.valid_modes_mask	= REGULATOR_MODE_NORMAL
 					| REGULATOR_MODE_STANDBY,
@@ -977,7 +1003,7 @@ static struct twl4030_madc_platform_data notle_gpadc_data = {
 	.irq_line	= 1,
 };
 
-static struct twl4030_platform_data notle_twldata = {
+static struct twl4030_platform_data dog_twldata = {
 	.irq_base	= TWL6030_IRQ_BASE,
 	.irq_end	= TWL6030_IRQ_END,
 
@@ -991,7 +1017,55 @@ static struct twl4030_platform_data notle_twldata = {
 	.vusb		= &notle_vusb,
 	.vaux1		= &notle_vaux1,
 	.vaux2		= &notle_vaux2,
-	.vaux3		= &notle_vaux3,
+	.vaux3		= &dog_vaux3,
+        .clk32kg        = &omap4_notle_clk32kg,
+	.usb		= &omap4_usbphy_data,
+
+	/* children */
+        .codec          = &twl6040_codec,
+	.bci            = &notle_bci_data,
+	.madc           = &notle_gpadc_data,
+};
+
+static struct twl4030_platform_data emu_twldata = {
+	.irq_base	= TWL6030_IRQ_BASE,
+	.irq_end	= TWL6030_IRQ_END,
+
+	/* Regulators */
+	.vmmc		= &notle_vmmc,
+	.vpp		= &notle_vpp,
+	.vusim		= &notle_vusim,
+	.vana		= &notle_vana,
+	.vcxio		= &notle_vcxio,
+	.vdac		= &notle_vdac,
+	.vusb		= &notle_vusb,
+	.vaux1		= &notle_vaux1,
+	.vaux2		= &notle_vaux2,
+	.vaux3		= &emu_vaux3,
+        .clk32kg        = &omap4_notle_clk32kg,
+	.usb		= &omap4_usbphy_data,
+
+	/* children */
+        .codec          = &twl6040_codec,
+	.bci            = &notle_bci_data,
+	.madc           = &notle_gpadc_data,
+};
+
+static struct twl4030_platform_data fly_twldata = {
+	.irq_base	= TWL6030_IRQ_BASE,
+	.irq_end	= TWL6030_IRQ_END,
+
+	/* Regulators */
+	.vmmc		= &notle_vmmc,
+	.vpp		= &notle_vpp,
+	.vusim		= &notle_vusim,
+	.vana		= &notle_vana,
+	.vcxio		= &notle_vcxio,
+	.vdac		= &notle_vdac,
+	.vusb		= &notle_vusb,
+	.vaux1		= &notle_vaux1,
+	.vaux2		= &notle_vaux2,
+	.vaux3		= &fly_vaux3,
         .clk32kg        = &omap4_notle_clk32kg,
 	.usb		= &omap4_usbphy_data,
 
@@ -1287,10 +1361,10 @@ static struct omap_i2c_bus_board_data __initdata notle_i2c_4_bus_pdata;
 
 static struct i2c_board_info __initdata notle_fly_i2c_4_boardinfo[] = {
         {
-                I2C_BOARD_INFO("panel-notle-fpga", 0x8),
+                I2C_BOARD_INFO("panel-notle-fpga", 0x0C),
         },
         {
-                I2C_BOARD_INFO("panel-notle-panel", 0x8),
+                I2C_BOARD_INFO("panel-notle-panel", 0x49),
         },
     // NOTE(abliss): currently, this i2c bus can support EITHER the sensors OR
     // the camera
@@ -1362,25 +1436,34 @@ static int __init notle_i2c_init(void)
         omap_register_i2c_bus_board_data(3, &notle_i2c_3_bus_pdata);
         omap_register_i2c_bus_board_data(4, &notle_i2c_4_bus_pdata);
 
-        omap4_pmic_init("twl6030", &notle_twldata);
-        omap_register_i2c_bus(2, 400, NULL, 0);
-        omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
-                        ARRAY_SIZE(notle_i2c_3_boardinfo));
         switch (NOTLE_VERSION) {
           case V1_DOG:
+            omap4_pmic_init("twl6030", &dog_twldata);
+            omap_register_i2c_bus(2, 400, NULL, 0);
+            omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
+                            ARRAY_SIZE(notle_i2c_3_boardinfo));
             omap_register_i2c_bus(4, 400, notle_dog_i2c_4_boardinfo,
-                        ARRAY_SIZE(notle_dog_i2c_4_boardinfo));
+                            ARRAY_SIZE(notle_dog_i2c_4_boardinfo));
             break;
           case V3_EMU:
+            omap4_pmic_init("twl6030", &emu_twldata);
+            omap_register_i2c_bus(2, 400, NULL, 0);
+            omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
+                            ARRAY_SIZE(notle_i2c_3_boardinfo));
             omap_register_i2c_bus(4, 400, notle_emu_i2c_4_boardinfo,
-                        ARRAY_SIZE(notle_emu_i2c_4_boardinfo));
+                            ARRAY_SIZE(notle_emu_i2c_4_boardinfo));
             break;
           case V4_FLY:
+            omap4_pmic_init("twl6030", &fly_twldata);
+            omap_register_i2c_bus(2, 400, NULL, 0);
+            omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
+                            ARRAY_SIZE(notle_i2c_3_boardinfo));
             omap_register_i2c_bus(4, 400, notle_fly_i2c_4_boardinfo,
-                        ARRAY_SIZE(notle_fly_i2c_4_boardinfo));
+                            ARRAY_SIZE(notle_fly_i2c_4_boardinfo));
             break;
           default:
-            omap_register_i2c_bus(4, 400, NULL, 0);
+            pr_err("Unrecognized Notle version: %i\n", NOTLE_VERSION);
+            return -1;
             break;
         }
         return 0;
