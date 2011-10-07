@@ -343,7 +343,7 @@ struct omap_dss_device panel_generic_dpi_device = {
 
 struct omap_dss_device panel_notle_device = {
         .type                     = OMAP_DISPLAY_TYPE_DPI,
-        .name                     = "notle_generic_panel",
+        .name                     = "notle_nhd_panel",
         .driver_name              = "notle_panel",
         .data                     = &notle_panel,
         .phy.dpi.data_lines       = 24,
@@ -465,14 +465,6 @@ int __init notle_dpi_init(void)
 {
         int r;
 
-        /* Requesting TFP410 DVI GPIO and disabling it, at bootup */
-        r = gpio_request_one(panel_generic_dpi_device.reset_gpio,
-                                GPIOF_OUT_INIT_LOW, "DVI PD");
-        if (r) {
-                pr_err("Failed to get DVI powerdown GPIO\n");
-                goto err;
-        }
-
         r = gpio_request_one(GPIO_EN_10V, GPIOF_OUT_INIT_HIGH, "enable_10V");
         if (r) {
                 pr_err("Failed to get enable_10V gpio\n");
@@ -481,10 +473,22 @@ int __init notle_dpi_init(void)
 
         switch (NOTLE_VERSION) {
           case V1_DOG:
+            r = gpio_request_one(panel_generic_dpi_device.reset_gpio,
+                                 GPIOF_OUT_INIT_LOW, "DVI PD");
+            if (r) {
+                    pr_err("Failed to get DVI powerdown GPIO\n");
+                    goto err;
+            }
             i2c_add_driver(&himax_i2c_driver);
             notle_enable_dpi(&panel_generic_dpi_device);
             break;
           case V4_FLY:
+            r = gpio_request_one(panel_notle_device.reset_gpio,
+                                 GPIOF_OUT_INIT_LOW, "DVI PD");
+            if (r) {
+                    pr_err("Failed to get DVI powerdown GPIO\n");
+                    goto err;
+            }
             notle_enable_dpi(&panel_notle_device);
             break;
           default:
@@ -498,27 +502,32 @@ err:
         return r;
 }
 
-static struct omap_dss_device *notle_dss_devices[] = {
-        &notle_dsi_device,
+static struct omap_dss_device *dog_dss_devices[] = {
         &panel_generic_dpi_device,
+};
+static struct omap_dss_device *emu_dss_devices[] = {
+        &notle_dsi_device,
+};
+static struct omap_dss_device *fly_dss_devices[] = {
         &panel_notle_device,
 };
 
+
 static struct omap_dss_board_info notle_dsi_dss_data = {
-        .num_devices    = ARRAY_SIZE(notle_dss_devices),
-        .devices        = notle_dss_devices,
+        .num_devices    = ARRAY_SIZE(emu_dss_devices),
+        .devices        = emu_dss_devices,
         .default_device = &notle_dsi_device,
 };
 
 static struct omap_dss_board_info generic_dpi_dss_data = {
-        .num_devices    = ARRAY_SIZE(notle_dss_devices),
-        .devices        = notle_dss_devices,
+        .num_devices    = ARRAY_SIZE(dog_dss_devices),
+        .devices        = dog_dss_devices,
         .default_device = &panel_generic_dpi_device,
 };
 
 static struct omap_dss_board_info panel_notle_dss_data = {
-        .num_devices    = ARRAY_SIZE(notle_dss_devices),
-        .devices        = notle_dss_devices,
+        .num_devices    = ARRAY_SIZE(fly_dss_devices),
+        .devices        = fly_dss_devices,
         .default_device = &panel_notle_device,
 };
 

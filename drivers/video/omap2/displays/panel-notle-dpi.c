@@ -179,7 +179,6 @@ static int panel_write_register(u8 reg, u8 value) {
 
         r = i2c_transfer(i2c_data->panel_client->adapter, msgs, 1);
         if (r < 0) {
-                printk(KERN_ERR "Failed I2C write to Notle panel\n");
                 return r;
         }
 
@@ -202,7 +201,6 @@ static int fpga_write_config(struct fpga_config *config) {
 
         r = i2c_transfer(i2c_data->fpga_client->adapter, msgs, 1);
         if (r < 0) {
-                printk(KERN_ERR "Failed I2C write to Notle fpga\n");
                 return r;
         }
 
@@ -239,13 +237,21 @@ static int notle_panel_power_on(struct omap_dss_device *dssdev) {
         }
 
         for (i = 0; i < ARRAY_SIZE(panel_init_regs); ++i) {
-                panel_write_register(panel_init_regs[i].reg,
-                                     panel_init_regs[i].value);
+                if(panel_write_register(panel_init_regs[i].reg,
+                                        panel_init_regs[i].value)) {
+                  printk(KERN_ERR "Failed to write panel config to Notle panel\n");
+                  goto err2;
+                }
         }
 
         /* TODO(madsci): Set up some sysfs attributes to control this config. */
-        fpga_write_config(&fpga_config);
+        if (fpga_write_config(&fpga_config)) {
+          printk(KERN_ERR "Failed to write FPGA config for Notle panel\n");
+          goto err2;
+        }
 
+        return 0;
+err2:
         return 0;
 err1:
         omapdss_dpi_display_disable(dssdev);
