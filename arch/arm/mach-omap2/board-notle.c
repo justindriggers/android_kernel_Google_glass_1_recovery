@@ -79,6 +79,7 @@
 #include <video/omapdss.h>
 #include <video/omap-panel-generic-dpi.h>
 #include <video/omap-panel-tc358762.h>
+#include <video/omap-panel-notle.h>
 
 #include "timer-gp.h"
 #include "omap4_ion.h"
@@ -131,8 +132,7 @@
 #define PHYS_ADDR_SMC_SIZE      (SZ_1M * 3)
 #define PHYS_ADDR_SMC_MEM       (0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
 #define OMAP_ION_HEAP_SECURE_INPUT_SIZE (SZ_1M * 30)
-// NOTE(abliss): This should move to 105 to keep up with panda, but that seems
-// to break currently.  When it does, we probably also need to change the value
+// NOTE(abliss): This probably also needs to stay in sync with the value
 // in omap4_ion.c.
 #define PHYS_ADDR_DUCATI_SIZE   (SZ_1M * 103)
 #define PHYS_ADDR_DUCATI_MEM    (PHYS_ADDR_SMC_MEM - PHYS_ADDR_DUCATI_SIZE - \
@@ -246,84 +246,9 @@ static void __init notle_init_early(void)
 	omap2_init_common_devices(NULL, NULL);
 }
 
-static int display_set_config(void);
-
-#ifndef CONFIG_OMAP2_DSS_DSI
-/* Display DVI */
-static int notle_enable_dvi(struct omap_dss_device *dssdev)
-{
-	gpio_set_value(dssdev->reset_gpio, 1);
-        display_set_config();
-	return 0;
-}
-
-static void notle_disable_dvi(struct omap_dss_device *dssdev)
-{
-	gpio_set_value(dssdev->reset_gpio, 0);
-}
-
-/* Using generic display panel */
-static struct panel_generic_dpi_data dvi_panel = {
-	.name			= "generic-wingman",
-	.platform_enable	= notle_enable_dvi,
-	.platform_disable	= notle_disable_dvi,
-};
-
-struct omap_dss_device notle_dvi_device = {
-	.type			= OMAP_DISPLAY_TYPE_DPI,
-	.name			= "notle_generic_panel",
-	.driver_name		= "generic_dpi_panel",
-	.data			= &dvi_panel,
-	.phy.dpi.data_lines	= 24,
-	.reset_gpio		= GPIO_LCD_RESET_N,
-	.channel		= OMAP_DSS_CHANNEL_LCD2,
-};
-#else
-
-static struct tc358762_board_data dsi_panel = {
-        .reset_gpio     = 53,
-};
-
-static struct omap_dss_device notle_dsi_device = {
-        .name                   = "lcd",
-        .driver_name            = "tc358762",
-        .type                   = OMAP_DISPLAY_TYPE_DSI,
-        .data                   = &dsi_panel,
-        .phy.dsi                = {
-                .type           = OMAP_DSS_DSI_TYPE_VIDEO_MODE,
-                .clk_lane       = 1,
-                .clk_pol        = 0,
-                .data1_lane     = 2,
-                .data1_pol      = 0,
-        },
-        .clocks                 = {
-                .dispc                  = {
-                        .channel                = {
-                                .lck_div                = 1,        /* Logic Clock = 172.8 MHz */
-                                .pck_div                = 6,        /* Pixel Clock = 34.56 MHz */
-                                .lcd_clk_src            = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
-                        },
-                        .dispc_fclk_src        = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
-                },
-                .dsi                    = {
-                        .regm                   = 192,  /* DSI_PLL_REGM */
-                        .regn                   = 8,   /* DSI_PLL_REGN */
-                        .regm_dispc             = 6,    /* PLL_CLK1 (M4) */
-                        .regm_dsi               = 5,    /* PLL_CLK2 (M5) */
-
-                        .lp_clk_div             = 13,    /* LP Clock = 8.64 MHz */
-                        .dsi_fclk_src           = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DSI,
-                },
-        },
-        .panel                  = {
-        },
-        .channel                = OMAP_DSS_CHANNEL_LCD,
-};
-#endif
-
 static struct i2c_client *himax_client;
 
-static int display_set_config(void)
+static int write_dog_display_config(void)
 {
         int ret = 0;
 
@@ -378,6 +303,93 @@ static int display_set_config(void)
         return ret;
 }
 
+static int notle_enable_dpi(struct omap_dss_device *dssdev)
+{
+        gpio_set_value(dssdev->reset_gpio, 1);
+        if (NOTLE_VERSION == V1_DOG) {
+                write_dog_display_config();
+        }
+        return 0;
+}
+
+static void notle_disable_dpi(struct omap_dss_device *dssdev)
+{
+        gpio_set_value(dssdev->reset_gpio, 0);
+}
+
+/* Using the panel-generic-dpi driver, we specify the panel name. */
+static struct panel_generic_dpi_data dpi_panel = {
+        .name                     = "generic-wingman",
+        .platform_enable          = notle_enable_dpi,
+        .platform_disable         = notle_disable_dpi,
+};
+
+/* Using the panel-notle-dpi driver, we only specify enable/disable. */
+static struct panel_notle_data notle_panel = {
+        .platform_enable          = notle_enable_dpi,
+        .platform_disable         = notle_disable_dpi,
+};
+
+struct omap_dss_device panel_generic_dpi_device = {
+        .type                     = OMAP_DISPLAY_TYPE_DPI,
+        .name                     = "notle_generic_panel",
+        .driver_name              = "generic_dpi_panel",
+        .data                     = &dpi_panel,
+        .phy.dpi.data_lines       = 24,
+        .reset_gpio               = GPIO_LCD_RESET_N,
+        .channel                  = OMAP_DSS_CHANNEL_LCD2,
+};
+
+struct omap_dss_device panel_notle_device = {
+        .type                     = OMAP_DISPLAY_TYPE_DPI,
+        .name                     = "notle_generic_panel",
+        .driver_name              = "notle_panel",
+        .data                     = &notle_panel,
+        .phy.dpi.data_lines       = 24,
+        .reset_gpio               = GPIO_LCD_RESET_N,
+        .channel                  = OMAP_DSS_CHANNEL_LCD2,
+};
+
+static struct tc358762_board_data dsi_panel = {
+        .reset_gpio               = GPIO_LCD_RESET_N,
+};
+
+static struct omap_dss_device notle_dsi_device = {
+        .name                     = "lcd",
+        .driver_name              = "tc358762",
+        .type                     = OMAP_DISPLAY_TYPE_DSI,
+        .data                     = &dsi_panel,
+        .phy.dsi                  = {
+                .type             = OMAP_DSS_DSI_TYPE_VIDEO_MODE,
+                .clk_lane         = 1,
+                .clk_pol          = 0,
+                .data1_lane       = 2,
+                .data1_pol        = 0,
+        },
+        .clocks                   = {
+                .dispc                  = {
+                        .channel                = {
+                                .lck_div                = 1,        /* Logic Clock = 172.8 MHz */
+                                .pck_div                = 8,        /* Pixel Clock = 34.56 MHz */
+                                .lcd_clk_src            = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
+                        },
+                        .dispc_fclk_src         = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DISPC,
+                },
+                .dsi                    = {
+                        .regm                   = 142,  /* DSI_PLL_REGM */
+                        .regn                   = 8,   /* DSI_PLL_REGN */
+                        .regm_dispc             = 4,    /* PLL_CLK1 (M4) */
+                        .regm_dsi               = 4,    /* PLL_CLK2 (M5) */
+
+                        .lp_clk_div             = 18,    /* LP Clock = 8.64 MHz */
+                        .dsi_fclk_src           = OMAP_DSS_CLK_SRC_DSI_PLL_HSDIV_DSI,
+                },
+        },
+        .panel                  = {
+        },
+        .channel                = OMAP_DSS_CHANNEL_LCD,
+};
+
 static int __devinit himax_probe(struct i2c_client *client,
                                   const struct i2c_device_id *id)
 {
@@ -388,7 +400,7 @@ static int __devinit himax_probe(struct i2c_client *client,
         }
 
         himax_client = client;
-        return display_set_config();
+        return write_dog_display_config();
 }
 
 static int __devexit himax_remove(struct i2c_client *client)
@@ -402,9 +414,8 @@ static const struct i2c_device_id himax_id[] = {
         {}
 };
 
-MODULE_DEVICE_TABLE(i2c, notle_id);
+MODULE_DEVICE_TABLE(i2c, himax_id);
 
-#ifdef CONFIG_OMAP2_DSS_DSI
 int __init notle_dsi_init(void) {
         u32 reg;
         int r;
@@ -417,7 +428,6 @@ int __init notle_dsi_init(void) {
         reg &= ~OMAP4_DSI2_PIPD_MASK;
         reg |= 0x1f << OMAP4_DSI1_PIPD_SHIFT;
         reg |= 0x1f << OMAP4_DSI2_PIPD_SHIFT;
-        pr_info("Writing 0x%08x to CONTROL_DSIPHY\n", reg);
         omap4_ctrl_pad_writel(reg, OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_DSIPHY);
 
 
@@ -441,8 +451,7 @@ err:
         return r;
 }
 
-#else
-static struct i2c_driver notle_driver = {
+static struct i2c_driver himax_i2c_driver = {
         .driver = {
                 .name = "notle_himax",
         },
@@ -451,15 +460,15 @@ static struct i2c_driver notle_driver = {
         .id_table = himax_id,
 };
 
-int __init notle_dvi_init(void)
+int __init notle_dpi_init(void)
 {
-	int r;
+        int r;
 
-	/* Requesting TFP410 DVI GPIO and disabling it, at bootup */
-	r = gpio_request_one(notle_dvi_device.reset_gpio,
-				GPIOF_OUT_INIT_LOW, "DVI PD");
-	if (r) {
-		pr_err("Failed to get DVI powerdown GPIO\n");
+        /* Requesting TFP410 DVI GPIO and disabling it, at bootup */
+        r = gpio_request_one(panel_generic_dpi_device.reset_gpio,
+                                GPIOF_OUT_INIT_LOW, "DVI PD");
+        if (r) {
+                pr_err("Failed to get DVI powerdown GPIO\n");
                 goto err;
         }
 
@@ -469,30 +478,47 @@ int __init notle_dvi_init(void)
                 goto err;
         }
 
-        i2c_add_driver(&notle_driver);
-        notle_enable_dvi(&notle_dvi_device);
+        switch (NOTLE_VERSION) {
+          case V1_DOG:
+            i2c_add_driver(&himax_i2c_driver);
+            notle_enable_dpi(&panel_generic_dpi_device);
+            break;
+          case V4_FLY:
+            notle_enable_dpi(&panel_notle_device);
+            break;
+          default:
+            pr_err("Unrecognized Notle version initializing DPI\n");
+            r = -1;
+            goto err;
+        }
 
+        return 0;
 err:
-	return r;
+        return r;
 }
-#endif
 
 static struct omap_dss_device *notle_dss_devices[] = {
-#ifndef CONFIG_OMAP2_DSS_DSI
-        &notle_dvi_device,
-#else
         &notle_dsi_device,
-#endif
+        &panel_generic_dpi_device,
+        &panel_notle_device,
 };
 
-static struct omap_dss_board_info notle_dss_data = {
-	.num_devices	= ARRAY_SIZE(notle_dss_devices),
-	.devices	= notle_dss_devices,
-#ifdef CONFIG_OMAP2_DSS_DSI
+static struct omap_dss_board_info notle_dsi_dss_data = {
+        .num_devices    = ARRAY_SIZE(notle_dss_devices),
+        .devices        = notle_dss_devices,
         .default_device = &notle_dsi_device,
-#else
-	.default_device	= &notle_dvi_device,
-#endif
+};
+
+static struct omap_dss_board_info generic_dpi_dss_data = {
+        .num_devices    = ARRAY_SIZE(notle_dss_devices),
+        .devices        = notle_dss_devices,
+        .default_device = &panel_generic_dpi_device,
+};
+
+static struct omap_dss_board_info panel_notle_dss_data = {
+        .num_devices    = ARRAY_SIZE(notle_dss_devices),
+        .devices        = notle_dss_devices,
+        .default_device = &panel_notle_device,
 };
 
 static struct omap_musb_board_data musb_board_data = {
@@ -929,7 +955,11 @@ static struct twl4030_bci_platform_data notle_bci_data = {
 
 
 static struct twl4030_codec_audio_data twl6040_audio = {
-	/* Add audio only data */
+	.hs_left_step	= 0x0f,
+	.hs_right_step	= 0x0f,
+	.hf_left_step	= 0x1d,
+	.hf_right_step	= 0x1d,
+	.ep_step	= 0x0f,
 };
 
 static struct twl4030_codec_vibra_data twl6040_vibra = {
@@ -969,15 +999,6 @@ static struct twl4030_platform_data notle_twldata = {
         .codec          = &twl6040_codec,
 	.bci            = &notle_bci_data,
 	.madc           = &notle_gpadc_data,
-};
-
-static struct i2c_board_info __initdata notle_i2c_boardinfo[] = {
-	{
-		I2C_BOARD_INFO("twl6030", 0x48),
-		.flags = I2C_CLIENT_WAKE,
-		.irq = OMAP44XX_IRQ_SYS_1N,
-		.platform_data = &notle_twldata,
-	},
 };
 
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
@@ -1120,64 +1141,123 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 
 #endif //CONFIG_NOTLE_I2C4_SENSORS
 
-static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
-	{
-		I2C_BOARD_INFO("tc358762-i2c", 0x0b),
-	},
+static struct i2c_board_info __initdata notle_dog_i2c_4_boardinfo[] = {
     // NOTE(abliss): currently, this i2c bus can support EITHER the sensors OR
     // the camera
 #if CONFIG_NOTLE_I2C4_SENSORS
 #ifdef CONFIG_MPU_SENSORS_MPU6050B1
         {
-		I2C_BOARD_INFO("mpu6050B1", 0x68),
-	//	.irq = OMAP44XX_IRQ_SYS_1N,
-		.platform_data = &mpu6050_data,
+                I2C_BOARD_INFO("mpu6050B1", 0x68),
+        //        .irq = OMAP44XX_IRQ_SYS_1N,
+                .platform_data = &mpu6050_data,
         },
 #endif
 #ifdef CONFIG_INPUT_L3G4200D
-	{
-		I2C_BOARD_INFO("l3g4200d_gyr", 0x68),
-		.flags = I2C_CLIENT_WAKE,
-	//	.irq = OMAP44XX_IRQ_SYS_1N,
-		.platform_data = &notle_l3g4200d_data,
-	},
+        {
+                I2C_BOARD_INFO("l3g4200d_gyr", 0x68),
+                .flags = I2C_CLIENT_WAKE,
+        //        .irq = OMAP44XX_IRQ_SYS_1N,
+                .platform_data = &notle_l3g4200d_data,
+        },
 #endif
 #ifdef CONFIG_INPUT_LSM303DLHC
-	{
-		I2C_BOARD_INFO("lsm303dlhc_acc", 0x18),
-		.flags = I2C_CLIENT_WAKE,
-	//	.irq = OMAP44XX_IRQ_SYS_1N,
-		.platform_data = &notle_lsm303dlh_acc_data,
-	},
-	{
-		I2C_BOARD_INFO("lsm303dlhc_mag", 0x1e),
-		.flags = I2C_CLIENT_WAKE,
-	//	.irq = OMAP44XX_IRQ_SYS_1N,
-		.platform_data = &notle_lsm303dlh_mag_data,
-	},
+        {
+                I2C_BOARD_INFO("lsm303dlhc_acc", 0x18),
+                .flags = I2C_CLIENT_WAKE,
+        //        .irq = OMAP44XX_IRQ_SYS_1N,
+                .platform_data = &notle_lsm303dlh_acc_data,
+        },
+        {
+                I2C_BOARD_INFO("lsm303dlhc_mag", 0x1e),
+                .flags = I2C_CLIENT_WAKE,
+        //        .irq = OMAP44XX_IRQ_SYS_1N,
+                .platform_data = &notle_lsm303dlh_mag_data,
+        },
 #endif
 #ifdef CONFIG_INPUT_LTR506ALS
-	{
-		I2C_BOARD_INFO("ltr506als", 0x1d),
-		.flags = I2C_CLIENT_WAKE,
-		.platform_data = &notle_ltr506als_data,
-	},
+        {
+                I2C_BOARD_INFO("ltr506als", 0x1d),
+                .flags = I2C_CLIENT_WAKE,
+                .platform_data = &notle_ltr506als_data,
+        },
 #endif
-	{
-		I2C_BOARD_INFO("notle_himax", 0x48),
-	},
+        {
+                I2C_BOARD_INFO("notle_himax", 0x48),
+        },
 #endif //CONFIG_NOTLE_I2C4_SENSORS
 #if CONFIG_NOTLE_OV9726
-	{
-		I2C_BOARD_INFO("ov9726", 0x10),
-		.flags = I2C_CLIENT_WAKE,
-	},
+        {
+                I2C_BOARD_INFO("ov9726", 0x10),
+                .flags = I2C_CLIENT_WAKE,
+        },
 #endif //CONFIG_NOTLE_OV9726
 #if CONFIG_NOTLE_OV5650
-	{
-		I2C_BOARD_INFO("ov5650", 0x36),
-		.flags = I2C_CLIENT_WAKE,
-	},
+        {
+                I2C_BOARD_INFO("ov5650", 0x36),
+                .flags = I2C_CLIENT_WAKE,
+        },
+#endif //CONFIG_NOTLE_OV5650
+
+};
+
+static struct i2c_board_info __initdata notle_emu_i2c_4_boardinfo[] = {
+        {
+                I2C_BOARD_INFO("tc358762-i2c", 0x0b),
+        },
+    // NOTE(abliss): currently, this i2c bus can support EITHER the sensors OR
+    // the camera
+#if CONFIG_NOTLE_I2C4_SENSORS
+#ifdef CONFIG_MPU_SENSORS_MPU6050B1
+        {
+                I2C_BOARD_INFO("mpu6050B1", 0x68),
+        //        .irq = OMAP44XX_IRQ_SYS_1N,
+                .platform_data = &mpu6050_data,
+        },
+#endif
+#ifdef CONFIG_INPUT_L3G4200D
+        {
+                I2C_BOARD_INFO("l3g4200d_gyr", 0x68),
+                .flags = I2C_CLIENT_WAKE,
+        //        .irq = OMAP44XX_IRQ_SYS_1N,
+                .platform_data = &notle_l3g4200d_data,
+        },
+#endif
+#ifdef CONFIG_INPUT_LSM303DLHC
+        {
+                I2C_BOARD_INFO("lsm303dlhc_acc", 0x18),
+                .flags = I2C_CLIENT_WAKE,
+        //        .irq = OMAP44XX_IRQ_SYS_1N,
+                .platform_data = &notle_lsm303dlh_acc_data,
+        },
+        {
+                I2C_BOARD_INFO("lsm303dlhc_mag", 0x1e),
+                .flags = I2C_CLIENT_WAKE,
+        //        .irq = OMAP44XX_IRQ_SYS_1N,
+                .platform_data = &notle_lsm303dlh_mag_data,
+        },
+#endif
+#ifdef CONFIG_INPUT_LTR506ALS
+        {
+                I2C_BOARD_INFO("ltr506als", 0x1d),
+                .flags = I2C_CLIENT_WAKE,
+                .platform_data = &notle_ltr506als_data,
+        },
+#endif
+        {
+                I2C_BOARD_INFO("notle_himax", 0x48),
+        },
+#endif //CONFIG_NOTLE_I2C4_SENSORS
+#if CONFIG_NOTLE_OV9726
+        {
+                I2C_BOARD_INFO("ov9726", 0x10),
+                .flags = I2C_CLIENT_WAKE,
+        },
+#endif //CONFIG_NOTLE_OV9726
+#if CONFIG_NOTLE_OV5650
+        {
+                I2C_BOARD_INFO("ov5650", 0x36),
+                .flags = I2C_CLIENT_WAKE,
+        },
 #endif //CONFIG_NOTLE_OV5650
 
 };
@@ -1205,6 +1285,71 @@ static struct omap_i2c_bus_board_data __initdata notle_i2c_2_bus_pdata;
 static struct omap_i2c_bus_board_data __initdata notle_i2c_3_bus_pdata;
 static struct omap_i2c_bus_board_data __initdata notle_i2c_4_bus_pdata;
 
+static struct i2c_board_info __initdata notle_fly_i2c_4_boardinfo[] = {
+        {
+                I2C_BOARD_INFO("panel-notle-fpga", 0x8),
+        },
+        {
+                I2C_BOARD_INFO("panel-notle-panel", 0x8),
+        },
+    // NOTE(abliss): currently, this i2c bus can support EITHER the sensors OR
+    // the camera
+#if CONFIG_NOTLE_I2C4_SENSORS
+#ifdef CONFIG_MPU_SENSORS_MPU6050B1
+        {
+                I2C_BOARD_INFO("mpu6050B1", 0x68),
+        //        .irq = OMAP44XX_IRQ_SYS_1N,
+                .platform_data = &mpu6050_data,
+        },
+#endif
+#ifdef CONFIG_INPUT_L3G4200D
+        {
+                I2C_BOARD_INFO("l3g4200d_gyr", 0x68),
+                .flags = I2C_CLIENT_WAKE,
+        //        .irq = OMAP44XX_IRQ_SYS_1N,
+                .platform_data = &notle_l3g4200d_data,
+        },
+#endif
+#ifdef CONFIG_INPUT_LSM303DLHC
+        {
+                I2C_BOARD_INFO("lsm303dlhc_acc", 0x18),
+                .flags = I2C_CLIENT_WAKE,
+        //        .irq = OMAP44XX_IRQ_SYS_1N,
+                .platform_data = &notle_lsm303dlh_acc_data,
+        },
+        {
+                I2C_BOARD_INFO("lsm303dlhc_mag", 0x1e),
+                .flags = I2C_CLIENT_WAKE,
+        //        .irq = OMAP44XX_IRQ_SYS_1N,
+                .platform_data = &notle_lsm303dlh_mag_data,
+        },
+#endif
+#ifdef CONFIG_INPUT_LTR506ALS
+        {
+                I2C_BOARD_INFO("ltr506als", 0x1d),
+                .flags = I2C_CLIENT_WAKE,
+                .platform_data = &notle_ltr506als_data,
+        },
+#endif
+        {
+                I2C_BOARD_INFO("notle_himax", 0x48),
+        },
+#endif //CONFIG_NOTLE_I2C4_SENSORS
+#if CONFIG_NOTLE_OV9726
+        {
+                I2C_BOARD_INFO("ov9726", 0x10),
+                .flags = I2C_CLIENT_WAKE,
+        },
+#endif //CONFIG_NOTLE_OV9726
+#if CONFIG_NOTLE_OV5650
+        {
+                I2C_BOARD_INFO("ov5650", 0x36),
+                .flags = I2C_CLIENT_WAKE,
+        },
+#endif //CONFIG_NOTLE_OV5650
+
+};
+
 static int __init notle_i2c_init(void)
 {
         omap_i2c_hwspinlock_init(1, 0, &notle_i2c_1_bus_pdata);
@@ -1217,13 +1362,28 @@ static int __init notle_i2c_init(void)
         omap_register_i2c_bus_board_data(3, &notle_i2c_3_bus_pdata);
         omap_register_i2c_bus_board_data(4, &notle_i2c_4_bus_pdata);
 
-	omap4_pmic_init("twl6030", &notle_twldata);
-	omap_register_i2c_bus(2, 400, NULL, 0);
-	omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
-			ARRAY_SIZE(notle_i2c_3_boardinfo));
-	omap_register_i2c_bus(4, 400, notle_i2c_4_boardinfo,
-			ARRAY_SIZE(notle_i2c_4_boardinfo));
-	return 0;
+        omap4_pmic_init("twl6030", &notle_twldata);
+        omap_register_i2c_bus(2, 400, NULL, 0);
+        omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
+                        ARRAY_SIZE(notle_i2c_3_boardinfo));
+        switch (NOTLE_VERSION) {
+          case V1_DOG:
+            omap_register_i2c_bus(4, 400, notle_dog_i2c_4_boardinfo,
+                        ARRAY_SIZE(notle_dog_i2c_4_boardinfo));
+            break;
+          case V3_EMU:
+            omap_register_i2c_bus(4, 400, notle_emu_i2c_4_boardinfo,
+                        ARRAY_SIZE(notle_emu_i2c_4_boardinfo));
+            break;
+          case V4_FLY:
+            omap_register_i2c_bus(4, 400, notle_fly_i2c_4_boardinfo,
+                        ARRAY_SIZE(notle_fly_i2c_4_boardinfo));
+            break;
+          default:
+            omap_register_i2c_bus(4, 400, NULL, 0);
+            break;
+        }
+        return 0;
 }
 
 #ifdef CONFIG_OMAP_MUX
@@ -1329,19 +1489,19 @@ error:
         return r;
 }
 
+/* XXX Turning on GPS currently costs us ~50mA of current draw.
 static int __init notle_gps_start(void) {
 	gpio_set_value(GPIO_GPS_ON_OFF, 1);
         pr_info("Turning on GPS chip\n");
         return 0;
 }
-/* XXX Turning on GPS currently costs us ~50mA of current draw.
 late_initcall(notle_gps_start);
 */
 
 static int __init notle_touchpad_init(void) {
         int r;
 
-        pr_info("%s()+", __func__);
+        pr_info("%s()+\n", __func__);
 
         /* Configuration of requested GPIO line */
 
@@ -1601,22 +1761,37 @@ static void __init notle_init(void)
                 pr_err("Touchpad initialization failed: %d\n", err);
         }
 
-#ifdef CONFIG_OMAP2_DSS_DSI
-        err = notle_dsi_init();
-        if (!err) {
-                omap_display_init(&notle_dss_data);
-        } else {
-                pr_err("DSI initialization failed: %d\n", err);
-        }
-#else
-        err = notle_dvi_init();
-        if (!err) {
-                omap_display_init(&notle_dss_data);
-        } else {
-                pr_err("DVI initialization failed: %d\n", err);
+        switch (NOTLE_VERSION) {
+          case V1_DOG:
+            err = notle_dpi_init();
+            if (!err) {
+                    omap_display_init(&generic_dpi_dss_data);
+            } else {
+                    pr_err("DPI initialization failed: %d\n", err);
+            }
+            break;
+          case V3_EMU:
+            err = notle_dsi_init();
+            if (!err) {
+                    omap_display_init(&notle_dsi_dss_data);
+            } else {
+                    pr_err("DSI initialization failed: %d\n", err);
+            }
+            break;
+          case V4_FLY:
+            err = notle_dpi_init();
+            if (!err) {
+                    omap_display_init(&panel_notle_dss_data);
+            } else {
+                    pr_err("DPI initialization failed: %d\n", err);
+            }
+            break;
+          default:
+            pr_err("No display supported for Notle version: %s\n",
+                   notle_version_str(NOTLE_VERSION));
+            break;
         }
 
-#endif
         omap_enable_smartreflex_on_init();
 }
 
