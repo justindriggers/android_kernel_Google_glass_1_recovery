@@ -1559,7 +1559,7 @@ static void __init notle_init(void)
         }
 
         register_reboot_notifier(&notle_reboot_notifier);
-        if (board_ver != V1_DOG) {
+        if (NOTLE_VERSION != V1_DOG) {
                 // Disable support for sd card on Emu and beyond:
                 mmc[2].mmc = 0;
                 // Also disable vmmc voltage regulator used for sd card:
