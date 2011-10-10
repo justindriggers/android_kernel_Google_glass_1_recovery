@@ -944,8 +944,12 @@ static void twl6040_hs_jack_report(struct snd_soc_codec *codec,
 
 	/* Sync status */
 	status = twl6040_read_reg_volatile(codec, TWL6040_REG_STATUS);
-	if (status & TWL6040_PLUGCOMP)
-		state = report;
+//	if (status & TWL6040_PLUGCOMP)
+//		state = report;
+	// TODO(petermalkin): For now have the headset always on
+	// Whenever Russ gives me a signal from headset,
+	// place the real code here
+	state = report;
 
 	mutex_unlock(&priv->mutex);
 
