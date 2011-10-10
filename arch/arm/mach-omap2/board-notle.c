@@ -326,7 +326,7 @@ static struct panel_generic_dpi_data dpi_panel = {
 };
 
 /* Using the panel-notle-dpi driver, we only specify enable/disable. */
-static struct panel_notle_data notle_panel = {
+static struct panel_notle_data panel_notle = {
         .platform_enable          = notle_enable_dpi,
         .platform_disable         = notle_disable_dpi,
 };
@@ -344,8 +344,8 @@ struct omap_dss_device panel_generic_dpi_device = {
 struct omap_dss_device panel_notle_device = {
         .type                     = OMAP_DISPLAY_TYPE_DPI,
         .name                     = "notle_nhd_panel",
-        .driver_name              = "notle_panel",
-        .data                     = &notle_panel,
+        .driver_name              = "panel_notle",
+        .data                     = &panel_notle,
         .phy.dpi.data_lines       = 24,
         .reset_gpio               = GPIO_LCD_RESET_N,
         .channel                  = OMAP_DSS_CHANNEL_LCD2,

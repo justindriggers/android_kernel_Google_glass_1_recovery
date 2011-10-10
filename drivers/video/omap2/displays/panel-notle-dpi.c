@@ -25,6 +25,11 @@
 #include <video/omapdss.h>
 #include <video/omap-panel-notle.h>
 
+enum {
+        NOTLE_I2C_FPGA  = 0,
+        NOTLE_I2C_PANEL = 1,
+};
+
 struct init_register_value {
         u8 reg;
         u8 value;
@@ -107,11 +112,11 @@ static struct fpga_config fpga_config = {
   .blue_on_line = 0x03,
 };
 
-struct notle_panel_i2c {
+struct panel_notle_i2c {
         struct i2c_client *fpga_client;
         struct i2c_client *panel_client;
 };
-static struct notle_panel_i2c *i2c_data;
+static struct panel_notle_i2c *i2c_data;
 
 struct panel_config {
         struct omap_video_timings timings;
@@ -132,15 +137,15 @@ static struct panel_config notle_config = {
         .timings = {
                 .x_res          = 640,
                 .y_res          = 360,
-                .pixel_clock    = 76800,
+                .pixel_clock    = 66400,
 
-                .hfp            = 48,
-                .hsw            = 32,
-                .hbp            = 80,
+                .hfp            = 10,
+                .hsw            = 68,
+                .hbp            = 10,
 
-                .vfp            = 3,
-                .vsw            = 4,
-                .vbp            = 7,
+                .vfp            = 5,
+                .vsw            = 10,
+                .vbp            = 5,
         },
         .acbi                   = 0x0,
         .acb                    = 0x0,
@@ -149,9 +154,10 @@ static struct panel_config notle_config = {
         .power_off_delay        = 0,
 };
 
-struct panel_drv_data {
+struct notle_drv_data {
         struct omap_dss_device *dssdev;
         struct panel_config *panel_config;
+        struct kobject kobj;
 };
 
 static inline struct panel_notle_data
@@ -159,6 +165,97 @@ static inline struct panel_notle_data
         return (struct panel_notle_data *) dssdev->data;
 }
 
+/* Local functions used by the sysfs interface */
+static void panel_notle_power_off(struct omap_dss_device *dssdev);
+static int panel_notle_power_on(struct omap_dss_device *dssdev);
+
+/* Sysfs interface */
+static ssize_t panel_notle_sysfs_reset(struct notle_drv_data *notle_data,
+                                       const char *buf, size_t size) {
+        panel_notle_power_off(notle_data->dssdev);
+        msleep(100);
+        panel_notle_power_on(notle_data->dssdev);
+        return size;
+}
+
+/* Sysfs show functions */
+static ssize_t panel_notle_pixel_clock_show(struct notle_drv_data *notle_data,
+                                            char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        notle_data->dssdev->panel.timings.pixel_clock);
+}
+
+/* Sysfs store functions */
+static ssize_t panel_notle_pixel_clock_store(struct notle_drv_data *notle_data,
+                                             const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+        notle_data->dssdev->panel.timings.pixel_clock = value;
+        return size;
+}
+
+/* Sysfs attribute wrappers for show/store functions */
+struct panel_notle_attribute {
+        struct attribute attr;
+        ssize_t (*show)(struct notle_drv_data *, char *);
+        ssize_t (*store)(struct notle_drv_data *, const char *, size_t);
+};
+
+#define NOTLE_ATTR(_name, _mode, _show, _store) \
+        struct panel_notle_attribute panel_notle_attr_##_name = \
+        __ATTR(_name, _mode, _show, _store)
+
+static NOTLE_ATTR(reset, S_IWUSR, NULL, panel_notle_sysfs_reset);
+static NOTLE_ATTR(pixel_clock, S_IRUGO|S_IWUSR,
+                  panel_notle_pixel_clock_show, panel_notle_pixel_clock_store);
+
+static struct attribute *panel_notle_sysfs_attrs[] = {
+        &panel_notle_attr_reset.attr,
+        &panel_notle_attr_pixel_clock.attr,
+        NULL,
+};
+
+static ssize_t panel_notle_attr_show(struct kobject *kobj, struct attribute *attr,
+                                     char *buf) {
+        struct notle_drv_data *panel_notle;
+        struct panel_notle_attribute *panel_notle_attr;
+
+        panel_notle = container_of(kobj, struct notle_drv_data, kobj);
+        panel_notle_attr = container_of(attr, struct panel_notle_attribute, attr);
+
+        if (!panel_notle_attr->show)
+                return -ENOENT;
+
+        return panel_notle_attr->show(panel_notle, buf);
+}
+
+static ssize_t panel_notle_attr_store(struct kobject *kobj, struct attribute *attr,
+                                      const char *buf, size_t size) {
+        struct notle_drv_data *panel_notle;
+        struct panel_notle_attribute *panel_notle_attr;
+
+        panel_notle = container_of(kobj, struct notle_drv_data, kobj);
+        panel_notle_attr = container_of(attr, struct panel_notle_attribute, attr);
+
+        if (!panel_notle_attr->store)
+                return -ENOENT;
+
+        return panel_notle_attr->store(panel_notle, buf, size);
+}
+
+static const struct sysfs_ops panel_notle_sysfs_ops = {
+        .show = panel_notle_attr_show,
+        .store = panel_notle_attr_store,
+};
+
+static struct kobj_type panel_notle_ktype = {
+        .sysfs_ops = &panel_notle_sysfs_ops,
+        .default_attrs = panel_notle_sysfs_attrs,
+};
+
+/* Utility functions */
 static int panel_write_register(u8 reg, u8 value) {
         u8 buf[2];
         int r;
@@ -207,10 +304,11 @@ static int fpga_write_config(struct fpga_config *config) {
         return 0;
 };
 
-static int notle_panel_power_on(struct omap_dss_device *dssdev) {
+/* Functions to perform actions on the panel and DSS driver */
+static int panel_notle_power_on(struct omap_dss_device *dssdev) {
         int i, r;
         struct panel_notle_data *panel_data = get_panel_data(dssdev);
-        struct panel_drv_data *drv_data = dev_get_drvdata(&dssdev->dev);
+        struct notle_drv_data *drv_data = dev_get_drvdata(&dssdev->dev);
         struct panel_config *panel_config = drv_data->panel_config;
 
         if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE) {
@@ -244,10 +342,9 @@ static int notle_panel_power_on(struct omap_dss_device *dssdev) {
                 }
         }
 
-        /* TODO(madsci): Set up some sysfs attributes to control this config. */
         if (fpga_write_config(&fpga_config)) {
-          printk(KERN_ERR "Failed to write FPGA config for Notle panel\n");
-          goto err2;
+                printk(KERN_ERR "Failed to write FPGA config for Notle panel\n");
+                goto err2;
         }
 
         return 0;
@@ -259,9 +356,9 @@ err0:
         return r;
 }
 
-static void notle_panel_power_off(struct omap_dss_device *dssdev) {
+static void panel_notle_power_off(struct omap_dss_device *dssdev) {
         struct panel_notle_data *panel_data = get_panel_data(dssdev);
-        struct panel_drv_data *drv_data = dev_get_drvdata(&dssdev->dev);
+        struct notle_drv_data *drv_data = dev_get_drvdata(&dssdev->dev);
         struct panel_config *panel_config = drv_data->panel_config;
 
         if (dssdev->state != OMAP_DSS_DISPLAY_ACTIVE) {
@@ -279,9 +376,10 @@ static void notle_panel_power_off(struct omap_dss_device *dssdev) {
         omapdss_dpi_display_disable(dssdev);
 }
 
-static int notle_panel_probe(struct omap_dss_device *dssdev) {
+static int panel_notle_probe(struct omap_dss_device *dssdev) {
+        int r;
         struct panel_config *panel_config = &notle_config;
-        struct panel_drv_data *drv_data = NULL;
+        struct notle_drv_data *drv_data = NULL;
 
         dev_dbg(&dssdev->dev, "probe\n");
 
@@ -300,11 +398,17 @@ static int notle_panel_probe(struct omap_dss_device *dssdev) {
 
         dev_set_drvdata(&dssdev->dev, drv_data);
 
+        r = kobject_init_and_add(&drv_data->kobj, &panel_notle_ktype,
+                        &dssdev->manager->kobj, "panel-notle-dpi");
+        if (r) {
+                printk(KERN_WARNING "Notle panel failed to create sysfs directory\n");
+        }
+
         return 0;
 }
 
-static void __exit notle_panel_remove(struct omap_dss_device *dssdev) {
-        struct panel_drv_data *drv_data = dev_get_drvdata(&dssdev->dev);
+static void __exit panel_notle_remove(struct omap_dss_device *dssdev) {
+        struct notle_drv_data *drv_data = dev_get_drvdata(&dssdev->dev);
 
         dev_dbg(&dssdev->dev, "remove\n");
 
@@ -313,10 +417,10 @@ static void __exit notle_panel_remove(struct omap_dss_device *dssdev) {
         dev_set_drvdata(&dssdev->dev, NULL);
 }
 
-static int notle_panel_enable(struct omap_dss_device *dssdev) {
+static int panel_notle_enable(struct omap_dss_device *dssdev) {
         int r = 0;
 
-        r = notle_panel_power_on(dssdev);
+        r = panel_notle_power_on(dssdev);
         if (r)
                 return r;
 
@@ -325,10 +429,10 @@ static int notle_panel_enable(struct omap_dss_device *dssdev) {
         return 0;
 }
 
-static int notle_panel_resume(struct omap_dss_device *dssdev) {
+static int panel_notle_resume(struct omap_dss_device *dssdev) {
         int r = 0;
 
-        r = notle_panel_power_on(dssdev);
+        r = panel_notle_power_on(dssdev);
         if (r)
                 return r;
 
@@ -337,54 +441,55 @@ static int notle_panel_resume(struct omap_dss_device *dssdev) {
         return 0;
 }
 
-static void notle_panel_disable(struct omap_dss_device *dssdev) {
-        notle_panel_power_off(dssdev);
+static void panel_notle_disable(struct omap_dss_device *dssdev) {
+        panel_notle_power_off(dssdev);
 
         dssdev->state = OMAP_DSS_DISPLAY_DISABLED;
 }
 
-static int notle_panel_suspend(struct omap_dss_device *dssdev) {
-        notle_panel_power_off(dssdev);
+static int panel_notle_suspend(struct omap_dss_device *dssdev) {
+        panel_notle_power_off(dssdev);
 
         dssdev->state = OMAP_DSS_DISPLAY_SUSPENDED;
 
         return 0;
 }
 
-static void notle_panel_set_timings(struct omap_dss_device *dssdev,
+static void panel_notle_set_timings(struct omap_dss_device *dssdev,
                 struct omap_video_timings *timings) {
         dpi_set_timings(dssdev, timings);
 }
 
-static void notle_panel_get_timings(struct omap_dss_device *dssdev,
+static void panel_notle_get_timings(struct omap_dss_device *dssdev,
                 struct omap_video_timings *timings) {
         *timings = dssdev->panel.timings;
 }
 
-static int notle_panel_check_timings(struct omap_dss_device *dssdev,
+static int panel_notle_check_timings(struct omap_dss_device *dssdev,
                 struct omap_video_timings *timings) {
         return dpi_check_timings(dssdev, timings);
 }
 
 static struct omap_dss_driver dpi_driver = {
-        .probe                 = notle_panel_probe,
-        .remove                = __exit_p(notle_panel_remove),
+        .probe                 = panel_notle_probe,
+        .remove                = __exit_p(panel_notle_remove),
 
-        .enable                = notle_panel_enable,
-        .disable               = notle_panel_disable,
-        .suspend               = notle_panel_suspend,
-        .resume                = notle_panel_resume,
+        .enable                = panel_notle_enable,
+        .disable               = panel_notle_disable,
+        .suspend               = panel_notle_suspend,
+        .resume                = panel_notle_resume,
 
-        .set_timings           = notle_panel_set_timings,
-        .get_timings           = notle_panel_get_timings,
-        .check_timings         = notle_panel_check_timings,
+        .set_timings           = panel_notle_set_timings,
+        .get_timings           = panel_notle_get_timings,
+        .check_timings         = panel_notle_check_timings,
 
         .driver                = {
-                .name                  = "notle_panel",
+                .name                  = "panel_notle",
                 .owner                 = THIS_MODULE,
         },
 };
 
+/* Functions to handle initialization of the i2c driver */
 static int __devinit i2c_probe(struct i2c_client *client,
                                const struct i2c_device_id *id)
 {
@@ -398,11 +503,11 @@ static int __devinit i2c_probe(struct i2c_client *client,
         i2c_set_clientdata(client, i2c_data);
 
         switch (id->driver_data) {
-          case 0:
+          case NOTLE_I2C_FPGA:
             /* panel-notle-fpga */
             i2c_data->fpga_client = client;
             break;
-          case 1:
+          case NOTLE_I2C_PANEL:
             /* panel-notle-panel */
             i2c_data->panel_client = client;
             break;
@@ -414,24 +519,22 @@ static int __devinit i2c_probe(struct i2c_client *client,
         return 0;
 }
 
-/* driver remove function */
 static int __devexit i2c_remove(struct i2c_client *client)
 {
-        struct notle_panel_i2c *drv_data = i2c_get_clientdata(client);
+        struct panel_notle_i2c *drv_data = i2c_get_clientdata(client);
 
-        /* remove client data */
         i2c_set_clientdata(client, NULL);
 
-        /* free private data memory */
         i2c_data = NULL;
         kfree(drv_data);
 
         return 0;
 }
 
+/* These are the I2C devices we support */
 static const struct i2c_device_id i2c_idtable[] = {
-        {"panel-notle-fpga", 0},
-        {"panel-notle-panel", 1},
+        {"panel-notle-fpga", NOTLE_I2C_FPGA},
+        {"panel-notle-panel", NOTLE_I2C_PANEL},
         {},
 };
 
@@ -445,24 +548,37 @@ static struct i2c_driver i2c_driver = {
         },
 };
 
-static int __init notle_panel_drv_init(void) {
+static int __init panel_notle_drv_init(void) {
         int r = 0;
         r = i2c_add_driver(&i2c_driver);
         if (r < 0) {
                 printk(KERN_WARNING "Notle panel i2c driver registration failed\n");
-                return r;
+                goto err0;
         }
 
-        return omap_dss_register_driver(&dpi_driver);
+        r = omap_dss_register_driver(&dpi_driver);
+        if (r < 0) {
+                printk(KERN_WARNING "Notle panel dss driver registration failed\n");
+                goto err1;
+        }
+
+        return 0;
+
+err1:
+        i2c_del_driver(&i2c_driver);
+err0:
+        return r;
 }
 
-static void __exit notle_panel_drv_exit(void) {
+static void __exit panel_notle_drv_exit(void) {
         omap_dss_unregister_driver(&dpi_driver);
         i2c_del_driver(&i2c_driver);
 }
 
-module_init(notle_panel_drv_init);
-module_exit(notle_panel_drv_exit);
+module_init(panel_notle_drv_init);
+module_exit(panel_notle_drv_exit);
+
+
 
 MODULE_DESCRIPTION("Notle FPGA and Panel Driver");
 MODULE_LICENSE("GPL");

@@ -29,6 +29,7 @@ struct omap_dss_device;
  * @platform_disable: platform specific panel disable function
  */
 struct panel_notle_data {
+        struct omap_dss_device *dssdev;
         int (*platform_enable)(struct omap_dss_device *dssdev);
         void (*platform_disable)(struct omap_dss_device *dssdev);
 };
