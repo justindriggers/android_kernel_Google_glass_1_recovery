@@ -1093,13 +1093,28 @@ static struct rmi_sensor_suspend_custom_ops synaptics_custom_ops = {
         .delay_resume = 0,
 };
 
+static struct rmi_f11_functiondata synaptics_f11_data = {
+        .swap_axes = true,
+        /* flip_X and flip_Y will be set based on NOTLE_VERSION */
+};
+
+static struct rmi_functiondata synaptics_fndata = {
+        .function_index     = RMI_F11_INDEX,
+        .data               = &synaptics_f11_data,
+};
+
+static struct rmi_functiondata_list synaptics_fndatalist = {
+        .count              = 1,
+        .functiondata       = &synaptics_fndata,
+};
+
 static struct rmi_sensordata __initdata synaptics_sensordata = {
         .rmi_sensor_setup = 0,
         .rmi_sensor_teardown = 0,
         .attn_gpio_number = GPIO_TOUCHPAD_INT_N,
         .attn_polarity = 0,
         .custom_suspend_ops = &synaptics_custom_ops,
-        .perfunctiondata = 0,
+        .perfunctiondata = &synaptics_fndatalist,
 };
 
 static struct rmi_i2c_platformdata __initdata synaptics_platformdata = {
@@ -1449,6 +1464,9 @@ static int __init notle_i2c_init(void)
 
         switch (NOTLE_VERSION) {
           case V1_DOG:
+            synaptics_f11_data.flip_X = true;
+            synaptics_f11_data.flip_Y = false;
+
             omap4_pmic_init("twl6030", &dog_twldata);
             omap_register_i2c_bus(2, 400, NULL, 0);
             omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
@@ -1457,6 +1475,9 @@ static int __init notle_i2c_init(void)
                             ARRAY_SIZE(notle_dog_i2c_4_boardinfo));
             break;
           case V3_EMU:
+            synaptics_f11_data.flip_X = false;
+            synaptics_f11_data.flip_Y = true;
+
             omap4_pmic_init("twl6030", &emu_twldata);
             omap_register_i2c_bus(2, 400, NULL, 0);
             omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
@@ -1465,6 +1486,9 @@ static int __init notle_i2c_init(void)
                             ARRAY_SIZE(notle_emu_i2c_4_boardinfo));
             break;
           case V4_FLY:
+            synaptics_f11_data.flip_X = true;
+            synaptics_f11_data.flip_Y = false;
+
             omap4_pmic_init("twl6030", &fly_twldata);
             omap_register_i2c_bus(2, 400, NULL, 0);
             omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,

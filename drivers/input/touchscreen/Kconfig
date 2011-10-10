@@ -226,13 +226,6 @@ config TOUCHSCREEN_ELO
 	  To compile this driver as a module, choose M here: the
 	  module will be called elo.
 
-config TOUCHSCREEN_FLIP_AXES
-	bool "Flip both touchscreen axes"
-	help
-	  Say Y here if you want both touchscreen axes to be flipped.
-
-	  If unsure, say N.
-
 config TOUCHSCREEN_WACOM_W8001
 	tristate "Wacom W8001 penabled serial touchscreen"
 	select SERIO

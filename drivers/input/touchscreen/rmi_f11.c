@@ -978,16 +978,9 @@ int FN_11_init(struct rmi_function_device *function_device)
 			RMI_F11_INDEX);
 	pr_debug("%s: RMI4 F11 init", __func__);
 
-	/* TODO: Initialize these through some normal kernel mechanism.
-	 */
-#ifdef CONFIG_TOUCHSCREEN_FLIP_AXES
-        instance_data->flip_X = false;
-        instance_data->flip_Y = true;
-#else
-	instance_data->flip_X = true;
+	instance_data->flip_X = false;
 	instance_data->flip_Y = false;
-#endif
-	instance_data->swap_axes = true;
+	instance_data->swap_axes = false;
 	instance_data->rel_report_enabled = true;
 	instance_data->offset_X = instance_data->offset_Y = 0;
 	instance_data->clip_X_low = instance_data->clip_Y_low = 0;
