@@ -380,6 +380,11 @@ config MACH_NOTLE
 	select OMAP_PACKAGE_CBS
     select REGULATOR_FIXED_VOLTAGE
 
+config MMC_NOTLE
+	bool "SD card support for Notle Board"
+	default n
+	depends on MACH_NOTLE
+
 config OMAP3_EMU
 	bool "OMAP3 debugging peripherals"
 	depends on ARCH_OMAP3

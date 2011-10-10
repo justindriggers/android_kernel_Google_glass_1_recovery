@@ -1041,8 +1041,7 @@ static struct twl4030_platform_data emu_twldata = {
 	.irq_end	= TWL6030_IRQ_END,
 
 	/* Regulators */
-//	.vmmc		= &notle_vmmc,
-	.vmmc           = NULL,
+	.vmmc		= &notle_vmmc,
 	.vpp		= &notle_vpp,
 	.vusim		= &notle_vusim,
 	.vana		= &notle_vana,
@@ -1066,8 +1065,7 @@ static struct twl4030_platform_data fly_twldata = {
 	.irq_end	= TWL6030_IRQ_END,
 
 	/* Regulators */
-//	.vmmc		= &notle_vmmc,
-	.vmmc           = NULL,
+	.vmmc		= &notle_vmmc,
 	.vpp		= &notle_vpp,
 	.vusim		= &notle_vusim,
 	.vana		= &notle_vana,
@@ -1837,10 +1835,16 @@ static void __init notle_init(void)
         }
 
         register_reboot_notifier(&notle_reboot_notifier);
-        if (NOTLE_VERSION != V1_DOG) {
-                // Disable support for sd card on Emu and beyond:
-                mmc[2].mmc = 0;
-        }
+
+#ifndef CONFIG_MMC_NOTLE
+        // Disable support for sd card:
+        mmc[2].mmc = 0;
+        // Also disable vmmc voltage regulator used for sd card:
+        dog_twldata.vmmc = NULL;
+        emu_twldata.vmmc = NULL;
+        fly_twldata.vmmc = NULL;
+#endif
+
         notle_i2c_init();
         omap4_register_ion();
 
