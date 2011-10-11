@@ -34,7 +34,7 @@
 #include "rmi_sensor.h"
 #include "rmi_dev.h"
 
-#ifdef CONFIG_SYNA_RMI_DEV
+#if defined(CONFIG_SYNA_RMI_DEV)
 
 #define CHAR_DEVICE_NAME "rmi"
 #define CHAR_DEVICE_NAME_SZ 3
@@ -95,8 +95,9 @@ static loff_t rmi_char_dev_llseek(struct file *filp, loff_t off, int whence)
 	}
 
 	if (newpos < 0 || newpos > REG_ADDR_LIMIT) {
-		pr_debug("%s: newpos 0x%04x is invalid.", __func__, newpos);
-		newpos = -EOVERFLOW;
+		pr_debug("%s: newpos 0x%04x is invalid.",
+				__func__, (unsigned int)newpos);
+		newpos = -EINVAL;
 		goto clean_up;
 	}
 
@@ -126,8 +127,12 @@ static ssize_t rmi_char_dev_read(struct file *filp, char __user *buf,
 {
 	struct rmi_char_dev *my_char_dev = filp->private_data;
 	ssize_t ret_value  = 0;
-	unsigned char tmpbuf[count];
+	unsigned char tmpbuf[count+1];
 	struct rmi_phys_driver *rpd;
+
+	/* limit offset to REG_ADDR_LIMIT-1 */
+	if (count > (REG_ADDR_LIMIT - *f_pos))
+		count = REG_ADDR_LIMIT - *f_pos;
 
 	if (count == 0)
 		return 0;
@@ -145,6 +150,7 @@ static ssize_t rmi_char_dev_read(struct file *filp, char __user *buf,
 	 * just let it go through , because we do not know the register is FIFO
 	 * register or not
 	 */
+
 	/* return zero upon success */
 	ret_value = rpd->read_multiple(rpd, *f_pos, tmpbuf, count);
 	if (ret_value == 0) {
@@ -152,7 +158,7 @@ static ssize_t rmi_char_dev_read(struct file *filp, char __user *buf,
 		ret_value = count;
 		*f_pos += count;
 	} else {
-		ret_value = 0;
+		ret_value = -EIO;
 		goto clean_up;
 	}
 
@@ -182,8 +188,12 @@ static ssize_t rmi_char_dev_write(struct file *filp, const char __user *buf,
 {
 	struct rmi_char_dev *my_char_dev = filp->private_data;
 	ssize_t ret_value  = 0;
-	unsigned char tmpbuf[count];
+	unsigned char tmpbuf[count+1];
 	struct rmi_phys_driver *rpd;
+
+	/* limit offset to REG_ADDR_LIMIT-1 */
+	if (count > (REG_ADDR_LIMIT - *f_pos))
+		count = REG_ADDR_LIMIT - *f_pos;
 
 	if (count == 0)
 		return 0;
@@ -206,6 +216,7 @@ static ssize_t rmi_char_dev_write(struct file *filp, const char __user *buf,
 	 * just let it go through , because we do not know the register is FIFO
 	 * register or not
 	 */
+
 	/* return one upon success */
 
 	ret_value = rpd->write_multiple(rpd, *f_pos, tmpbuf, count);
@@ -215,7 +226,7 @@ static ssize_t rmi_char_dev_write(struct file *filp, const char __user *buf,
 		ret_value = count;
 		*f_pos += count;
 	} else {
-		ret_value = 0;
+		ret_value = -EIO;
 	}
 
 	mutex_unlock(&(my_char_dev->mutex_file_op));
@@ -246,15 +257,12 @@ static int rmi_char_dev_open(struct inode *inp, struct file *filp)
 	mutex_lock(&(my_dev->mutex_file_op));
 	if (my_dev->ref_count < 1)
 		my_dev->ref_count++;
-	else {
+	else
 		ret_value = -EACCES;
-		goto clean_up;
-	}
-	sensor->use_rmi_char_device = true;
 
-clean_up:
 	mutex_unlock(&(my_dev->mutex_file_op));
-	return 0; /*succeeds*/
+
+	return ret_value; /*succeeds*/
 }
 
 /*
@@ -275,8 +283,9 @@ static int rmi_char_dev_release(struct inode *inp, struct file *filp)
 
 	mutex_lock(&(my_dev->mutex_file_op));
 
-	sensor->use_rmi_char_device = false;
 	my_dev->ref_count--;
+	if (my_dev->ref_count < 0)
+		my_dev->ref_count = 0;
 
 	mutex_unlock(&(my_dev->mutex_file_op));
 

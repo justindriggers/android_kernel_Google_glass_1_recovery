@@ -83,10 +83,6 @@ struct rmi_sensor_driver {
 	struct rmi_functiondata_list *perfunctiondata;
 		/* non-default operation for suspend/resume */
 	struct rmi_sensor_suspend_custom_ops *custom_suspend_ops;
-#ifdef CONFIG_SYNA_RMI_DEV
-	 /*by default this is false*/
-	bool use_rmi_char_device;
-#endif /*CONFIG_SYNA_RMI_DEV*/
 };
 
 /* macro to get the pointer to the device_driver struct from the sensor */

@@ -43,6 +43,7 @@
 #include "rmi_f11.h"
 #include "rmi_f19.h"
 #include "rmi_f34.h"
+#include "rmi_f54.h"
 
 
 #define FUNCTION_NAME_SIZE 10
@@ -111,6 +112,17 @@ static struct rmi_function_ops supported_functions[] = {
 		.init = FN_34_init,
 		.detect = FN_34_detect,
 		.attention = FN_34_attention,
+		.suspend = NULL,
+		.resume = NULL,
+		.suspendable = rmi_function_suspendable},
+	/* Fn $54 - diagnostics. */
+	{
+		.function_number = RMI_F54_INDEX,
+		.inthandler = FN_54_inthandler,
+		.config = FN_54_config,
+		.init = FN_54_init,
+		.detect = FN_54_detect,
+		.attention = NULL,
 		.suspend = NULL,
 		.resume = NULL,
 		.suspendable = rmi_function_suspendable},

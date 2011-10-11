@@ -40,6 +40,10 @@
 #define DRIVER_NAME "rmi4_ts"
 #define DEVICE_NAME "rmi4_ts"
 
+#define COMM_DEBUG  0		/* Set to 1 to dump transfers. */
+
+#define PAGE_SELECT_REGISTER 0xFF
+
 static const struct i2c_device_id rmi_i2c_id_table[] = {
 	{RMI4_I2C_DEVICE_NAME, 0},
 	{},
@@ -95,10 +99,14 @@ static irqreturn_t i2c_attn_isr(int irq, void *info);
 #if	defined(USE_PAGESELECT)
 int rmi_set_page(struct instance_data *instance_data, unsigned int page)
 {
-	char txbuf[2];
+	char txbuf[2] = {PAGE_SELECT_REGISTER, page};
 	int retval;
-	txbuf[0] = 0xff;
-	txbuf[1] = page;
+
+#if	COMM_DEBUG
+	dev_info(&instance_data->i2cclient->dev,
+		 "%s: Set page to 0x%02X.", __func__, page);
+#endif
+
 	retval = i2c_master_send(instance_data->i2cclient,
 				txbuf, ARRAY_SIZE(txbuf));
 	if (retval != ARRAY_SIZE(txbuf)) {
@@ -134,10 +142,14 @@ static int rmi_i2c_read_multiple(struct rmi_phys_driver *physdrvr,
 {
 	struct instance_data *instance_data =
 	    container_of(physdrvr, struct instance_data, rmiphysdrvr);
-
-	char txbuf[2];
+	char txbuf[1] = {address & 0xff};
 	int retval = 0;
 	int retry_count = 0;
+
+#if	COMM_DEBUG
+	dev_info(&instance_data->i2cclient->dev, "%s: Read %d bytes at 0x%04x",
+		 __func__, size, address);
+#endif
 
 	/* Can't have anyone else changing the page behind our backs */
 	mutex_lock(&instance_data->page_mutex);
@@ -150,17 +162,23 @@ static int rmi_i2c_read_multiple(struct rmi_phys_driver *physdrvr,
 	}
 
 retry:
-	txbuf[0] = address & 0xff;
-	retval = i2c_master_send(instance_data->i2cclient, txbuf, 1);
+	physdrvr->tx_count++;
+	physdrvr->tx_bytes += ARRAY_SIZE(txbuf);
+	retval = i2c_master_send(instance_data->i2cclient, txbuf, ARRAY_SIZE(txbuf));
 
 	if (retval != 1) {
 		dev_err(&instance_data->i2cclient->dev, "%s: Write fail: %d\n",
 			__func__, retval);
+		physdrvr->tx_errors++;
 		goto exit;
 	}
+
+	physdrvr->rx_count++;
+	physdrvr->rx_bytes += size;
 	retval = i2c_master_recv(instance_data->i2cclient, valp, size);
 
 	if (retval != size) {
+		physdrvr->rx_errors++;
 		if (++retry_count == 5) {
 			dev_err(&instance_data->i2cclient->dev,
 				"%s: Read of 0x%04x size %d fail: %d\n",
@@ -221,20 +239,29 @@ rmi_i2c_write_multiple(struct rmi_phys_driver *physdrvr, unsigned short address,
 	if (((address >> 8) & 0xff) != instance_data->page) {
 		/* Switch pages */
 		retval = rmi_set_page(instance_data, ((address >> 8) & 0xff));
-		if (retval)
+		if (retval) {
+			/* error occurs we change return value to -1 */
+			retval = -1;
 			goto exit;
+		}
 	}
 
 	txbuf[0] = address & 0xff;	/* put the address in the first byte */
 	retval = i2c_master_send(instance_data->i2cclient,
 				txbuf, ARRAY_SIZE(txbuf));
+	physdrvr->tx_count++;
+	physdrvr->tx_bytes += ARRAY_SIZE(txbuf);
 
 	/* TODO: Add in retry on writes only in certain error return values */
 	if (retval != ARRAY_SIZE(txbuf)) {
 		dev_err(&instance_data->i2cclient->dev, "%s: Write fail: %d\n",
 			__func__, retval);
+		physdrvr->tx_errors++;
+		/* error occurs we change return value to -2 */
+		retval = -2;
 		goto exit;
-	}
+	} else
+		retval = 1; /* return one if succeeds */
 
 exit:
 	mutex_unlock(&instance_data->page_mutex);
@@ -265,7 +292,7 @@ static irqreturn_t i2c_attn_isr(int irq, void *info)
 	struct instance_data *instance_data = info;
 
 	disable_irq_nosync(instance_data->irq);
-
+	instance_data->rmiphysdrvr.attn_count++;
 
 	if (instance_data->rmiphysdrvr.attention &&
 			(gpio_get_value(instance_data->attn_gpio) ==
@@ -285,8 +312,9 @@ acquire_attn_irq(struct instance_data *instance_data)
 {
 	int retval;
 
+	unsigned long irq_type = IRQ_TYPE_LEVEL_LOW;
 	retval = request_irq(instance_data->irq, i2c_attn_isr,
-		     IRQ_TYPE_EDGE_BOTH, "rmi_i2c",
+			irq_type, "rmi_i2c",
 		     instance_data);
 	if (retval)
 		return retval;
@@ -300,13 +328,25 @@ acquire_attn_irq(struct instance_data *instance_data)
                 return retval;
 #endif
 
-	if (gpio_get_value(instance_data->attn_gpio) ==
+	/*
+	 * For some reason if we setup as level trigger, and execute
+	 * 'instance_data->rmiphysdrvr.atten',
+	 * there will be no more IRQ triggered.
+	 * On the contrary, if we setup as edge trigger, we have to execute
+	 * 'instance_data->rmiphysdrvr.atten'.
+	 * Or, we won't receive any IRQ.
+	 *
+	 */
+	if ((irq_type & IRQ_TYPE_EDGE_BOTH) != 0)
+		if (instance_data->attn_gpio &&
+			gpio_get_value(instance_data->attn_gpio) ==
 			instance_data->attn_polarity &&
 			instance_data->rmiphysdrvr.attention) {
-		disable_irq(instance_data->irq);
-		instance_data->rmiphysdrvr.attention(
-			&instance_data->rmiphysdrvr);
-			}
+
+			disable_irq(instance_data->irq);
+			instance_data->rmiphysdrvr.attention(
+					&instance_data->rmiphysdrvr);
+		}
 
 	return retval;
 }
@@ -321,13 +361,13 @@ static void set_attn_handler (struct rmi_phys_driver *physdrvr,
 
 	physdrvr->attention = attention;
 	if (instance_data->attn_gpio &&
-                gpio_get_value(instance_data->attn_gpio) ==
-		instance_data->attn_polarity &&
-		instance_data->rmiphysdrvr.attention) {
-                disable_irq(instance_data->irq);
-                instance_data->rmiphysdrvr.attention(
-                        &instance_data->rmiphysdrvr);
-        }
+			gpio_get_value(instance_data->attn_gpio) ==
+			instance_data->attn_polarity &&
+			instance_data->rmiphysdrvr.attention) {
+		disable_irq(instance_data->irq);
+		instance_data->rmiphysdrvr.attention(
+			&instance_data->rmiphysdrvr);
+	}
 }
 
 
@@ -438,6 +478,7 @@ rmi_i2c_probe(struct i2c_client *client, const struct i2c_device_id *dev_id)
 	   for this device. We'll still work but in polling mode since we didn't
 	   find any irq info */
 	instance_data->rmiphysdrvr.polling_required = true;
+	instance_data->rmiphysdrvr.proto_name = "i2c";
 
 	instance_data->page = 0xffff;	/* Force a set page the first time */
 	instance_data->enabled = true;	/* We plan to come up enabled. */
@@ -537,6 +578,9 @@ rmi_i2c_probe(struct i2c_client *client, const struct i2c_device_id *dev_id)
 			retval = 0;
 		}
 
+		/* export GPIO for attention handling */
+
+#if defined(CONFIG_SYNA_RMI_DEV)
 		retval = gpio_export(instance_data->attn_gpio, false);
 		if (retval) {
 			dev_warn(&client->dev, "%s: WARNING: Failed to "
@@ -561,6 +605,7 @@ rmi_i2c_probe(struct i2c_client *client, const struct i2c_device_id *dev_id)
 					__func__, instance_data->attn_gpio);
 			}
 		}
+#endif /* CONFIG_SYNA_RMI_DEV */
 	}
 
 	dev_dbg(&client->dev, "%s: Successfully registered %s sensor driver.\n",

@@ -192,6 +192,8 @@ struct f11_instance_data {
 	bool swap_axes;
 	bool rel_report_enabled;
 
+	struct input_dev *mouse_input;
+
 	unsigned int data8_offset;
 	unsigned int data9_offset;
 	unsigned int data10_offset;
@@ -732,7 +734,7 @@ static void handle_absolute_reports(struct rmi_function_info *rmifninfo)
 					XY_HIGH_BITS_SHIFT) & XY_HIGH_BITS_MASK)
 				| ((instance_data->finger_data_buffer[reg +
 					XY_LOW_BITS_OFFSET] >> X_LOW_BITS_SHIFT)
-				& XY_LOW_BITS_MASK);
+					& XY_LOW_BITS_MASK);
 			Y = ((instance_data->finger_data_buffer[reg +
 					Y_HIGH_BITS_OFFSET] <<
 					XY_HIGH_BITS_SHIFT) & XY_HIGH_BITS_MASK)
@@ -872,8 +874,6 @@ static void handle_absolute_reports(struct rmi_function_info *rmifninfo)
 static void handle_relative_report(struct rmi_function_info *rmifninfo)
 {
 	struct f11_instance_data *instance_data = rmifninfo->fndata;
-	struct rmi_function_device *function_device =
-			rmifninfo->function_device;
 	signed char X, Y;
 	int reg = instance_data->rel_data_offset;
 
@@ -894,8 +894,11 @@ static void handle_relative_report(struct rmi_function_info *rmifninfo)
 	Y = (signed char)min(F11_MAX_RELATIVE,
 				max(F11_MIN_RELATIVE, (int)Y));
 
-	input_report_rel(function_device->input, REL_X, X);
-	input_report_rel(function_device->input, REL_Y, Y);
+	if (X || Y) {
+		input_report_rel(instance_data->mouse_input, REL_X, X);
+		input_report_rel(instance_data->mouse_input, REL_Y, Y);
+	}
+	input_sync(instance_data->mouse_input);
 }
 
 /* This is a stub for now, and will be expanded as this implementation
@@ -978,6 +981,8 @@ int FN_11_init(struct rmi_function_device *function_device)
 			RMI_F11_INDEX);
 	pr_debug("%s: RMI4 F11 init", __func__);
 
+	/* TODO: Initialize these through some normal kernel mechanism.
+	 */
 	instance_data->flip_X = false;
 	instance_data->flip_Y = false;
 	instance_data->swap_axes = false;
@@ -1037,6 +1042,41 @@ int FN_11_init(struct rmi_function_device *function_device)
 	set_bit(EV_KEY, function_device->input->evbit);
 
 	f11_set_abs_params(function_device);
+
+
+	if (instance_data->sensor_info->has_relative) {
+		/*create input device for mouse events  */
+		struct input_dev *input_dev_mouse = input_allocate_device();
+		if (!input_dev_mouse) {
+			retval = -ENOMEM;
+			goto error_exit;
+		}
+
+		instance_data->mouse_input = input_dev_mouse;
+		input_dev_mouse->name = "rmi_mouse";
+		input_dev_mouse->phys = "rmi_f11/input0";
+
+		input_dev_mouse->id.vendor  = 0x18d1;
+		input_dev_mouse->id.product = 0x0210;
+		input_dev_mouse->id.version = 0x0100;
+
+		set_bit(EV_REL, input_dev_mouse->evbit);
+		set_bit(REL_X, input_dev_mouse->relbit);
+		set_bit(REL_Y, input_dev_mouse->relbit);
+
+		set_bit(BTN_MOUSE, input_dev_mouse->evbit);
+		/* Register device's buttons and keys */
+		set_bit(EV_KEY, input_dev_mouse->evbit);
+		set_bit(BTN_LEFT, input_dev_mouse->keybit);
+		set_bit(BTN_MIDDLE, input_dev_mouse->keybit);
+		set_bit(BTN_RIGHT, input_dev_mouse->keybit);
+
+		retval = input_register_device(input_dev_mouse);
+		if (retval < 0) {
+			pr_err("Failed to register mouse device.\n");
+			goto error_exit;
+		}
+	}
 
 	pr_debug("%s: Creating sysfs files.", __func__);
 	/* Set up sysfs device attributes. */

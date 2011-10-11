@@ -140,4 +140,6 @@ struct rmi_f19_functiondata {
 	struct rmi_button_map *button_map;
 };
 
+#define USE_PAGESELECT /* for RMI_I2C */
+
 #endif

@@ -28,7 +28,21 @@
 
 #include <linux/input.h>
 #include <linux/device.h>
-
+/* For each function present on the RMI device, we need to get the RMI4 Function
+ * Descriptor info from the Page Descriptor Table. This will give us the
+ * addresses for Query, Command, Control, Data and the Source Count (number
+ * of sources for this function) and the function id.
+ * This version contains the full addresses, needed in the case of multiple
+ * pages with PDT's on them.
+ */
+struct rmi_function_descriptor_short {
+	unsigned short query_base_addr;
+	unsigned short command_base_addr;
+	unsigned short control_base_addr;
+	unsigned short data_base_addr;
+	unsigned char interrupt_source_count;
+	unsigned char function_number;
+};
 /* For each function present on the RMI device, there will be a corresponding
  * entry in the functions list of the rmi_sensor_driver structure.  This entry
  * gives information about the number of data sources and the number of data
@@ -57,9 +71,9 @@ struct rmi_function_info {
 
 	/* This is the RMI function descriptor associated with this function.
 	 *  It contains the Base addresses for the functions query, command,
-	 *  control, and data registers.
+	 *  control, and data registers. It includes the page in the addresses.
 	 */
-	struct rmi_function_descriptor function_descriptor;
+	struct rmi_function_descriptor_short function_descriptor;
 
 	/* pointer to data specific to a functions implementation. */
 	void *fndata;
@@ -157,7 +171,8 @@ struct rmi_function_driver {
 };
 
 struct rmi_function_device {
-	struct rmi_function_driver *function;
+	/*TODO: function driver should be removed if/when we don't need it.*/
+	/*struct rmi_function_driver *function;*/
 	struct device dev;
 	struct input_dev *input;
 	/* need this to be bound to phys driver layer */

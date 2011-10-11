@@ -215,7 +215,7 @@ int FN_34_init(struct rmi_function_device *function_device)
 	if (retval) {
 		pr_err("%s : Could not read bootloaderid from 0x%04x\n",
 		       __func__,
-		       function_device->function->query_base_address);
+		       rmifninfo->function_descriptor.query_base_addr);
 		goto error_exit;
 	}
 	batohs(&instance_data->bootloaderid, buf);
@@ -341,11 +341,11 @@ static ssize_t rmi_fn_34_bootloaderid_store(struct device *dev,
 	 * Data registers (F34_Flash_Data2.0 and F34_Flash_Data2.1). */
 	hstoba(data, (unsigned short)val);
 	error =
-	    rmi_write_multiple(fn->sensor, fn->function->data_base_address,
+	    rmi_write_multiple(fn->sensor, fn->rfi->function_descriptor.data_base_addr,
 			       data, ARRAY_SIZE(data));
 	if (error) {
 		dev_err(dev, "%s : Could not write bootloader id to 0x%x\n",
-		       __func__, fn->function->data_base_address);
+		       __func__, fn->rfi->function_descriptor.data_base_addr);
 		return error;
 	}
 
@@ -433,12 +433,13 @@ static ssize_t rmi_fn_34_cmd_store(struct device *dev,
 		/* Issue a Write Firmware Block ($02) command to the Flash
 		 * Command (F34_Flash_Data3, bits 3:0) field. */
 		error = rmi_write_multiple(fn->sensor,
-				fn->function->data_base_address + 3,
+				fn->rfi->function_descriptor.data_base_addr + 3,
 			     &instance_data->cmd, 1);
-		if (error) {
+		/* return one if succeeds */
+		if (error != 1) {
 			dev_err(dev, "%s: Could not write command 0x%02x "
 				"to 0x%04x\n", __func__, instance_data->cmd,
-				fn->function->data_base_address + 3);
+				fn->rfi->function_descriptor.data_base_addr + 3);
 			return error;
 		}
 		break;
@@ -475,11 +476,11 @@ static ssize_t rmi_fn_34_data_read(struct file *data_file,
 	 * at reading from the sysfs file.  When we return the count (or
 	 * error if we fail) the app will resume. */
 	error = rmi_read_multiple(fn->sensor,
-			fn->function->data_base_address + pos,
+			fn->rfi->function_descriptor.data_base_addr + pos,
 			(unsigned char *)buf, count);
 	if (error) {
 		dev_err(dev, "%s : Could not read data from 0x%llx\n",
-		       __func__, fn->function->data_base_address + pos);
+		       __func__, fn->rfi->function_descriptor.data_base_addr + pos);
 		return error;
 	}
 
@@ -531,23 +532,25 @@ static ssize_t rmi_fn_34_data_write(struct file *data_file,
 
 	/* Write the block number first */
 	error = rmi_write_multiple(fn->sensor,
-				fn->function->data_base_address,
+				fn->rfi->function_descriptor.data_base_addr,
 				(unsigned char *)&blocknum, 2);
-	if (error) {
+	/* return one if succeeds */
+	if (error != 1 ) {
 		dev_err(dev, "%s: Could not write block number to 0x%x\n",
-		       __func__, fn->function->data_base_address);
+		       __func__, fn->rfi->function_descriptor.data_base_addr);
 		return error;
 	}
 
 	/* Write the data block - only if the count is non-zero  */
 	if (count) {
 		error = rmi_write_multiple(fn->sensor,
-				fn->function->data_base_address + 2,
+				fn->rfi->function_descriptor.data_base_addr + 2,
 				(unsigned char *)buf, count);
-		if (error) {
+		/* return one if succeeds */
+		if (error != 1) {
 			dev_err(dev, "%s: Could not write block data "
 				"to 0x%x\n", __func__,
-				fn->function->data_base_address + 2);
+				fn->rfi->function_descriptor.data_base_addr + 2);
 			return error;
 		}
 	}

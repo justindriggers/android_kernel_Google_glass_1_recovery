@@ -53,6 +53,16 @@ struct rmi_phys_driver {
 	int (*enable_device) (struct rmi_phys_driver *physdrvr);
 	void (*disable_device) (struct rmi_phys_driver *physdrvr);
 
+	/* Some quick data relating to the operation of the device. */
+	char *proto_name;
+	unsigned long tx_count;
+	unsigned long tx_bytes;
+	unsigned long tx_errors;
+	unsigned long rx_count;
+	unsigned long rx_bytes;
+	unsigned long rx_errors;
+	unsigned long attn_count;
+
 	struct list_head drivers;
 	struct rmi_sensor_driver *sensor;
 	struct module *module;

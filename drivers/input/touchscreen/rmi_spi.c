@@ -38,7 +38,7 @@
 #include "rmi_drvr.h"
 #include "rmi_sensor.h"
 
-#define COMM_DEBUG  0		/* Set to 1 to dump transfers. */
+#define COMM_DEBUG  1		/* Set to 1 to dump transfers. */
 
 /* For V1 protocol, the high bit in the address is set to indicate reads. */
 #define SPI_V1_READ_FLAG 0x80
@@ -105,9 +105,14 @@ static int spi_xfer(struct spi_device_instance_data *instance_data,
 		    n_tx > 1 ? instance_data->split_read_byte_delay_us : 0;
 	}
 
-	if (n_tx)
+	if (n_tx) {
 		xfers_in_message += 1;
+		instance_data->rpd.tx_count++;
+		instance_data->rpd.tx_bytes += n_tx;
+	}
 	if (n_rx) {
+		instance_data->rpd.rx_count++;
+		instance_data->rpd.rx_bytes += n_rx;
 		if (byte_delay)
 			xfers_in_message += n_rx;
 		else
@@ -165,8 +170,11 @@ static int spi_xfer(struct spi_device_instance_data *instance_data,
 			instance_data->platformdata->cs_assert_data, true);
 		if (!status) {
 			pr_err("%s: Failed to assert CS.", __func__);
+			/* nonzero means error */
+			status = -1;
 			goto error_exit;
-		}
+		} else
+			status = 0;
 	}
 	status = spi_sync(spi, &message);
 	if (instance_data->platformdata->cs_assert) {
@@ -174,8 +182,11 @@ static int spi_xfer(struct spi_device_instance_data *instance_data,
 			instance_data->platformdata->cs_assert_data, false);
 		if (!status) {
 			pr_err("%s: Failed to deassert CS.", __func__);
+			/* nonzero means error */
+			status = -1;
 			goto error_exit;
-		}
+		} else
+			status = 0;
 	}
 	if (status == 0) {
 		memcpy(rxbuf, local_buf + n_tx, n_rx);
@@ -188,6 +199,10 @@ static int spi_xfer(struct spi_device_instance_data *instance_data,
 		}
 #endif
 	} else {
+		if (n_tx)
+			instance_data->rpd.tx_errors++;
+		if (n_rx)
+			instance_data->rpd.rx_errors++;
 		pr_err("%s: spi_sync failed with error code %d.",
 		       __func__, status);
 	}
@@ -424,6 +439,7 @@ static irqreturn_t spi_attn_isr(int irq, void *info)
 	struct spi_device_instance_data *instance_data = info;
 
 	disable_irq_nosync(instance_data->irq);
+	instance_data->rpd.attn_count++;
 
 	if (instance_data->spi_version == 2 &&
 	    instance_data->split_read_pending) {
@@ -452,6 +468,7 @@ static int __devinit rmi_spi_probe(struct spi_device *spi)
 	struct rmi_spi_platformdata *platformdata;
 	struct rmi_sensordata *sensordata;
 	char buf[6];
+	unsigned long irq_type = IRQ_TYPE_LEVEL_LOW;
 
 	dev_info(&spi->dev, "%s: Probing RMI4 SPI device", __func__);
 
@@ -499,6 +516,7 @@ static int __devinit rmi_spi_probe(struct spi_device *spi)
 
 	instance_data->spidev = spi;
 	instance_data->rpd.name = RMI4_SPI_DRIVER_NAME;
+	instance_data->rpd.proto_name = "spi1";
 	instance_data->rpd.write = rmi_spi_write_v1;
 	instance_data->rpd.read = rmi_spi_read_v1;
 	instance_data->rpd.write_multiple = rmi_spi_write_multiple_v1;
@@ -529,11 +547,9 @@ static int __devinit rmi_spi_probe(struct spi_device *spi)
 	/* Determine if we need to poll (inefficient) or use interrupts.
 	 */
 	if (sensordata->attn_gpio_number) {
-		instance_data->irq = gpio_to_irq(sensordata->attn_gpio_number);
 		instance_data->attn_polarity = sensordata->attn_polarity;
 		instance_data->attn_gpio = sensordata->attn_gpio_number;
 		instance_data->rpd.polling_required = false;
-		instance_data->rpd.irq = instance_data->irq;
 	} else {
 		instance_data->rpd.polling_required = true;
 		dev_info(&spi->dev,
@@ -575,6 +591,7 @@ static int __devinit rmi_spi_probe(struct spi_device *spi)
 		break;
 	case 2:
 		instance_data->v2_transaction_size = (unsigned char)buf[1];
+		instance_data->rpd.proto_name = "spi2";
 		instance_data->rpd.write = rmi_spi_write_v2;
 		instance_data->rpd.write_multiple = rmi_spi_write_multiple_v2;
 		instance_data->rpd.read = rmi_spi_read_v2;
@@ -602,7 +619,7 @@ static int __devinit rmi_spi_probe(struct spi_device *spi)
 
 	if (instance_data->rpd.polling_required == false) {
 		retval = request_irq(instance_data->irq, spi_attn_isr,
-				IRQ_TYPE_EDGE_BOTH, dev_name(&spi->dev),
+				irq_type, dev_name(&spi->dev),
 				instance_data);
 		if (retval) {
 			dev_err(&spi->dev,
@@ -616,20 +633,57 @@ static int __devinit rmi_spi_probe(struct spi_device *spi)
 			 * create and start timer. */
 		} else {
 			dev_dbg(&spi->dev, "%s: got irq.\n", __func__);
+			instance_data->irq =
+			gpio_to_irq(sensordata->attn_gpio_number);
+
 			instance_data->rpd.irq = instance_data->irq;
 			if (instance_data->spi_version == 2) {
 				init_waitqueue_head(&instance_data->attn_event);
 				instance_data->rpd.read_multiple =
 				    rmi_spi_split_read_v2;
 			}
-			if (gpio_get_value(instance_data->attn_gpio) ==
-					instance_data->attn_polarity &&
+			if ((irq_type & IRQ_TYPE_EDGE_BOTH) != 0)
+
+				if (instance_data->attn_gpio &&
+					gpio_get_value(
+					instance_data->attn_gpio
+					) == instance_data->attn_polarity &&
 					instance_data->rpd.attention) {
+
 					disable_irq(instance_data->irq);
-				instance_data->rpd.attention(
-					&instance_data->rpd);
+					instance_data->rpd.attention(
+							&instance_data->rpd);
+				}
+		}
+
+		/* export GPIO for attention handling */
+
+#if defined(CONFIG_SYNA_RMI_DEV)
+		retval = gpio_export(instance_data->attn_gpio, false);
+		if (retval) {
+			dev_warn(&spi->dev, "%s: WARNING: Failed to "
+				"export ATTN gpio!.", __func__);
+			retval = 0;
+		} else {
+			retval = gpio_export_link(
+				&instance_data->rpd.sensor->
+				sensor_device->dev, "attn",
+				instance_data->attn_gpio);
+			if (retval) {
+				dev_warn(
+					&instance_data->rpd.sensor->
+					sensor_device->dev, "%s: WARNING: "
+					"Failed to symlink ATTN gpio!.",
+					__func__);
+				retval = 0;
+			} else {
+				dev_info(&instance_data->
+					rpd.sensor->sensor_device->dev,
+					 "%s: Exported GPIO %d.",
+					__func__, instance_data->attn_gpio);
 			}
 		}
+#endif /* CONFIG_SYNA_RMI_DEV */
 	}
 
 	dev_info(&spi->dev, "%s: Successfully registered %s.", __func__,
