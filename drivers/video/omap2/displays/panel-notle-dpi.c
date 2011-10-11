@@ -25,6 +25,8 @@
 #include <video/omapdss.h>
 #include <video/omap-panel-notle.h>
 
+#define REG_DELAY 0xFF
+
 enum {
         NOTLE_I2C_FPGA  = 0,
         NOTLE_I2C_PANEL = 1,
@@ -95,6 +97,13 @@ static struct init_register_value panel_init_regs[] = {
   { 0x4E, 0x00 },
   { 0x4F, 0x23 },
   { 0x50, 0x38 },
+  { REG_DELAY, 0x0A },
+  { 0x00, 0x80 },
+};
+
+static struct init_register_value panel_shutdown_regs[] = {
+  { 0x00, 0x85 },
+  { REG_DELAY, 0x0A },
   { 0x00, 0x80 },
 };
 
@@ -137,7 +146,7 @@ static struct panel_config notle_config = {
         .timings = {
                 .x_res          = 640,
                 .y_res          = 360,
-                .pixel_clock    = 66400,
+                .pixel_clock    = 85333,
 
                 .hfp            = 10,
                 .hsw            = 68,
@@ -173,26 +182,12 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev);
 static ssize_t panel_notle_sysfs_reset(struct notle_drv_data *notle_data,
                                        const char *buf, size_t size) {
         panel_notle_power_off(notle_data->dssdev);
+        notle_data->dssdev->state = OMAP_DSS_DISPLAY_DISABLED;
+
         msleep(100);
-        panel_notle_power_on(notle_data->dssdev);
-        return size;
-}
-
-/* Sysfs show functions */
-static ssize_t panel_notle_pixel_clock_show(struct notle_drv_data *notle_data,
-                                            char *buf) {
-        return snprintf(buf, PAGE_SIZE, "%d\n",
-                        notle_data->dssdev->panel.timings.pixel_clock);
-}
-
-/* Sysfs store functions */
-static ssize_t panel_notle_pixel_clock_store(struct notle_drv_data *notle_data,
-                                             const char *buf, size_t size) {
-        int r, value;
-        r = kstrtoint(buf, 0, &value);
-        if (r)
-                return r;
-        notle_data->dssdev->panel.timings.pixel_clock = value;
+        if (!panel_notle_power_on(notle_data->dssdev)) {
+          notle_data->dssdev->state = OMAP_DSS_DISPLAY_ACTIVE;
+        }
         return size;
 }
 
@@ -208,12 +203,9 @@ struct panel_notle_attribute {
         __ATTR(_name, _mode, _show, _store)
 
 static NOTLE_ATTR(reset, S_IWUSR, NULL, panel_notle_sysfs_reset);
-static NOTLE_ATTR(pixel_clock, S_IRUGO|S_IWUSR,
-                  panel_notle_pixel_clock_show, panel_notle_pixel_clock_store);
 
 static struct attribute *panel_notle_sysfs_attrs[] = {
         &panel_notle_attr_reset.attr,
-        &panel_notle_attr_pixel_clock.attr,
         NULL,
 };
 
@@ -312,39 +304,52 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
         struct panel_config *panel_config = drv_data->panel_config;
 
         if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE) {
-                return 0;
+          return 0;
         }
 
         r = omapdss_dpi_display_enable(dssdev);
         if (r) {
-                printk(KERN_ERR "Notle panel driver failed to enable DPI\n");
-                goto err0;
+          printk(KERN_ERR "Notle panel driver failed to enable DPI\n");
+          goto err0;
         }
 
         if (panel_config->power_on_delay) {
-                msleep(panel_config->power_on_delay);
+          msleep(panel_config->power_on_delay);
         }
 
         if (panel_data->platform_enable) {
-                r = panel_data->platform_enable(dssdev);
-                if (r) {
-                        printk(KERN_ERR "Notle panel driver failed to "
-                               "platform_enable\n");
-                        goto err1;
-                }
+          r = panel_data->platform_enable(dssdev);
+          if (r) {
+            printk(KERN_ERR "Notle panel driver failed to "
+                   "platform_enable\n");
+            goto err1;
+          }
         }
 
         for (i = 0; i < ARRAY_SIZE(panel_init_regs); ++i) {
-                if(panel_write_register(panel_init_regs[i].reg,
-                                        panel_init_regs[i].value)) {
-                  printk(KERN_ERR "Failed to write panel config to Notle panel\n");
-                  goto err2;
-                }
+          if (panel_init_regs[i].reg == REG_DELAY) {
+            if (panel_data->panel_enable) {
+              r = panel_data->panel_enable();
+              if (r) {
+                printk(KERN_ERR "Notle panel driver failed to "
+                       "panel_enable\n");
+                goto err1;
+              }
+            }
+            msleep(panel_init_regs[i].value);
+            continue;
+          }
+
+          if (panel_write_register(panel_init_regs[i].reg,
+                                   panel_init_regs[i].value)) {
+            printk(KERN_ERR "Failed to write panel config to Notle panel\n");
+            goto err2;
+          }
         }
 
         if (fpga_write_config(&fpga_config)) {
-                printk(KERN_ERR "Failed to write FPGA config for Notle panel\n");
-                goto err2;
+          printk(KERN_ERR "Failed to write FPGA config for Notle panel\n");
+          goto err2;
         }
 
         return 0;
@@ -360,17 +365,36 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
         struct panel_notle_data *panel_data = get_panel_data(dssdev);
         struct notle_drv_data *drv_data = dev_get_drvdata(&dssdev->dev);
         struct panel_config *panel_config = drv_data->panel_config;
+        int i;
 
         if (dssdev->state != OMAP_DSS_DISPLAY_ACTIVE) {
-                return;
+          return;
         }
 
+        for (i = 0; i < ARRAY_SIZE(panel_shutdown_regs); ++i) {
+          if (panel_shutdown_regs[i].reg == REG_DELAY) {
+            msleep(panel_shutdown_regs[i].value);
+            continue;
+          }
+
+          if(panel_write_register(panel_shutdown_regs[i].reg,
+                                  panel_shutdown_regs[i].value)) {
+            printk(KERN_ERR "Failed to shutdown Notle panel\n");
+          }
+        }
+
+        /* Disable DISP_ENB */
+        if (panel_data->panel_disable) {
+          panel_data->panel_disable();
+        }
+
+        /* Disable LCD_RST_N */
         if (panel_data->platform_disable) {
-                panel_data->platform_disable(dssdev);
+          panel_data->platform_disable(dssdev);
         }
 
         if (panel_config->power_off_delay) {
-                msleep(panel_config->power_off_delay);
+          msleep(panel_config->power_off_delay);
         }
 
         omapdss_dpi_display_disable(dssdev);
@@ -412,6 +436,8 @@ static void __exit panel_notle_remove(struct omap_dss_device *dssdev) {
 
         dev_dbg(&dssdev->dev, "remove\n");
 
+        kobject_del(&drv_data->kobj);
+        kobject_put(&drv_data->kobj);
         kfree(drv_data);
 
         dev_set_drvdata(&dssdev->dev, NULL);

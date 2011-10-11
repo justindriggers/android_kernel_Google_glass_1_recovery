@@ -304,8 +304,7 @@ static int write_dog_display_config(void)
         return ret;
 }
 
-static int notle_enable_dpi(struct omap_dss_device *dssdev)
-{
+static int notle_enable_dpi(struct omap_dss_device *dssdev) {
         gpio_set_value(dssdev->reset_gpio, 1);
         if (NOTLE_VERSION == V1_DOG) {
                 write_dog_display_config();
@@ -313,10 +312,19 @@ static int notle_enable_dpi(struct omap_dss_device *dssdev)
         return 0;
 }
 
-static void notle_disable_dpi(struct omap_dss_device *dssdev)
-{
+static void notle_disable_dpi(struct omap_dss_device *dssdev) {
         gpio_set_value(dssdev->reset_gpio, 0);
 }
+
+static int notle_enable_panel(void) {
+        gpio_set_value(GPIO_EN_10V, 1);
+        return 0;
+};
+
+static void notle_disable_panel(void) {
+        gpio_set_value(GPIO_EN_10V, 0);
+        return 0;
+};
 
 /* Using the panel-generic-dpi driver, we specify the panel name. */
 static struct panel_generic_dpi_data dpi_panel = {
@@ -329,6 +337,8 @@ static struct panel_generic_dpi_data dpi_panel = {
 static struct panel_notle_data panel_notle = {
         .platform_enable          = notle_enable_dpi,
         .platform_disable         = notle_disable_dpi,
+        .panel_enable             = notle_enable_panel,
+        .panel_disable            = notle_disable_panel,
 };
 
 struct omap_dss_device panel_generic_dpi_device = {
@@ -465,29 +475,35 @@ int __init notle_dpi_init(void)
 {
         int r;
 
-        r = gpio_request_one(GPIO_EN_10V, GPIOF_OUT_INIT_HIGH, "enable_10V");
-        if (r) {
-                pr_err("Failed to get enable_10V gpio\n");
-                goto err;
-        }
-
         switch (NOTLE_VERSION) {
           case V1_DOG:
+            r = gpio_request_one(GPIO_EN_10V, GPIOF_OUT_INIT_HIGH, "enable_10V");
+            if (r) {
+                    pr_err("Failed to get enable_10V gpio\n");
+                    goto err;
+            }
+
             r = gpio_request_one(panel_generic_dpi_device.reset_gpio,
                                  GPIOF_OUT_INIT_LOW, "DVI PD");
             if (r) {
                     pr_err("Failed to get DVI powerdown GPIO\n");
-                    goto err;
+                    goto err1;
             }
             i2c_add_driver(&himax_i2c_driver);
             notle_enable_dpi(&panel_generic_dpi_device);
             break;
           case V4_FLY:
+            r = gpio_request_one(GPIO_EN_10V, GPIOF_OUT_INIT_LOW, "enable_10V");
+            if (r) {
+                    pr_err("Failed to get enable_10V gpio\n");
+                    goto err;
+            }
+
             r = gpio_request_one(panel_notle_device.reset_gpio,
                                  GPIOF_OUT_INIT_LOW, "DVI PD");
             if (r) {
                     pr_err("Failed to get DVI powerdown GPIO\n");
-                    goto err;
+                    goto err1;
             }
             notle_enable_dpi(&panel_notle_device);
             break;
@@ -498,6 +514,8 @@ int __init notle_dpi_init(void)
         }
 
         return 0;
+err1:
+        gpio_free(GPIO_EN_10V);
 err:
         return r;
 }
