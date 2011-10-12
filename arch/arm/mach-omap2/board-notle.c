@@ -1110,8 +1110,7 @@ static struct rmi_sensor_suspend_custom_ops synaptics_custom_ops = {
 };
 
 static struct rmi_f11_functiondata synaptics_f11_data = {
-        .swap_axes = true,
-        /* flip_X and flip_Y will be set based on NOTLE_VERSION */
+        /* flip_X, flip_Y, and swap_axes will be set based on NOTLE_VERSION */
 };
 
 static struct rmi_functiondata synaptics_fndata = {
@@ -1482,6 +1481,7 @@ static int __init notle_i2c_init(void)
           case V1_DOG:
             synaptics_f11_data.flip_X = true;
             synaptics_f11_data.flip_Y = false;
+            synaptics_f11_data.swap_axes = true;
 
             omap4_pmic_init("twl6030", &dog_twldata);
             omap_register_i2c_bus(2, 400, NULL, 0);
@@ -1493,6 +1493,7 @@ static int __init notle_i2c_init(void)
           case V3_EMU:
             synaptics_f11_data.flip_X = false;
             synaptics_f11_data.flip_Y = true;
+            synaptics_f11_data.swap_axes = true;
 
             omap4_pmic_init("twl6030", &emu_twldata);
             omap_register_i2c_bus(2, 400, NULL, 0);
@@ -1502,8 +1503,9 @@ static int __init notle_i2c_init(void)
                             ARRAY_SIZE(notle_emu_i2c_4_boardinfo));
             break;
           case V4_FLY:
-            synaptics_f11_data.flip_X = true;
-            synaptics_f11_data.flip_Y = false;
+            synaptics_f11_data.flip_X = false;
+            synaptics_f11_data.flip_Y = true;
+            synaptics_f11_data.swap_axes = false;
 
             omap4_pmic_init("twl6030", &fly_twldata);
             omap_register_i2c_bus(2, 400, NULL, 0);
