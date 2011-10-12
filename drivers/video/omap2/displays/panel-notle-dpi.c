@@ -167,6 +167,7 @@ struct notle_drv_data {
         struct omap_dss_device *dssdev;
         struct panel_config *panel_config;
         struct kobject kobj;
+        int enabled;
 };
 
 static inline struct panel_notle_data
@@ -190,6 +191,30 @@ static ssize_t panel_notle_sysfs_reset(struct notle_drv_data *notle_data,
         }
         return size;
 }
+static ssize_t enabled_show(struct notle_drv_data *notle_data, char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        notle_data->enabled);
+}
+static ssize_t enabled_store(struct notle_drv_data *notle_data,
+                             const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+
+        value = !!value;
+
+        if (value) {
+          if (!panel_notle_power_on(notle_data->dssdev)) {
+            notle_data->dssdev->state = OMAP_DSS_DISPLAY_ACTIVE;
+          }
+        } else {
+          panel_notle_power_off(notle_data->dssdev);
+          notle_data->dssdev->state = OMAP_DSS_DISPLAY_DISABLED;
+        }
+
+        return size;
+}
 
 /* Sysfs attribute wrappers for show/store functions */
 struct panel_notle_attribute {
@@ -203,9 +228,11 @@ struct panel_notle_attribute {
         __ATTR(_name, _mode, _show, _store)
 
 static NOTLE_ATTR(reset, S_IWUSR, NULL, panel_notle_sysfs_reset);
+static NOTLE_ATTR(enabled, S_IRUGO|S_IWUSR, enabled_show, enabled_store);
 
 static struct attribute *panel_notle_sysfs_attrs[] = {
         &panel_notle_attr_reset.attr,
+        &panel_notle_attr_enabled.attr,
         NULL,
 };
 
@@ -349,9 +376,9 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
 
         if (fpga_write_config(&fpga_config)) {
           printk(KERN_ERR "Failed to write FPGA config for Notle panel\n");
-          goto err2;
         }
 
+        drv_data->enabled = 1;
         return 0;
 err2:
         return 0;
@@ -398,6 +425,7 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
         }
 
         omapdss_dpi_display_disable(dssdev);
+        drv_data->enabled = 0;
 }
 
 static int panel_notle_probe(struct omap_dss_device *dssdev) {
@@ -419,6 +447,7 @@ static int panel_notle_probe(struct omap_dss_device *dssdev) {
 
         drv_data->dssdev = dssdev;
         drv_data->panel_config = panel_config;
+        drv_data->enabled = 0;
 
         dev_set_drvdata(&dssdev->dev, drv_data);
 
