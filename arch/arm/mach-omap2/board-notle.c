@@ -967,11 +967,11 @@ static struct platform_device bluetooth_rfkill_device = {
 };
 
 // Translate hardware buttons to keys -- we have only one.  Note that
-// GPIO_CAMERA_DOG may be overwritten by GPIO_CAMERA_EMU below.
+// GPIO_CAMERA_EMU may be overwritten by GPIO_CAMERA_DOG below.
 static struct gpio_keys_button notle_button_table[] = {
     [0] = {
                 .code   = KEY_CAMERA,           \
-                .gpio   = GPIO_CAMERA_DOG,      \
+                .gpio   = GPIO_CAMERA_EMU,      \
                 .desc   = "Camera",             \
                 .type   = EV_KEY,               \
                 .wakeup = 1,                    \
@@ -1776,10 +1776,10 @@ static void __init my_mux_init(void) {
 
         // input gpio's:
         __raw_writew(flags, CORE_BASE_ADDR + MUX_BCM_WLAN_HOST_WAKE);
-        if (NOTLE_VERSION == V3_EMU) {
-          __raw_writew(flags, CORE_BASE_ADDR + MUX_CAMERA_EMU);
-        } else {
+        if (NOTLE_VERSION == V1_DOG) {
           __raw_writew(flags, CORE_BASE_ADDR + MUX_CAMERA_DOG);
+        } else {
+          __raw_writew(flags, CORE_BASE_ADDR + MUX_CAMERA_EMU);
         }
         __raw_writew(flags, CORE_BASE_ADDR + MUX_TOUCHPAD_INT_N);
 
@@ -1868,8 +1868,8 @@ static void __init notle_init(void)
         notle_i2c_init();
         omap4_register_ion();
 
-        if (NOTLE_VERSION == V3_EMU) {
-          notle_button_table[0].gpio = GPIO_CAMERA_EMU;
+        if (NOTLE_VERSION == V1_DOG) {
+          notle_button_table[0].gpio = GPIO_CAMERA_DOG;
         }
 
         platform_add_devices(notle_devices, ARRAY_SIZE(notle_devices));
