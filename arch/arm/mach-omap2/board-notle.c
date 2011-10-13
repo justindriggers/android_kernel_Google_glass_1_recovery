@@ -299,8 +299,6 @@ static int write_dog_display_config(void)
                 return ret;
         }
 #endif
-#ifdef HDMI
-#endif
         return ret;
 }
 
@@ -323,7 +321,6 @@ static int notle_enable_panel(void) {
 
 static void notle_disable_panel(void) {
         gpio_set_value(GPIO_EN_10V, 0);
-        return 0;
 };
 
 /* Using the panel-generic-dpi driver, we specify the panel name. */
@@ -725,8 +722,6 @@ static struct regulator_init_data dog_vaux3 = {
 					| REGULATOR_CHANGE_STATUS,
 		.always_on		= true,
 	},
-	.num_consumer_supplies	= ARRAY_SIZE(notle_vcxio_supply),
-	.consumer_supplies	= notle_vcxio_supply,
 };
 
 static struct regulator_init_data emu_vaux3 = {
@@ -755,8 +750,6 @@ static struct regulator_init_data fly_vaux3 = {
 					| REGULATOR_CHANGE_STATUS,
 		.always_on		= true,
 	},
-	.num_consumer_supplies	= ARRAY_SIZE(notle_vcxio_supply),
-	.consumer_supplies	= notle_vcxio_supply,
 };
 
 /* Voltage for SD card */
@@ -1402,7 +1395,7 @@ static struct omap_i2c_bus_board_data __initdata notle_i2c_4_bus_pdata;
 
 static struct i2c_board_info __initdata notle_fly_i2c_4_boardinfo[] = {
         {
-                I2C_BOARD_INFO("panel-notle-fpga", 0x0C),
+                I2C_BOARD_INFO("panel-notle-fpga", 0x0A),
         },
         {
                 I2C_BOARD_INFO("panel-notle-panel", 0x49),

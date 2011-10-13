@@ -107,18 +107,26 @@ static struct init_register_value panel_shutdown_regs[] = {
   { 0x00, 0x80 },
 };
 
+#define FPGA_CONFIG_MASK          ((u8)0x1F)   /* Mask of all valid config bits */
+#define FPGA_CONFIG_TEST_MONO     ((u8)0x01)   /* Enable monochrome mode */
+#define FPGA_CONFIG_TEST_PATTERN  ((u8)0x02)   /* Ouput test pattern */
+#define FPGA_CONFIG_LED_EN        ((u8)0x04)   /* Enable LED backlight */
+#define FPGA_CONFIG_CP_SEL        ((u8)0x08)   /* Chargepump select */
+#define FPGA_CONFIG_MONO          ((u8)0x10)   /* Chargepump select */
+
 struct fpga_config {
   u8 config;
-  u8 red_on_line;
-  u8 green_on_line;
-  u8 blue_on_line;
+  u8 red;
+  u8 green;
+  u8 blue;
+  u8 revision;  /* Read-only */
 };
 
 static struct fpga_config fpga_config = {
-  .config = 0x00,
-  .red_on_line = 0x01,
-  .green_on_line = 0x02,
-  .blue_on_line = 0x03,
+  .config = 0,
+  .red = (312 >> 1),
+  .green = (292 >> 1),
+  .blue = (324 >> 1),
 };
 
 struct panel_notle_i2c {
@@ -178,10 +186,12 @@ static inline struct panel_notle_data
 /* Local functions used by the sysfs interface */
 static void panel_notle_power_off(struct omap_dss_device *dssdev);
 static int panel_notle_power_on(struct omap_dss_device *dssdev);
+static int fpga_write_config(struct fpga_config *config);
+static int fpga_read_config(struct fpga_config *config);
 
 /* Sysfs interface */
-static ssize_t panel_notle_sysfs_reset(struct notle_drv_data *notle_data,
-                                       const char *buf, size_t size) {
+static ssize_t sysfs_reset(struct notle_drv_data *notle_data,
+                           const char *buf, size_t size) {
         panel_notle_power_off(notle_data->dssdev);
         notle_data->dssdev->state = OMAP_DSS_DISPLAY_DISABLED;
 
@@ -190,6 +200,13 @@ static ssize_t panel_notle_sysfs_reset(struct notle_drv_data *notle_data,
           notle_data->dssdev->state = OMAP_DSS_DISPLAY_ACTIVE;
         }
         return size;
+}
+static ssize_t fpga_revision(struct notle_drv_data *notle_data, char *buf) {
+        struct fpga_config config;
+        if (fpga_read_config(&config)) {
+          return -EIO;
+        }
+        return snprintf(buf, PAGE_SIZE, "0x%x\n", config.revision);
 }
 static ssize_t enabled_show(struct notle_drv_data *notle_data, char *buf) {
         return snprintf(buf, PAGE_SIZE, "%d\n",
@@ -215,6 +232,113 @@ static ssize_t enabled_store(struct notle_drv_data *notle_data,
 
         return size;
 }
+static ssize_t fpga_config_show(struct notle_drv_data *notle_data, char *buf) {
+        struct fpga_config config;
+        if (fpga_read_config(&config)) {
+          return -EIO;
+        }
+        return snprintf(buf, PAGE_SIZE, "0x%x/%d/%d/%d\n",
+                        config.config, config.red << 1,
+                        config.green << 1, config.blue << 1);
+}
+static ssize_t fpga_config_store(struct notle_drv_data *notle_data,
+                                 const char *buf, size_t size) {
+        int config;
+        unsigned int red, green, blue;
+
+        if (sscanf(buf, "0x%x/%u/%u/%u", &config, &red, &green, &blue) != 4) {
+          return -EINVAL;
+        }
+
+        red >>= 1;
+        green >>= 1;
+        blue >>= 1;
+
+        if (((config & FPGA_CONFIG_MASK) != config) ||
+            (red > 255) || (green > 255) || (blue > 255)) {
+          return -EINVAL;
+        }
+
+        fpga_config.config = (u8)config;
+        fpga_config.red    = (u8)red;
+        fpga_config.green  = (u8)green;
+        fpga_config.blue   = (u8)blue;
+
+        if (fpga_write_config(&fpga_config)) {
+          return -EIO;
+        }
+
+        return size;
+}
+static ssize_t testpattern_show(struct notle_drv_data *notle_data, char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        !!(fpga_config.config & FPGA_CONFIG_TEST_PATTERN));
+}
+static ssize_t testpattern_store(struct notle_drv_data *notle_data,
+                                 const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+
+        if (value) {
+          fpga_config.config |= FPGA_CONFIG_TEST_PATTERN;
+        } else {
+          fpga_config.config &= ~FPGA_CONFIG_TEST_PATTERN;
+        }
+
+        if (fpga_write_config(&fpga_config)) {
+          return -EIO;
+        }
+
+        return size;
+}
+static ssize_t testmono_show(struct notle_drv_data *notle_data, char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        !!(fpga_config.config & FPGA_CONFIG_TEST_MONO));
+}
+static ssize_t testmono_store(struct notle_drv_data *notle_data,
+                                 const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+
+        if (value) {
+          fpga_config.config |= FPGA_CONFIG_TEST_MONO;
+        } else {
+          fpga_config.config &= ~FPGA_CONFIG_TEST_MONO;
+        }
+
+        if (fpga_write_config(&fpga_config)) {
+          return -EIO;
+        }
+
+        return size;
+}
+static ssize_t mono_show(struct notle_drv_data *notle_data, char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                        !!(fpga_config.config & FPGA_CONFIG_MONO));
+}
+static ssize_t mono_store(struct notle_drv_data *notle_data,
+                                 const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+
+        if (value) {
+          fpga_config.config |= FPGA_CONFIG_MONO;
+        } else {
+          fpga_config.config &= ~FPGA_CONFIG_MONO;
+        }
+
+        if (fpga_write_config(&fpga_config)) {
+          return -EIO;
+        }
+
+        return size;
+}
 
 /* Sysfs attribute wrappers for show/store functions */
 struct panel_notle_attribute {
@@ -227,12 +351,27 @@ struct panel_notle_attribute {
         struct panel_notle_attribute panel_notle_attr_##_name = \
         __ATTR(_name, _mode, _show, _store)
 
-static NOTLE_ATTR(reset, S_IWUSR, NULL, panel_notle_sysfs_reset);
-static NOTLE_ATTR(enabled, S_IRUGO|S_IWUSR, enabled_show, enabled_store);
+static NOTLE_ATTR(reset, S_IWUSR, NULL, sysfs_reset);
+static NOTLE_ATTR(fpga_revision, S_IRUGO, fpga_revision, NULL);
+static NOTLE_ATTR(enabled, S_IRUGO|S_IWUSR,
+                  enabled_show, enabled_store);
+static NOTLE_ATTR(fpga_config, S_IRUGO|S_IWUSR,
+                  fpga_config_show, fpga_config_store);
+static NOTLE_ATTR(mono, S_IRUGO|S_IWUSR,
+                  mono_show, mono_store);
+static NOTLE_ATTR(testpattern, S_IRUGO|S_IWUSR,
+                  testpattern_show, testpattern_store);
+static NOTLE_ATTR(testmono, S_IRUGO|S_IWUSR,
+                  testmono_show, testmono_store);
 
 static struct attribute *panel_notle_sysfs_attrs[] = {
         &panel_notle_attr_reset.attr,
+        &panel_notle_attr_fpga_revision.attr,
         &panel_notle_attr_enabled.attr,
+        &panel_notle_attr_mono.attr,
+        &panel_notle_attr_fpga_config.attr,
+        &panel_notle_attr_testpattern.attr,
+        &panel_notle_attr_testmono.attr,
         NULL,
 };
 
@@ -301,22 +440,53 @@ static int panel_write_register(u8 reg, u8 value) {
         return 0;
 }
 
-static int fpga_write_config(struct fpga_config *config) {
+static int fpga_read_config(struct fpga_config *config) {
         int r;
+        u8 buf[5];
         struct i2c_msg msgs[1];
 
         if (!i2c_data || !i2c_data->fpga_client) {
-                printk(KERN_ERR "No I2C data set for Notle fpga init\n");
+                printk(KERN_ERR "No I2C data set for Notle FPGA init\n");
+                return -1;
+        }
+
+        msgs[0].addr = i2c_data->fpga_client->addr;
+        msgs[0].flags = I2C_M_RD;
+        msgs[0].len = sizeof(buf);
+        msgs[0].buf = buf;
+
+        r = i2c_transfer(i2c_data->fpga_client->adapter, msgs, 1);
+        if (r < 0) {
+                printk(KERN_ERR "Failed to read FPGA config\n");
+                return r;
+        }
+        config->config   = buf[0];
+        config->red      = buf[1];
+        config->green    = buf[2];
+        config->blue     = buf[3];
+        config->revision = buf[4];
+
+        return 0;
+};
+
+static int fpga_write_config(struct fpga_config *config) {
+        int r;
+        u8 buf[4] = {config->config, config->red, config->green, config->blue};
+        struct i2c_msg msgs[1];
+
+        if (!i2c_data || !i2c_data->fpga_client) {
+                printk(KERN_ERR "No I2C data set for Notle FPGA init\n");
                 return -1;
         }
 
         msgs[0].addr = i2c_data->fpga_client->addr;
         msgs[0].flags = 0;
-        msgs[0].len = sizeof(*config);
-        msgs[0].buf = (u8*)config;
+        msgs[0].len = sizeof(buf);
+        msgs[0].buf = buf;
 
         r = i2c_transfer(i2c_data->fpga_client->adapter, msgs, 1);
         if (r < 0) {
+                printk(KERN_ERR "Failed to write FPGA config\n");
                 return r;
         }
 
@@ -374,6 +544,8 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
           }
         }
 
+        /* Enable LED backlight */
+        fpga_config.config |= FPGA_CONFIG_LED_EN;
         if (fpga_write_config(&fpga_config)) {
           printk(KERN_ERR "Failed to write FPGA config for Notle panel\n");
         }
@@ -396,6 +568,12 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
 
         if (dssdev->state != OMAP_DSS_DISPLAY_ACTIVE) {
           return;
+        }
+
+        /* Disable LED backlight */
+        fpga_config.config &= ~FPGA_CONFIG_LED_EN;
+        if (fpga_write_config(&fpga_config)) {
+          printk(KERN_ERR "Failed to write FPGA config for Notle panel\n");
         }
 
         for (i = 0; i < ARRAY_SIZE(panel_shutdown_regs); ++i) {
