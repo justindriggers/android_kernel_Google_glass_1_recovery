@@ -107,12 +107,24 @@ static struct init_register_value panel_shutdown_regs[] = {
   { 0x00, 0x80 },
 };
 
+/*
+ * FPGA configuration options:
+ *   TEST_MONO:      Turn on all backlight LEDs at full brightness
+ *                   simultaneously.  This disables color sequencing.
+ *   TEST_PATTERN:   Generate a checkerboard test pattern.  This
+ *                   causes OMAP pixel data output to be ignored.
+ *   LED_EN:         Enable/disable the backlight.
+ *   CP_SEL:         Enable/disable the charge pump on the backlight LEDs.
+ *   MONO:           Enable/disable monochrome mode.  The color mix is
+ *                   determined by the current value of fpga_config fields.
+ *                   Note that this disables color sequencing.
+ */
 #define FPGA_CONFIG_MASK          ((u8)0x1F)   /* Mask of all valid config bits */
-#define FPGA_CONFIG_TEST_MONO     ((u8)0x01)   /* Enable monochrome mode */
+#define FPGA_CONFIG_TEST_MONO     ((u8)0x01)   /* Enable monochrome test mode */
 #define FPGA_CONFIG_TEST_PATTERN  ((u8)0x02)   /* Ouput test pattern */
 #define FPGA_CONFIG_LED_EN        ((u8)0x04)   /* Enable LED backlight */
 #define FPGA_CONFIG_CP_SEL        ((u8)0x08)   /* Chargepump select */
-#define FPGA_CONFIG_MONO          ((u8)0x10)   /* Chargepump select */
+#define FPGA_CONFIG_MONO          ((u8)0x10)   /* Enable monochrome mode */
 
 struct fpga_config {
   u8 config;
