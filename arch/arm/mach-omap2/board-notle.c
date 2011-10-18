@@ -138,13 +138,6 @@
 #define PHYS_ADDR_DUCATI_MEM    (PHYS_ADDR_SMC_MEM - PHYS_ADDR_DUCATI_SIZE - \
                                  OMAP_ION_HEAP_SECURE_INPUT_SIZE)
 
-#ifndef CONFIG_NOTLE_I2C4_SENSORS
-#define CONFIG_NOTLE_I2C4_SENSORS 0
-#endif
-
-#define CONFIG_NOTLE_OV9726 0
-#define CONFIG_NOTLE_OV5650 1
-
 extern int tuna_wlan_init(void);
 
 // Notle board version detection gpios
@@ -1145,7 +1138,6 @@ static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
         },
 };
 
-#if CONFIG_NOTLE_I2C4_SENSORS
 /*
  * i2c-4 
  */
@@ -1247,12 +1239,10 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 };
 #endif
 
-#endif //CONFIG_NOTLE_I2C4_SENSORS
 
 static struct i2c_board_info __initdata notle_dog_i2c_4_boardinfo[] = {
     // NOTE(abliss): currently, this i2c bus can support EITHER the sensors OR
     // the camera
-#if CONFIG_NOTLE_I2C4_SENSORS
 #ifdef CONFIG_MPU_SENSORS_MPU6050B1
         {
                 I2C_BOARD_INFO("mpu6050B1", 0x68),
@@ -1292,20 +1282,10 @@ static struct i2c_board_info __initdata notle_dog_i2c_4_boardinfo[] = {
         {
                 I2C_BOARD_INFO("notle_himax", 0x48),
         },
-#endif //CONFIG_NOTLE_I2C4_SENSORS
-#if CONFIG_NOTLE_OV9726
         {
                 I2C_BOARD_INFO("ov9726", 0x10),
                 .flags = I2C_CLIENT_WAKE,
         },
-#endif //CONFIG_NOTLE_OV9726
-#if CONFIG_NOTLE_OV5650
-        {
-                I2C_BOARD_INFO("ov5650", 0x36),
-                .flags = I2C_CLIENT_WAKE,
-        },
-#endif //CONFIG_NOTLE_OV5650
-
 };
 
 static struct i2c_board_info __initdata notle_emu_i2c_4_boardinfo[] = {
@@ -1314,7 +1294,6 @@ static struct i2c_board_info __initdata notle_emu_i2c_4_boardinfo[] = {
         },
     // NOTE(abliss): currently, this i2c bus can support EITHER the sensors OR
     // the camera
-#if CONFIG_NOTLE_I2C4_SENSORS
 #ifdef CONFIG_MPU_SENSORS_MPU6050B1
         {
                 I2C_BOARD_INFO("mpu6050B1", 0x68),
@@ -1354,20 +1333,10 @@ static struct i2c_board_info __initdata notle_emu_i2c_4_boardinfo[] = {
         {
                 I2C_BOARD_INFO("notle_himax", 0x48),
         },
-#endif //CONFIG_NOTLE_I2C4_SENSORS
-#if CONFIG_NOTLE_OV9726
-        {
-                I2C_BOARD_INFO("ov9726", 0x10),
-                .flags = I2C_CLIENT_WAKE,
-        },
-#endif //CONFIG_NOTLE_OV9726
-#if CONFIG_NOTLE_OV5650
         {
                 I2C_BOARD_INFO("ov5650", 0x36),
                 .flags = I2C_CLIENT_WAKE,
         },
-#endif //CONFIG_NOTLE_OV5650
-
 };
 
 static void __init omap_i2c_hwspinlock_init(int bus_id, int spinlock_id,
@@ -1402,7 +1371,6 @@ static struct i2c_board_info __initdata notle_fly_i2c_4_boardinfo[] = {
         },
     // NOTE(abliss): currently, this i2c bus can support EITHER the sensors OR
     // the camera
-#if CONFIG_NOTLE_I2C4_SENSORS
 #ifdef CONFIG_MPU_SENSORS_MPU6050B1
         {
                 I2C_BOARD_INFO("mpu6050B1", 0x68),
@@ -1442,20 +1410,10 @@ static struct i2c_board_info __initdata notle_fly_i2c_4_boardinfo[] = {
         {
                 I2C_BOARD_INFO("notle_himax", 0x48),
         },
-#endif //CONFIG_NOTLE_I2C4_SENSORS
-#if CONFIG_NOTLE_OV9726
         {
                 I2C_BOARD_INFO("ov9726", 0x10),
                 .flags = I2C_CLIENT_WAKE,
         },
-#endif //CONFIG_NOTLE_OV9726
-#if CONFIG_NOTLE_OV5650
-        {
-                I2C_BOARD_INFO("ov5650", 0x36),
-                .flags = I2C_CLIENT_WAKE,
-        },
-#endif //CONFIG_NOTLE_OV5650
-
 };
 
 static int __init notle_i2c_init(void)
