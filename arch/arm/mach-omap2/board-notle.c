@@ -38,19 +38,13 @@
 #include <linux/reboot.h>
 #include <linux/rfkill-gpio.h>
 
-#ifdef CONFIG_INPUT_L3G4200D
 #include <linux/i2c/l3g4200d.h>
-#endif
-#ifdef CONFIG_INPUT_LSM303DLHC
 #include <linux/i2c/lsm303dlhc.h>
-#endif
 #ifdef CONFIG_INPUT_LTR506ALS
 #include <linux/i2c/ltr506als.h>
 #endif
 
-#ifdef CONFIG_MPU_SENSORS_MPU6050B1
 #include <linux/mpu.h>
-#endif
 
 #include <linux/regulator/fixed.h>
 #include <linux/regulator/machine.h>
@@ -1141,7 +1135,6 @@ static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
 /*
  * i2c-4 
  */
-#ifdef CONFIG_MPU_SENSORS_MPU6050B1
 static struct mpu_platform_data mpu6050_data = {
         .int_config     = 0x10,
         .orientation    = { 1, 0, 0,
@@ -1167,9 +1160,7 @@ static struct mpu_platform_data mpu6050_data = {
                                  0, 0, -1 },
         },
 };
-#endif
 
-#ifdef CONFIG_INPUT_L3G4200D
 static struct l3g4200d_gyr_platform_data notle_l3g4200d_data = {
         .min_interval = 1,                // Minimum poll interval in ms.
 	.poll_interval = 10,              /* poll interval (in ms) to pass
@@ -1191,9 +1182,7 @@ static struct l3g4200d_gyr_platform_data notle_l3g4200d_data = {
 	.negate_y = 1,
 	.axis_map_z = 2,
 };
-#endif
 
-#ifdef CONFIG_INPUT_LSM303DLHC
 static struct lsm303dlhc_acc_platform_data notle_lsm303dlh_acc_data = {
         .min_interval = 1,     // Minimum poll interval in ms.
         .poll_interval = 10,   // Poll interval in ms.
@@ -1222,7 +1211,6 @@ static struct lsm303dlhc_mag_platform_data notle_lsm303dlh_mag_data = {
 	.negate_y = 1,
 	.axis_map_z = 1,
 };
-#endif
 
 #ifdef CONFIG_INPUT_LTR506ALS
 static struct ltr506_platform_data notle_ltr506als_data = {
@@ -1241,24 +1229,12 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 
 
 static struct i2c_board_info __initdata notle_dog_i2c_4_boardinfo[] = {
-    // NOTE(abliss): currently, this i2c bus can support EITHER the sensors OR
-    // the camera
-#ifdef CONFIG_MPU_SENSORS_MPU6050B1
-        {
-                I2C_BOARD_INFO("mpu6050B1", 0x68),
-        //        .irq = OMAP44XX_IRQ_SYS_1N,
-                .platform_data = &mpu6050_data,
-        },
-#endif
-#ifdef CONFIG_INPUT_L3G4200D
         {
                 I2C_BOARD_INFO("l3g4200d_gyr", 0x68),
                 .flags = I2C_CLIENT_WAKE,
         //        .irq = OMAP44XX_IRQ_SYS_1N,
                 .platform_data = &notle_l3g4200d_data,
         },
-#endif
-#ifdef CONFIG_INPUT_LSM303DLHC
         {
                 I2C_BOARD_INFO("lsm303dlhc_acc", 0x18),
                 .flags = I2C_CLIENT_WAKE,
@@ -1271,7 +1247,6 @@ static struct i2c_board_info __initdata notle_dog_i2c_4_boardinfo[] = {
         //        .irq = OMAP44XX_IRQ_SYS_1N,
                 .platform_data = &notle_lsm303dlh_mag_data,
         },
-#endif
 #ifdef CONFIG_INPUT_LTR506ALS
         {
                 I2C_BOARD_INFO("ltr506als", 0x1d),
@@ -1292,37 +1267,11 @@ static struct i2c_board_info __initdata notle_emu_i2c_4_boardinfo[] = {
         {
                 I2C_BOARD_INFO("tc358762-i2c", 0x0b),
         },
-    // NOTE(abliss): currently, this i2c bus can support EITHER the sensors OR
-    // the camera
-#ifdef CONFIG_MPU_SENSORS_MPU6050B1
         {
                 I2C_BOARD_INFO("mpu6050B1", 0x68),
         //        .irq = OMAP44XX_IRQ_SYS_1N,
                 .platform_data = &mpu6050_data,
         },
-#endif
-#ifdef CONFIG_INPUT_L3G4200D
-        {
-                I2C_BOARD_INFO("l3g4200d_gyr", 0x68),
-                .flags = I2C_CLIENT_WAKE,
-        //        .irq = OMAP44XX_IRQ_SYS_1N,
-                .platform_data = &notle_l3g4200d_data,
-        },
-#endif
-#ifdef CONFIG_INPUT_LSM303DLHC
-        {
-                I2C_BOARD_INFO("lsm303dlhc_acc", 0x18),
-                .flags = I2C_CLIENT_WAKE,
-        //        .irq = OMAP44XX_IRQ_SYS_1N,
-                .platform_data = &notle_lsm303dlh_acc_data,
-        },
-        {
-                I2C_BOARD_INFO("lsm303dlhc_mag", 0x1e),
-                .flags = I2C_CLIENT_WAKE,
-        //        .irq = OMAP44XX_IRQ_SYS_1N,
-                .platform_data = &notle_lsm303dlh_mag_data,
-        },
-#endif
 #ifdef CONFIG_INPUT_LTR506ALS
         {
                 I2C_BOARD_INFO("ltr506als", 0x1d),
@@ -1369,37 +1318,11 @@ static struct i2c_board_info __initdata notle_fly_i2c_4_boardinfo[] = {
         {
                 I2C_BOARD_INFO("panel-notle-panel", 0x49),
         },
-    // NOTE(abliss): currently, this i2c bus can support EITHER the sensors OR
-    // the camera
-#ifdef CONFIG_MPU_SENSORS_MPU6050B1
         {
                 I2C_BOARD_INFO("mpu6050B1", 0x68),
         //        .irq = OMAP44XX_IRQ_SYS_1N,
                 .platform_data = &mpu6050_data,
         },
-#endif
-#ifdef CONFIG_INPUT_L3G4200D
-        {
-                I2C_BOARD_INFO("l3g4200d_gyr", 0x68),
-                .flags = I2C_CLIENT_WAKE,
-        //        .irq = OMAP44XX_IRQ_SYS_1N,
-                .platform_data = &notle_l3g4200d_data,
-        },
-#endif
-#ifdef CONFIG_INPUT_LSM303DLHC
-        {
-                I2C_BOARD_INFO("lsm303dlhc_acc", 0x18),
-                .flags = I2C_CLIENT_WAKE,
-        //        .irq = OMAP44XX_IRQ_SYS_1N,
-                .platform_data = &notle_lsm303dlh_acc_data,
-        },
-        {
-                I2C_BOARD_INFO("lsm303dlhc_mag", 0x1e),
-                .flags = I2C_CLIENT_WAKE,
-        //        .irq = OMAP44XX_IRQ_SYS_1N,
-                .platform_data = &notle_lsm303dlh_mag_data,
-        },
-#endif
 #ifdef CONFIG_INPUT_LTR506ALS
         {
                 I2C_BOARD_INFO("ltr506als", 0x1d),
