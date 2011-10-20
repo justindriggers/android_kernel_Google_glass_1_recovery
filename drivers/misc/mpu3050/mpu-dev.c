@@ -98,12 +98,12 @@ static int mpu_pm_notifier_callback(struct notifier_block *nb,
 	mpu->mpu_pm_event.irqtime =
 	    (((long long)event_time.tv_sec) << 32) + event_time.tv_usec;
 	mpu->mpu_pm_event.data_type = MPUIRQ_DATA_TYPE_PM_EVENT;
-	mpu->mpu_pm_event.data = mpu->event;
 
 	if (event == PM_SUSPEND_PREPARE)
 		mpu->event = MPU_PM_EVENT_SUSPEND_PREPARE;
 	if (event == PM_POST_SUSPEND)
 		mpu->event = MPU_PM_EVENT_POST_SUSPEND;
+	mpu->mpu_pm_event.data = mpu->event;
 
 	if (mpu->response_timeout > 0) {
 		mpu->timeout.expires = jiffies + mpu->response_timeout * HZ;
@@ -189,15 +189,17 @@ static ssize_t mpu_read(struct file *file,
 	struct mpu_private_data *mpu =
 	    container_of(file->private_data, struct mpu_private_data, dev);
 	struct i2c_client *client = mpu->client;
-	size_t len = sizeof(mpu->mpu_pm_event) + sizeof(unsigned long);
+	size_t len = sizeof(mpu->mpu_pm_event);
 	int err;
 
 	if (!mpu->event && (!(file->f_flags & O_NONBLOCK)))
 		wait_event_interruptible(mpu->mpu_event_wait, mpu->event);
 
 	if (!mpu->event || NULL == buf
-	    || count < sizeof(mpu->mpu_pm_event) + sizeof(unsigned long))
+	    || count < sizeof(mpu->mpu_pm_event)) {
+                mpu->event = 0;
 		return 0;
+        }
 
 	err = copy_to_user(buf, &mpu->mpu_pm_event, sizeof(mpu->mpu_pm_event));
 	if (err != 0) {
