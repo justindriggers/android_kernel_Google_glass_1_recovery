@@ -1137,27 +1137,27 @@ static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
  */
 static struct mpu_platform_data mpu6050_data = {
         .int_config     = 0x10,
-        .orientation    = { 1, 0, 0,
+        .orientation    = { 0, 0, -1,
                             0, 1, 0,
-                            0, 0, 1},
+                            1, 0, 0 },
         .level_shifter  = 0,
         .accel          = {
                 .get_slave_descr = mantis_get_slave_descr,
                 .adapt_num = 4,
                 .bus = EXT_SLAVE_BUS_SECONDARY,
                 .address = 0x68,
-                .orientation = { 1, 0, 0,
+                .orientation = { 0, 0, -1,
                                  0, 1, 0,
-                                 0, 0, 1 },
+                                 1, 0, 0 },
         },
         .compass        = {
                 .get_slave_descr = ak8975_get_slave_descr,
                 .adapt_num = 4,
                 .bus = EXT_SLAVE_BUS_SECONDARY,
                 .address = 0x0C,
-                .orientation = { 0, 1, 0,
+                .orientation = { 0, 0, 1,
                                  1, 0, 0,
-                                 0, 0, -1 },
+                                 0, 1, 0 },
         },
 };
 
