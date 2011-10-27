@@ -39,12 +39,15 @@
 #endif // NOTLE_VERSION_1
 
 #ifdef NOTLE_VERSION_2
-#define GPIO_BCM_WLAN_HOST_WAKE         170
-#define MUX_BCM_WLAN_HOST_WAKE          MUX(USBB2_HSIC_STROBE)
+// TODO: Figure out why the wlan_wake and wlan_host_wake gpio's
+// are swapped compared to what the hardware docs imply them
+// to be.
+#define GPIO_BCM_WLAN_HOST_WAKE         97
+#define MUX_BCM_WLAN_HOST_WAKE          MUX(USBB1_HSIC_STROBE)
 #define GPIO_BCM_BT_HOST_WAKE           154
 #define MUX_BCM_BT_HOST_WAKE            MUX(MCSPI4_CS0)
-#define GPIO_BCM_WLAN_WAKE              97
-#define MUX_BCM_WLAN_WAKE               MUX(USBB1_HSIC_STROBE)
+#define GPIO_BCM_WLAN_WAKE              170
+#define MUX_BCM_WLAN_WAKE               MUX(USBB2_HSIC_STROBE)
 #define GPIO_BCM_BT_WAKE                36
 #define MUX_BCM_BT_WAKE                 MUX(GPMC_AD12)
 #endif // NOTLE_VERSION_2

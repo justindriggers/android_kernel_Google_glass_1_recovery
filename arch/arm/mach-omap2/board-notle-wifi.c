@@ -41,7 +41,7 @@
 // simplify merges of future tuna improvements into this file.
 
 #define GPIO_WLAN_PMENA		GPIO_WL_BT_REG_ON
-#define GPIO_WLAN_IRQ		GPIO_BCM_WLAN_WAKE
+#define GPIO_WLAN_IRQ		GPIO_BCM_WLAN_HOST_WAKE
 
 
 // NOTE(abliss): These numbers were taken from tuna and I have no idea why they
@@ -365,32 +365,32 @@ static int __init notle_wlan_gpio(void) {
 
         /* Configuration of requested GPIO lines */
         __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN,
-                CORE_BASE_ADDR + MUX_BCM_WLAN_WAKE);
-        r = gpio_request_one(GPIO_BCM_WLAN_WAKE, GPIOF_IN, "wlan_irq");
+                CORE_BASE_ADDR + MUX_BCM_WLAN_HOST_WAKE);
+        r = gpio_request_one(GPIO_BCM_WLAN_HOST_WAKE, GPIOF_IN, "wlan_irq");
         if (r) {
-                pr_err("Failed to get wlan_wake gpio\n");
+                pr_err("Failed to get wlan_irq gpio\n");
                 goto error;
         }
 
-        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_BCM_WLAN_HOST_WAKE);
-        r = gpio_request_one(GPIO_BCM_WLAN_HOST_WAKE, GPIOF_OUT_INIT_HIGH, "wlan_host_wake");
+        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_BCM_WLAN_WAKE);
+        r = gpio_request_one(GPIO_BCM_WLAN_WAKE, GPIOF_OUT_INIT_HIGH, "wlan_wake");
         if (r) {
-                pr_err("Failed to get wlan_host_wake gpio\n");
+                pr_err("Failed to get wlan_wake gpio\n");
                 goto error1;
         }
 
         __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-                CORE_BASE_ADDR + MUX_BCM_BT_WAKE);
-        r = gpio_request_one(GPIO_BCM_BT_WAKE, GPIOF_IN, "bt_wake");
+                CORE_BASE_ADDR + MUX_BCM_BT_HOST_WAKE);
+        r = gpio_request_one(GPIO_BCM_BT_HOST_WAKE, GPIOF_IN, "bt_irq");
         if (r) {
-                pr_err("Failed to get bt_wake gpio\n");
+                pr_err("Failed to get bt_irq gpio\n");
                 goto error2;
         }
 
-        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_BCM_BT_HOST_WAKE);
-        r = gpio_request_one(GPIO_BCM_BT_HOST_WAKE, GPIOF_OUT_INIT_HIGH, "bt_host_wake");
+        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_BCM_BT_WAKE);
+        r = gpio_request_one(GPIO_BCM_BT_WAKE, GPIOF_OUT_INIT_HIGH, "bt_wake");
         if (r) {
-                pr_err("Failed to get bt_host_wake gpio\n");
+                pr_err("Failed to get bt_wake gpio\n");
                 goto error3;
         }
 
@@ -404,18 +404,15 @@ static int __init notle_wlan_gpio(void) {
 
         pr_info("%s()-: 0\n", __func__);
         return 0;
-        /*
-error5:
-        gpio_free(GPIO_WL_RST_N);
-        */
+
 error4:
-        gpio_free(GPIO_BCM_BT_HOST_WAKE);
-error3:
         gpio_free(GPIO_BCM_BT_WAKE);
+error3:
+        gpio_free(GPIO_BCM_BT_HOST_WAKE);
 error2:
-        gpio_free(GPIO_BCM_WLAN_HOST_WAKE);
-error1:
         gpio_free(GPIO_BCM_WLAN_WAKE);
+error1:
+        gpio_free(GPIO_BCM_WLAN_HOST_WAKE);
 error:
         pr_info("%s()-: %i\n", __func__, r);
         return r;
