@@ -426,6 +426,10 @@ static int inv_get_silicon_rev_mpu6050(
 	ERROR_CHECK(result);
 
 	prod_rev >>= 2;
+        if (prod_rev != 31) {
+                MPL_LOGE("unsupported product revision read: %d.  Changing to 31\n", prod_rev);
+                prod_rev = 31;
+        }
 
 	/* clean the prefetch and cfg user bank bits */
 	result = inv_serial_single_write(mlsl_handle, mldl_cfg->addr,
