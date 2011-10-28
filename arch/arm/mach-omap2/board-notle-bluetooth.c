@@ -36,6 +36,8 @@
 // tuna name (and tuna's distinct gpio terminology) in many places, in order to
 // simplify merges of future tuna improvements into this file.
 
+static void update_host_wake_locked(int);
+
 #define BT_REG_GPIO GPIO_WL_BT_REG_ON
 #define BT_RESET_GPIO GPIO_BT_RST_N
 
@@ -69,6 +71,9 @@ static int bcm4330_bt_rfkill_set_power(void *data, bool blocked)
 
 	} else {
 		gpio_set_value(BT_RESET_GPIO, 0);
+                // Chip won't toggle host_wake after reset.  Make sure
+                // we don't hold the wake_lock until chip wakes up again.
+                update_host_wake_locked(0);
                 /*
 		gpio_set_value(BT_REG_GPIO, 0);
                  */
