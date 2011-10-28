@@ -294,6 +294,8 @@ obj-$(CONFIG_MACH_OMAP4_PANDA)		+= board-omap4panda.o \
 					   omap4_apps_brd_id.o \
 					   omap_phy_internal.o
 obj-$(CONFIG_MACH_NOTLE)		+= board-notle.o \
+					   board-notle-bluetooth.o \
+					   board-notle-wifi.o \
 					   hsmmc.o \
 					   omap4_apps_brd_id.o \
 					   omap_phy_internal.o

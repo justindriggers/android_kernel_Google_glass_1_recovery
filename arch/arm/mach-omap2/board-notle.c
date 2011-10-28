@@ -36,7 +36,6 @@
 #include <linux/pwm.h>
 #include <linux/pwm_backlight.h>
 #include <linux/reboot.h>
-#include <linux/rfkill-gpio.h>
 
 #include <linux/i2c/l3g4200d.h>
 #include <linux/i2c/lsm303dlhc.h>
@@ -862,6 +861,8 @@ static struct omap_uart_port_info omap_serial_port_info[] = {
                 .dma_rx_poll_rate = DEFAULT_RXDMA_POLLRATE,
                 .dma_rx_timeout = DEFAULT_RXDMA_TIMEOUT,
                 .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
+                .wake_peer = bcm_bt_lpm_exit_lpm_locked,
+                .rts_mux_driver_control = 1,
         },
         { /* ttyO2 console port */
                 .use_dma        = 0,
@@ -923,28 +924,11 @@ static struct platform_device backlight_device = {
         },
 };
 
-/*
- * Driver data struct for the rfkill-gpio driver.  Fields:
- * @name:		name for the gpio rf kill instance
- * @reset_gpio:		GPIO which is used for reseting rfkill switch
- * @shutdown_gpio:	GPIO which is used for shutdown of rfkill switch
- * @power_clk_name:	[optional] name of clk to turn off while blocked
- */
-
-static struct rfkill_gpio_platform_data bluetooth_rfkill_data = {
-        .name = "bluetooth",
-        .reset_gpio = GPIO_BT_RST_N,
-        .shutdown_gpio = -1,
-        .type = RFKILL_TYPE_BLUETOOTH,
+static struct platform_device bcm4330_bluetooth_device = {
+	.name = "bcm4330_bluetooth",
+	.id = -1,
 };
 
-static struct platform_device bluetooth_rfkill_device = {
-        .name = "rfkill_gpio",
-        .id = -1,
-        .dev = {
-                .platform_data = &bluetooth_rfkill_data,
-        },
-};
 
 // Translate hardware buttons to keys -- we have only one.  Note that
 // GPIO_CAMERA_EMU may be overwritten by GPIO_CAMERA_DOG below.
@@ -975,6 +959,7 @@ static struct platform_device gpio_keys = {
 static struct platform_device *notle_devices[] __initdata = {
         &leds_gpio,
         &gpio_keys,
+        &bcm4330_bluetooth_device,
 };
 
 
@@ -1746,7 +1731,6 @@ static void __init notle_init(void)
           notle_button_table[0].gpio = GPIO_CAMERA_DOG;
         }
 
-        platform_add_devices(notle_devices, ARRAY_SIZE(notle_devices));
         omap_serial_board_init(omap_serial_port_info);
         omap4_twl6030_hsmmc_init(mmc);
         usb_musb_init(&musb_board_data);
@@ -1765,10 +1749,9 @@ static void __init notle_init(void)
                 pr_err("Wifi initialization failed: %d\n", err);
         }
 
-        err = platform_device_register(&bluetooth_rfkill_device);
-        if (err) {
-                pr_err("Failed to register BT rfkill device\n");
-        }
+        // Do this after the wlan_init, which inits the regulator shared
+        // with the bluetooth device and muxes the bt signals.
+        platform_add_devices(notle_devices, ARRAY_SIZE(notle_devices));
 
         err = notle_touchpad_init();
         if (err) {

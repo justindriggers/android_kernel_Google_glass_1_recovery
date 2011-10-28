@@ -17,6 +17,7 @@
 #ifndef _MACH_OMAP2_BOARD_NOTLE_H_
 #define _MACH_OMAP2_BOARD_NOTLE_H_
 
+#include <linux/serial_core.h>
 #include "mux.h"
 
 #define MUX(x) OMAP4_CTRL_MODULE_PAD_##x##_OFFSET
@@ -61,5 +62,6 @@
 
 extern struct mmc_platform_data tuna_wifi_data;
 int notle_wlan_init(void);
+void bcm_bt_lpm_exit_lpm_locked(struct uart_port *uport);
 
 #endif // _MACH_OMAP2_BOARD_NOTLE_H_

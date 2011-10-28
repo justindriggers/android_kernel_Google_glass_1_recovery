@@ -379,36 +379,24 @@ static int __init notle_wlan_gpio(void) {
                 goto error1;
         }
 
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
-                CORE_BASE_ADDR + MUX_BCM_BT_HOST_WAKE);
-        r = gpio_request_one(GPIO_BCM_BT_HOST_WAKE, GPIOF_IN, "bt_irq");
-        if (r) {
-                pr_err("Failed to get bt_irq gpio\n");
-                goto error2;
-        }
-
-        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_BCM_BT_WAKE);
-        r = gpio_request_one(GPIO_BCM_BT_WAKE, GPIOF_OUT_INIT_HIGH, "bt_wake");
-        if (r) {
-                pr_err("Failed to get bt_wake gpio\n");
-                goto error3;
-        }
-
         __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_WL_RST_N);
         r = gpio_request_one(GPIO_WL_RST_N, GPIOF_OUT_INIT_LOW, "wlan_reset");
         if (r) {
                 pr_err("Failed to get wlan_reset gpio\n");
-                goto error4;
+                goto error2;
         }
         gpio_set_value(GPIO_WL_RST_N, 1);
+
+        /* Mux the bt signals here, but handle the gpio requests in the
+         * bluetooth board file.
+         */
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
+                CORE_BASE_ADDR + MUX_BCM_BT_HOST_WAKE);
+        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_BCM_BT_WAKE);
 
         pr_info("%s()-: 0\n", __func__);
         return 0;
 
-error4:
-        gpio_free(GPIO_BCM_BT_WAKE);
-error3:
-        gpio_free(GPIO_BCM_BT_HOST_WAKE);
 error2:
         gpio_free(GPIO_BCM_WLAN_WAKE);
 error1:
