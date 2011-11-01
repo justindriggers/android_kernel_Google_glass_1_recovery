@@ -471,11 +471,11 @@ static struct kobj_type panel_notle_ktype = {
 static void led_config_to_fpga_config(struct led_config *led,
                                       struct fpga_config *fpga) {
         /* TODO(madsci): Move these to be configurable or in a better place. */
-        const int total_lines = 380;
-        const int red_max_mw = 41;
+        const int total_lines = 380;  /* Display height + vertical blanking */
+        const int red_max_mw = 41;    /* LED power when full on */
         const int green_max_mw = 62;
         const int blue_max_mw = 62;
-        const int limit_mw = 10;
+        const int limit_mw = 40;      /* Max backlight power */
 
         fpga->red =   (total_lines *
                         (10000 - (
