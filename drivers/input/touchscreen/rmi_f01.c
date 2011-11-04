@@ -308,6 +308,40 @@ int FN_01_config(struct rmi_function_info *rmifninfo)
 
 	pr_debug("%s: RMI4 function $01 config\n", __func__);
 
+	/* CMM Hack to force touchpad into reset for a percentage of touchpads
+	 * that seem to provide ghosting after a warm power cycle.
+	 * Give the device a reset upon initialization */
+	retval = rmi_set_bits(rmifninfo->sensor,
+			rmifninfo->function_descriptor.command_base_addr,
+			F01_RESET);
+	if (retval < 0) {
+		pr_err("%s: failed to issue reset command, "
+				"error = %d.\n", __func__, retval);
+		return retval;
+	}
+
+	/* CMM Hack cont'd
+	 * Wait an indeterminate length of time for reset to complete
+	 * and follow up with a read the device status and verify a reset has
+	 * occurred.  However, the common case status returned is not listed
+	 * in the TRM so this read is mostly done to indicate device is back
+	 * responding on the bus to continue the configuration.
+	 */
+	msleep(20);
+	retval = rmi_read(rmifninfo->sensor,
+			rmifninfo->function_descriptor.data_base_addr,
+			&instance_data->data_registers->device_status);
+	if (retval < 0) {
+		pr_err("%s: failed to read status after reset command, "
+				"error = %d.\n", __func__, retval);
+		return retval;
+	}
+	/* CMM Hack cont'd
+	 * Output message to kernel log to indicate we traversed through
+	 * this hack.
+	 */
+	pr_info("%s: Device has been reset.\n", __func__);
+
 	/* First thing to do is set the configuration bit.  We'll check this at
 	 * the end to determine if the device has reset during the config
 	 * process.
@@ -331,7 +365,6 @@ int FN_01_config(struct rmi_function_info *rmifninfo)
 	}
 
 	/* TODO: Check for reset! */
-
 	return retval;
 }
 EXPORT_SYMBOL(FN_01_config);
