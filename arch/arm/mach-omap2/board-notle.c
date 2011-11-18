@@ -488,7 +488,6 @@ int __init notle_dpi_init(void)
                     pr_err("Failed to get DVI powerdown GPIO\n");
                     goto err1;
             }
-            notle_enable_dpi(&panel_notle_device);
             break;
           default:
             pr_err("Unrecognized Notle version initializing DPI\n");
