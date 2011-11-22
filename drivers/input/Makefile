@@ -30,4 +30,6 @@ obj-$(CONFIG_INPUT_KEYRESET)	+= keyreset.o
 # rmi4 code.
 obj-$(CONFIG_RMI4_DEV) += rmi4/
 
-obj-$(CONFIG_INPUT_TOUCHPAD) += touchpad/
+# TODO(cmanton) Future destination for STMicroelectronics
+# touchpad driver.
+# obj-$(CONFIG_INPUT_TOUCHPAD) += touchpad/

@@ -188,7 +188,8 @@ source "drivers/input/tablet/Kconfig"
 
 source "drivers/input/touchscreen/Kconfig"
 
-source "drivers/input/touchpad/Kconfig"
+# TODO(cmanton) Location for STMicroelectronics touchpad
+# source "drivers/input/touchpad/Kconfig"
 
 source "drivers/input/misc/Kconfig"
 
