@@ -145,9 +145,8 @@ typedef enum {
         UNVERSIONED = 7,
         V1_DOG      = 7,
         V3_EMU      = 0,
-//        V4_FLY      = 1,
-        V5_GNU      = 2,
         V4_FLY      = 4,
+        V5_GNU      = 5,
 } notle_version;
 
 static notle_version NOTLE_VERSION = UNVERSIONED;
@@ -476,6 +475,7 @@ int __init notle_dpi_init(void)
             notle_enable_dpi(&panel_generic_dpi_device);
             break;
           case V4_FLY:
+          case V5_GNU:
             r = gpio_request_one(GPIO_EN_10V, GPIOF_OUT_INIT_LOW, "enable_10V");
             if (r) {
                     pr_err("Failed to get enable_10V gpio\n");
@@ -1361,6 +1361,7 @@ static int __init notle_i2c_init(void)
                             ARRAY_SIZE(notle_emu_i2c_4_boardinfo));
             break;
           case V4_FLY:
+          case V5_GNU:
             synaptics_f11_data.flip_X = false;
             synaptics_f11_data.flip_Y = true;
             synaptics_f11_data.swap_axes = false;
@@ -1705,7 +1706,7 @@ static void __init notle_init(void)
         notle_version_init();
         my_mux_init();
 
-        printk("Notle board revision: %s", notle_version_str(NOTLE_VERSION));
+        printk("Notle board revision: %s(%d)", notle_version_str(NOTLE_VERSION), NOTLE_VERSION);
 
         err = omap_audio_init();
         if (err) {
@@ -1775,6 +1776,7 @@ static void __init notle_init(void)
             }
             break;
           case V4_FLY:
+          case V5_GNU:
             err = notle_dpi_init();
             if (!err) {
                     omap_display_init(&panel_notle_dss_data);
