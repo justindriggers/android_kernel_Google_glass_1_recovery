@@ -1,0 +1,12 @@
+
+
+config TOUCHPAD_SYNAPTICS_RMI4_I2C
+  tristate "Synaptics RMI4 I2C touchpads"
+  depends on I2C && RMI4_DEV
+  help
+    Say Y here if you have a Synaptics RMI4 I2C touchpad connected to
+    your system. This enables support for Synaptics RMI4 over I2C based
+    touchpads.
+
+    If unsure, say N.
+

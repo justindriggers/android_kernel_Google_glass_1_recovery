@@ -170,6 +170,12 @@ config INPUT_KEYRESET
 	  To compile this driver as a module, choose M here: the
 	  module will be called keyreset.
 
+config RMI4_DEV
+  tristate "RMI4 input driver support"
+	depends on INPUT
+	help
+		Say y here for Synaptics RMI4 drivers support.
+
 comment "Input Device Drivers"
 
 source "drivers/input/keyboard/Kconfig"
@@ -182,7 +188,11 @@ source "drivers/input/tablet/Kconfig"
 
 source "drivers/input/touchscreen/Kconfig"
 
+source "drivers/input/touchpad/Kconfig"
+
 source "drivers/input/misc/Kconfig"
+
+source "drivers/input/rmi4/Kconfig"
 
 endif
 
