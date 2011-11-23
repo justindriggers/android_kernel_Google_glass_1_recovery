@@ -562,7 +562,10 @@ static struct omap2_hsmmc_info mmc[] = {
 		.nonremovable   = true,
 		.ocr_mask	= MMC_VDD_29_30,
                 .no_off_init    = true,
-                .power_saving   = true,
+                // TODO(rocky): Experiment with turning this off to see if
+                // it improves hsmmc suspend/resume problem.  Measured
+                // effect on current draw is zero.
+                .power_saving   = false,
 	},
         {
                 .name           = "bcm4329",
