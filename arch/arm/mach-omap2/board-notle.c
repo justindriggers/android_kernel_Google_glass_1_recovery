@@ -102,6 +102,8 @@
 #define MUX_AUDIO_POWERON_EMU           MUX(HDQ_SIO)
 #define GPIO_EN_10V                     84
 #define MUX_EN_10V                      MUX(USBB1_ULPITLL_CLK)
+#define GPIO_PROX_INT                   90
+#define MUX_PROX_INT                    MUX(USBB1_ULPITLL_DAT2)
 #define GPIO_CAMERA_DOG                 94
 #define MUX_CAMERA_DOG                  MUX(USBB1_ULPITLL_DAT6)
 #define GPIO_CAMERA_EMU                 121
