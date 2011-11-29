@@ -130,15 +130,6 @@
 #define GPIO_BCM_WLAN_HOST_WAKE                 86
 */
 
-#define PHYS_ADDR_SMC_SIZE      (SZ_1M * 3)
-#define PHYS_ADDR_SMC_MEM       (0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
-#define OMAP_ION_HEAP_SECURE_INPUT_SIZE (SZ_1M * 30)
-// NOTE(abliss): This probably also needs to stay in sync with the value
-// in omap4_ion.c.
-#define PHYS_ADDR_DUCATI_SIZE   (SZ_1M * 103)
-#define PHYS_ADDR_DUCATI_MEM    (PHYS_ADDR_SMC_MEM - PHYS_ADDR_DUCATI_SIZE - \
-                                 OMAP_ION_HEAP_SECURE_INPUT_SIZE)
-
 extern int tuna_wlan_init(void);
 
 // Notle board version detection gpios
@@ -1844,13 +1835,12 @@ static void __init notle_reserve(void)
         memblock_remove(PHYS_ADDR_DUCATI_MEM, PHYS_ADDR_DUCATI_SIZE);
         /* ipu needs to recognize secure input buffer area as well */
         omap_ipu_set_static_mempool(PHYS_ADDR_DUCATI_MEM, PHYS_ADDR_DUCATI_SIZE +
-                                    OMAP_ION_HEAP_SECURE_INPUT_SIZE);
+                                    OMAP4_ION_HEAP_SECURE_INPUT_SIZE);
 
 #ifdef CONFIG_ION_OMAP
         omap_ion_init();
-#else
-        omap_reserve();
 #endif
+        omap_reserve();
 }
 
 MACHINE_START(NOTLE, "OMAP4430")
