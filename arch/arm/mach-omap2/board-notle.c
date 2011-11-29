@@ -1212,7 +1212,7 @@ static struct ltr506_platform_data notle_ltr506als_data = {
         .pfd_ps_highthresh = 0,
 
         /* Interrupt */
-        .pfd_gpio_int_no = 0,
+        .pfd_gpio_int_no = GPIO_PROX_INT,
 };
 #endif
 
@@ -1238,8 +1238,9 @@ static struct i2c_board_info __initdata notle_dog_i2c_4_boardinfo[] = {
         },
 #ifdef CONFIG_INPUT_LTR506ALS
         {
-                I2C_BOARD_INFO("ltr506als", 0x1d),
+                I2C_BOARD_INFO("ltr506als", 0x3a),
                 .flags = I2C_CLIENT_WAKE,
+                .irq = OMAP_GPIO_IRQ(GPIO_PROX_INT),
                 .platform_data = &notle_ltr506als_data,
         },
 #endif
@@ -1263,8 +1264,9 @@ static struct i2c_board_info __initdata notle_emu_i2c_4_boardinfo[] = {
         },
 #ifdef CONFIG_INPUT_LTR506ALS
         {
-                I2C_BOARD_INFO("ltr506als", 0x1d),
+                I2C_BOARD_INFO("ltr506als", 0x3a),
                 .flags = I2C_CLIENT_WAKE,
+                .irq = OMAP_GPIO_IRQ(GPIO_PROX_INT),
                 .platform_data = &notle_ltr506als_data,
         },
 #endif
@@ -1314,8 +1316,9 @@ static struct i2c_board_info __initdata notle_fly_i2c_4_boardinfo[] = {
         },
 #ifdef CONFIG_INPUT_LTR506ALS
         {
-                I2C_BOARD_INFO("ltr506als", 0x1d),
+                I2C_BOARD_INFO("ltr506als", 0x3a),
                 .flags = I2C_CLIENT_WAKE,
+                .irq = OMAP_GPIO_IRQ(GPIO_PROX_INT),
                 .platform_data = &notle_ltr506als_data,
         },
 #endif
