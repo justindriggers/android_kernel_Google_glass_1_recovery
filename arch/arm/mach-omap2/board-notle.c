@@ -1345,9 +1345,11 @@ static int __init notle_i2c_init(void)
 
         switch (NOTLE_VERSION) {
           case V1_DOG:
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
             synaptics_f11_data.flip_X = true;
             synaptics_f11_data.flip_Y = false;
             synaptics_f11_data.swap_axes = true;
+#endif  /* CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C */
 
             omap4_pmic_init("twl6030", &dog_twldata);
             omap_register_i2c_bus(2, 400, NULL, 0);
@@ -1357,9 +1359,11 @@ static int __init notle_i2c_init(void)
                             ARRAY_SIZE(notle_dog_i2c_4_boardinfo));
             break;
           case V3_EMU:
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
             synaptics_f11_data.flip_X = false;
             synaptics_f11_data.flip_Y = true;
             synaptics_f11_data.swap_axes = true;
+#endif  /* CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C */
 
             omap4_pmic_init("twl6030", &emu_twldata);
             omap_register_i2c_bus(2, 400, NULL, 0);
@@ -1370,10 +1374,11 @@ static int __init notle_i2c_init(void)
             break;
           case V4_FLY:
           case V5_GNU:
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
             synaptics_f11_data.flip_X = false;
             synaptics_f11_data.flip_Y = true;
             synaptics_f11_data.swap_axes = false;
-
+#endif  /* CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C */
             omap4_pmic_init("twl6030", &fly_twldata);
             omap_register_i2c_bus(2, 400, NULL, 0);
             omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
