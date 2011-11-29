@@ -1,0 +1,21 @@
+#
+# Touchscreen driver configuration
+#
+menuconfig INPUT_TOUCHPAD
+	bool "Touchpads"
+	help
+	  Say Y here, and a list of supported touchpads will be displayed.
+	  This option doesn't affect the kernel.
+
+	  If unsure, say Y.
+
+if INPUT_TOUCHPAD
+
+config INPUT_TOUCHPAD_FTK
+	tristate "STMicroelectronics FingerTipK touchpad"
+	depends on I2C && INPUT
+	help
+	  Say Y here if you have a STMicroelectronics FingerTipK touchpad i2c device.  If unsure, say N.
+    
+
+endif

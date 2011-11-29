@@ -51,6 +51,9 @@
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
 #include "../../../drivers/input/touchscreen/rmi_i2c.h"
 #endif
+#ifdef CONFIG_INPUT_TOUCHPAD_FTK
+#include <linux/i2c/ftk_patch.h>
+#endif  /* CONFIG_INPUT_TOUCHPAD_FTK */
 
 #include <mach/hardware.h>
 #include <mach/omap4-common.h>
@@ -1071,6 +1074,18 @@ static struct twl4030_platform_data fly_twldata = {
 	.madc           = &notle_gpadc_data,
 };
 
+#if defined(CONFIG_INPUT_TOUCHPAD_FTK) && defined(CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C)
+#error "Can only define either FTK or Synaptics touchpad"
+#endif
+
+#ifdef CONFIG_INPUT_TOUCHPAD_FTK
+static struct ftk_i2c_platform_data ftk_platformdata = {
+  /* TODO(cmanton) Implement this based upon pending information from ST
+   * For now do nothing */
+  .power = NULL,
+};
+#endif  /* CONFIG_INPUT_TOUCHPAD_FTK */
+
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
 static struct rmi_sensor_suspend_custom_ops synaptics_custom_ops = {
         .rmi_sensor_custom_suspend = 0,
@@ -1116,6 +1131,12 @@ static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
                 .platform_data = &synaptics_platformdata,
         },
 #endif
+#ifdef CONFIG_INPUT_TOUCHPAD_FTK
+        {
+                I2C_BOARD_INFO("ftk", 0x4b),
+                .platform_data = &ftk_platformdata,
+        },
+#endif  /* CONFIG_TOUCHPAD_FTK */
         {
                 I2C_BOARD_INFO("stmpe32m28", 0x48),
         },
