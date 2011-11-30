@@ -114,6 +114,9 @@
 #define GPIO_TOUCHPAD_INT_N             32
 #define MUX_TOUCHPAD_INT_N              MUX(GPMC_AD8)
 #define MUX_BACKLIGHT                   MUX(USBB1_ULPITLL_DAT5)
+#define GPIO_CAM_PWDN                   91
+#define MUX_CAM_PWDN                    MUX(USBB1_ULPITLL_DAT3)
+
 #define PWM_TIMER                       9
 // Wifi defines go in board-notle.h.
 /*
@@ -1654,6 +1657,7 @@ static void __init my_mux_init(void) {
         __raw_writew(flags, CORE_BASE_ADDR + MUX_LCD_RESET_N);
         __raw_writew(flags, CORE_BASE_ADDR + MUX_EN_10V);
         __raw_writew(flags, CORE_BASE_ADDR + MUX_BT_RST_N);
+        __raw_writew(flags, CORE_BASE_ADDR + MUX_CAM_PWDN);
 
         // Set display backlight to be pulled down when we start.
         flags = OMAP_MUX_MODE7 | OMAP_PULL_ENA;
