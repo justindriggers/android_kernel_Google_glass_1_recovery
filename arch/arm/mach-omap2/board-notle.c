@@ -105,6 +105,10 @@
 #define MUX_AUDIO_POWERON_EMU           MUX(HDQ_SIO)
 #define GPIO_EN_10V                     84
 #define MUX_EN_10V                      MUX(USBB1_ULPITLL_CLK)
+#define GPIO_MPU9000_INT_TIMER          92
+#define MUX_MPU9000_INT_TIMER           MUX(USBB1_ULPITLL_DAT4)
+#define GPIO_MPU9000_INT                95
+#define MUX_MPU9000_INT                 MUX(USBB1_ULPITLL_DAT7)
 #define GPIO_PROX_INT                   90
 #define MUX_PROX_INT_N                  MUX(USBB1_ULPITLL_DAT2)
 #define GPIO_CAMERA_DOG                 94
@@ -1139,12 +1143,13 @@ static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
 /*
  * i2c-4 
  */
-static struct mpu_platform_data mpu6050_data = {
+static struct mpu_platform_data mpu9150_data = {
         .int_config     = 0x10,
         .orientation    = { 0, 0, -1,
                             0, 1, 0,
                             1, 0, 0 },
-        .level_shifter  = 0,
+        .level_shifter  = 1,
+        /*
         .accel          = {
                 .get_slave_descr = mantis_get_slave_descr,
                 .adapt_num = 4,
@@ -1163,7 +1168,17 @@ static struct mpu_platform_data mpu6050_data = {
                                  1, 0, 0,
                                  0, 1, 0 },
         },
+        */
 };
+
+/* compass */
+static struct ext_slave_platform_data ak8975_compass_data = {
+	.bus         = EXT_SLAVE_BUS_SECONDARY,
+	.orientation = { 0, 0, 1,
+			 1, 0, 0,
+			 0, 1, 0 },
+};
+
 
 static struct l3g4200d_gyr_platform_data notle_l3g4200d_data = {
         .min_interval = 1,                // Minimum poll interval in ms.
@@ -1271,9 +1286,14 @@ static struct i2c_board_info __initdata notle_emu_i2c_4_boardinfo[] = {
                 I2C_BOARD_INFO("tc358762-i2c", 0x0b),
         },
         {
-                I2C_BOARD_INFO("mpu6050B1", 0x68),
-        //        .irq = OMAP44XX_IRQ_SYS_1N,
-                .platform_data = &mpu6050_data,
+                I2C_BOARD_INFO("mpu6050", 0x68),
+                .irq = OMAP_GPIO_IRQ(GPIO_MPU9000_INT),
+                .platform_data = &mpu9150_data,
+        },
+        {
+                I2C_BOARD_INFO("ak8975", 0xC),
+                .irq = OMAP_GPIO_IRQ(GPIO_MPU9000_INT),
+                .platform_data = &ak8975_compass_data,
         },
 #ifdef CONFIG_INPUT_LTR506ALS
         {
@@ -1323,9 +1343,14 @@ static struct i2c_board_info __initdata notle_fly_i2c_4_boardinfo[] = {
                 I2C_BOARD_INFO("panel-notle-panel", 0x49),
         },
         {
-                I2C_BOARD_INFO("mpu6050B1", 0x68),
-        //        .irq = OMAP44XX_IRQ_SYS_1N,
-                .platform_data = &mpu6050_data,
+                I2C_BOARD_INFO("mpu6050", 0x68),
+                .irq = OMAP_GPIO_IRQ(GPIO_MPU9000_INT),
+                .platform_data = &mpu9150_data,
+        },
+        {
+                I2C_BOARD_INFO("ak8975", 0xC),
+                .irq = OMAP_GPIO_IRQ(GPIO_MPU9000_INT),
+                .platform_data = &ak8975_compass_data,
         },
 #ifdef CONFIG_INPUT_LTR506ALS
         {
@@ -1533,6 +1558,33 @@ static int __init notle_touchpad_init(void) {
         return r;
 }
 
+static int __init notle_imu_init(void) {
+        int r;
+
+        pr_info("%s()+\n", __func__);
+
+        /* Configuration of requested GPIO line */
+
+        r = gpio_request_one(GPIO_MPU9000_INT_TIMER, GPIOF_IN, "mpuirq_timer");
+        if (r) {
+                pr_err("Failed to get mpu9000_int_timer gpio\n");
+        } else {
+                pr_err("got the mpu9000 timer gpio!!!\n");
+        }
+        /*
+        r = gpio_request_one(GPIO_MPU9000_INT, GPIOF_IN, "mpuirq");
+        */
+        r = gpio_request(GPIO_MPU9000_INT, "mpuirq");
+        if (r) {
+                pr_err("Failed to get mpu9000_int gpio\n");
+        }
+        r = gpio_direction_input(GPIO_MPU9000_INT);
+        if (r) {
+                pr_err("Failed to get mpu9000_int gpio\n");
+        }
+        return r;
+}
+
 
 #ifndef BACKLIGHT_HACK
 static void notle_dmtimer_pwm_enable(void) {
@@ -1675,6 +1727,14 @@ static void __init my_mux_init(void) {
         __raw_writew(flags, CORE_BASE_ADDR + MUX_TOUCHPAD_INT_N);
         __raw_writew(flags, CORE_BASE_ADDR + MUX_PROX_INT_N);
 
+        // Invensense part configured as push-pull.  Don't need omap to pullup.
+        // TODO: (rocky) Do we want wakeup enabled?
+        flags = OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN;
+        if (NOTLE_VERSION != V1_DOG) {
+          __raw_writew(flags, CORE_BASE_ADDR + MUX_MPU9000_INT);
+          __raw_writew(flags, CORE_BASE_ADDR + MUX_MPU9000_INT_TIMER);
+        }
+
 }
 
 static int notle_notifier_call(struct notifier_block *this,
@@ -1757,6 +1817,10 @@ static void __init notle_init(void)
         fly_twldata.vmmc = NULL;
 #endif
 
+        err = notle_imu_init();
+        if (err) {
+                pr_err("IMU initialization failed: %d\n", err);
+        }
         notle_i2c_init();
         omap4_register_ion();
 
