@@ -52,31 +52,31 @@
 
 
 /* Default Settings (Bitshift left: Setting << Bit Number) */
-#define ADC_RESOLUTION		(4 << 5)
-#define ALS_GAIN		(0 << 3)
-#define ALS_SW_RESET		(0 << 2)
-#define ALS_MODE		(0 << 1)
+#define ADC_RESOLUTION		(7 << 5)
+#define ALS_GAIN		(3 << 2)
+#define ALS_SW_RESET		(1 << 2)
+#define ALS_MODE		(1 << 1)
 #define ALS_MEAS_RATE		(2 << 0)
-#define ALS_INT_PRST		(0 << 0)
+#define ALS_INT_PRST		(1 << 3)
 
-#define ALS_INT_FLAG		(0 << 3)
-#define ALS_NEWDATA		(0 << 2)
+#define ALS_INT_FLAG		(1 << 3)
+#define ALS_NEWDATA		(1 << 2)
 
-#define PS_GAIN			(0 << 2)
-#define PS_MODE			(0 << 1)
-#define PS_MEAS_RATE		(3 << 0)
-#define PS_INT_PRST		(0 << 4)
+#define PS_GAIN			(1 << 2)
+#define PS_MODE			(1 << 1)
+#define PS_MEAS_RATE		(7 << 0)
+#define PS_INT_PRST		(3 << 4)
 
-#define PS_INT_FLAG		(0 << 1)
-#define PS_NEWDATA		(0 << 0)
+#define PS_INT_FLAG		(1 << 1)
+#define PS_NEWDATA		(1 << 0)
 
-#define INTERRUPT_MODE		(1 << 0)
-#define INTERRUPT_POL		(0 << 2)
-#define INTERRUPT_OUTPUT_MODE	(0 << 3)
+#define INTERRUPT_MODE		(3 << 0)
+#define INTERRUPT_POL		(1 << 2)
+#define INTERRUPT_OUTPUT_MODE	(1 << 3)
 
-#define LED_PULSE_FREQ		(3 << 5)
-#define LED_DUTY_CYC		(1 << 3)
-#define LED_PEAK_CURR		(3 << 0)
+#define LED_PULSE_FREQ		(7 << 5)
+#define LED_DUTY_CYC		(3 << 3)
+#define LED_PEAK_CURR		(7 << 0)
 
 /* Power On response time in ms */
 #define PON_DELAY	600

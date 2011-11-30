@@ -158,7 +158,7 @@ static int _ltr506_set_bit(struct i2c_client *client, u8 set, u8 cmd, u8 data)
 	u8 value;
 	int ret = 0;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	buffer[0] = cmd;
 	ret = I2C_Read(buffer, 1);
@@ -191,7 +191,7 @@ static uint16_t read_adc_value(struct ltr506_data *ltr506)
 	uint16_t value, tmp_value, ret;
 	char buffer[2];
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	switch (ltr506->mode) {
 		case 0 :
@@ -248,7 +248,7 @@ static int set_als_range(uint16_t lt, uint16_t ht)
 	int ret;
 	char buffer[5];
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	buffer[0] = LTR506_ALS_THRES_UP_0;
 	buffer[1] = ht & 0xFF;
@@ -271,7 +271,7 @@ static int set_ps_range(uint16_t lt, uint16_t ht)
 	int ret;
 	char buffer[5];
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	buffer[0] = LTR506_PS_THRES_UP_0;
 	buffer[1] = ht & 0xFF;
@@ -293,7 +293,7 @@ static void report_ps_input_event(struct ltr506_data *ltr506)
 {
 	uint16_t val;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	ltr506->mode = 1;
 	val = read_adc_value(ltr506);
@@ -310,7 +310,7 @@ static void report_als_input_event(struct ltr506_data *ltr506)
 	uint16_t adc_value;
 	int level = 0, i, ret;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	ltr506->mode = 0;
 	adc_value = read_adc_value(ltr506);
@@ -340,7 +340,7 @@ static int als_resume_enable(struct ltr506_data *ltr506)
 {
 	int ret = -1;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	ret = _ltr506_set_bit(ltr506->i2c_client, 1, LTR506_ALS_CONTR, ALS_MODE);
 	if (ret < 0) {
@@ -368,7 +368,7 @@ static void ltr506_schedwork(struct work_struct *work)
 	int value2;
 	int retry_limit = 5;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	buffer[0] = LTR506_ALS_PS_STATUS;
 	ret = I2C_Read(buffer, 1);
@@ -390,7 +390,7 @@ static void ltr506_schedwork(struct work_struct *work)
 	mode_als = buffer[0];
 	mode_ps = buffer[1];
 
-	pr_info("Interrupt: %d", interrupt_stat);
+	pr_debug("Interrupt: %d", interrupt_stat);
 
 	switch (interrupt_stat){
 		case 0:
@@ -451,7 +451,7 @@ static irqreturn_t ltr506_irq_handler(int irq, void *data)
 {
 	struct ltr506_data *ltr506 = data;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	/* disable an irq without waiting */
 	disable_irq_nosync(ltr506->irq);
@@ -465,7 +465,7 @@ static int ltr506_gpio_irq(struct ltr506_data *ltr506)
 {
 	int ret = 0;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	ret = gpio_request(ltr506->gpio_int_no, DEVICE_NAME);
 	if (ret < 0) {
@@ -494,7 +494,7 @@ static int ps_led_setup(struct ltr506_data *ltr506)
 	int ret = 0;
 	char buffer[3];
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	buffer[0] = LTR506_PS_LED;
 
@@ -514,7 +514,7 @@ static int ps_meas_rate_setup(struct ltr506_data *ltr506)
 	int ret = 0;
 	char buffer[2];
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	buffer[0] = LTR506_PS_MEAS_RATE;
 	buffer[1] = 0x02;
@@ -530,7 +530,7 @@ static int als_meas_rate_setup(struct ltr506_data *ltr506)
 	int ret = 0;
 	char buffer[2];
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	buffer[0] = LTR506_ALS_MEAS_RATE;
 	buffer[1] = 0x02;
@@ -546,7 +546,7 @@ static int ps_enable(struct ltr506_data *ltr506)
 {
 	int ret;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 	if (ltr506->ps_enable_flag) {
 		pr_info("%s: already enabled\n", __func__);
 		return 0;
@@ -588,7 +588,7 @@ static int ps_disable(struct ltr506_data *ltr506)
 {
 	int ret = -EIO;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 	if (ltr506->ps_enable_flag == 0) {
 		pr_info("%s: already disabled\n", __func__);
 		return 0;
@@ -617,7 +617,7 @@ static int ps_open(struct inode *inode, struct file *file)
 {
 	struct ltr506_data *ltr506 = sensor_info;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	if (ltr506->ps_opened)
 		return -EBUSY;
@@ -632,7 +632,7 @@ static int ps_release(struct inode *inode, struct file *file)
 {
 	struct ltr506_data *ltr506 = sensor_info;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	ltr506->ps_opened = 0;
 
@@ -645,7 +645,7 @@ static long ps_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	int val;
 	struct ltr506_data *ltr506 = sensor_info;
 
-	pr_info("%s cmd %d\n", __func__, _IOC_NR(cmd));
+	pr_debug("%s cmd %d\n", __func__, _IOC_NR(cmd));
 
 	switch (cmd) {
 	case LTR506_IOCTL_PS_ENABLE:
@@ -682,7 +682,7 @@ static int als_enable(struct ltr506_data *ltr506)
 {
 	int ret;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	/* if device not enabled, enable it */
 	if (ltr506->als_enable_flag == 0) {
@@ -721,7 +721,7 @@ static int als_disable(struct ltr506_data *ltr506)
 {
 	int ret;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	if (ltr506->is_suspend) {
 		ltr506->als_enable_flag = 0;
@@ -754,7 +754,7 @@ static int als_open(struct inode *inode, struct file *file)
 	struct ltr506_data *ltr506 = sensor_info;
 	int rc = 0;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 	if (ltr506->als_opened) {
 		pr_err("%s: ALS already Opened...\n", __func__);
 		rc = -EBUSY;
@@ -767,7 +767,7 @@ static int als_release(struct inode *inode, struct file *file)
 {
 	struct ltr506_data *ltr506 = sensor_info;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 	ltr506->als_opened = 0;
 	return 0;
 }
@@ -777,7 +777,7 @@ static long als_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	int rc, val;
 	struct ltr506_data *ltr506 = sensor_info;
 
-	pr_info("%s cmd %d\n", __func__, _IOC_NR(cmd));
+	pr_debug("%s cmd %d\n", __func__, _IOC_NR(cmd));
 
 	switch (cmd) {
 	case LTR506_IOCTL_ALS_ENABLE:
@@ -817,7 +817,7 @@ static struct miscdevice als_misc = {
 static ssize_t ps_adc_show(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 	return 0;
 }
 
@@ -828,7 +828,7 @@ static ssize_t ps_enable_store(struct device *dev,
 	int ps_en;
 	struct ltr506_data *ltr506 = sensor_info;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	ps_en = -1;
 	sscanf(buf, "%d", &ps_en);
@@ -856,7 +856,7 @@ static ssize_t ps_led_show(struct device *dev,
 	int ret = 0;
 	struct ltr506_data *ltr506 = sensor_info;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	buffer[0] = LTR506_PS_LED;
 	ret = I2C_Read(buffer, 2);
@@ -888,7 +888,7 @@ static ssize_t ps_led_store(struct device *dev, struct device_attribute *attr,
 
 	sscanf(buf, "%d", &param);
 
-	pr_info("%s: store value = %d\n", __func__, param);
+	pr_debug("%s: store value = %d\n", __func__, param);
 
 	if (param == 1) {
 		/* Need to create routine for setting LED */
@@ -912,7 +912,7 @@ static ssize_t als_adc_show(struct device *dev,
 	int ret, i, level = -1;
 	struct ltr506_data *ltr506 = sensor_info;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	ltr506->mode = 0;
 	value = read_adc_value(ltr506);
@@ -940,7 +940,7 @@ static ssize_t als_enable_show(struct device *dev,
 	/*struct ltr506_data *ltr506 = sensor_info;*/
 	char buffer[2];
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	buffer[0] = LTR506_ALS_CONTR;
 	ret = I2C_Read(buffer, 1);
@@ -965,7 +965,7 @@ static ssize_t als_enable_store(struct device *dev,
 	int ret;
 	struct ltr506_data *ltr506 = sensor_info;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	als_on = -1;
 	sscanf(buf, "%d", &als_on);
@@ -976,7 +976,7 @@ static ssize_t als_enable_store(struct device *dev,
 		ltr506->als_enable_flag = 0;
 		
 
-	pr_info("%s: ltr506->als_enable_flag = %d!\n", __func__, ltr506->als_enable_flag);
+	pr_debug("%s: ltr506->als_enable_flag = %d!\n", __func__, ltr506->als_enable_flag);
 
 	ret = _ltr506_set_bit(ltr506->i2c_client, (ltr506->als_enable_flag ? 1 : 0),	LTR506_ALS_CONTR, ALS_MODE);
 	if (ret < 0)
@@ -987,11 +987,25 @@ static ssize_t als_enable_store(struct device *dev,
 
 static DEVICE_ATTR(als_on, 0666, als_enable_show, als_enable_store);
 
+static void sysfs_register_device(struct i2c_client *client) {
+	int rc = 0;
+
+	rc += device_create_file(&client->dev, &dev_attr_ps_adc);
+	rc += device_create_file(&client->dev, &dev_attr_ps_led);
+	rc += device_create_file(&client->dev, &dev_attr_als_adc);
+	rc += device_create_file(&client->dev, &dev_attr_als_on);
+	if (rc) {
+		pr_err("%s Unable to create sysfs files\n", __func__);
+	} else {
+		pr_info("%s Created sysfs files\n", __func__);
+	}
+}
+
 static int als_setup(struct ltr506_data *ltr506)
 {
 	int ret;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	ltr506->als_input_dev = input_allocate_device();
 	if (!ltr506->als_input_dev) {
@@ -1028,7 +1042,7 @@ static int ps_setup(struct ltr506_data *ltr506)
 {
 	int ret;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	ltr506->ps_input_dev = input_allocate_device();
 	if (!ltr506->ps_input_dev) {
@@ -1066,7 +1080,7 @@ static int ltr506_setup(struct ltr506_data *ltr506)
 	int ret = 0;
 	char buffer[3];
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	ret = ltr506_gpio_irq(ltr506);
 	if (ret < 0) {
@@ -1129,7 +1143,7 @@ static void ltr506_early_suspend(struct early_suspend *h)
 {
 	int ret;
 	struct ltr506_data *ltr506 = sensor_info;
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	ltr506->is_suspend = 1;
 
@@ -1165,7 +1179,7 @@ static int  __devinit ltr506_probe(struct i2c_client *client, const struct i2c_d
 	struct ltr506_data *ltr506;
 	struct ltr506_platform_data *platdata;
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	ltr506 = kzalloc(sizeof(struct ltr506_data), GFP_KERNEL);
 	if (!ltr506)
@@ -1237,6 +1251,9 @@ static int  __devinit ltr506_probe(struct i2c_client *client, const struct i2c_d
 	ltr506->early_suspend.suspend = ltr506_early_suspend;
 	ltr506->early_suspend.resume = ltr506_late_resume;
 	register_early_suspend(&ltr506->early_suspend);
+
+	/* Register the sysfs files */
+	sysfs_register_device(client);
 
 	pr_info("%s: Probe End...\n", __func__);
 	return ret;
