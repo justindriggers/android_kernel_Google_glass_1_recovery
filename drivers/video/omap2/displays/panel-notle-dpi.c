@@ -25,6 +25,8 @@
 #include <video/omapdss.h>
 #include <video/omap-panel-notle.h>
 
+#define LOG_TAG         "panel-notle: "
+
 #define REG_DELAY       0xFF
 #define MAX_BRIGHTNESS  0xFF
 
@@ -272,11 +274,13 @@ static ssize_t fpga_config_store(struct notle_drv_data *notle_data,
         unsigned int red, green, blue;
 
         if (sscanf(buf, "0x%x/%u/%u/%u", &config, &red, &green, &blue) != 4) {
+          printk(KERN_ERR LOG_TAG "Failed to fpga_config_store: malformed config: %s\n", buf);
           return -EINVAL;
         }
 
         if (((config & FPGA_CONFIG_MASK) != config) ||
             (red > 511) || (green > 511) || (blue > 511)) {
+          printk(KERN_ERR LOG_TAG "Failed to fpga_config_store: invalid config: %s\n", buf);
           return -EINVAL;
         }
 
@@ -286,6 +290,7 @@ static ssize_t fpga_config_store(struct notle_drv_data *notle_data,
         fpga_config.blue   = (u16)blue;
 
         if (fpga_write_config(&fpga_config)) {
+          printk(KERN_ERR LOG_TAG "Failed to fpga_config_store: i2c write failed\n");
           return -EIO;
         }
 
@@ -309,6 +314,7 @@ static ssize_t testpattern_store(struct notle_drv_data *notle_data,
         }
 
         if (fpga_write_config(&fpga_config)) {
+          printk(KERN_ERR LOG_TAG "Failed to testpattern_store: i2c write failed\n");
           return -EIO;
         }
 
@@ -332,6 +338,7 @@ static ssize_t testmono_store(struct notle_drv_data *notle_data,
         }
 
         if (fpga_write_config(&fpga_config)) {
+          printk(KERN_ERR LOG_TAG "Failed to testmono_store: i2c write failed\n");
           return -EIO;
         }
 
@@ -355,6 +362,7 @@ static ssize_t mono_store(struct notle_drv_data *notle_data,
         }
 
         if (fpga_write_config(&fpga_config)) {
+          printk(KERN_ERR LOG_TAG "Failed to mono_store: i2c write failed\n");
           return -EIO;
         }
 
@@ -370,8 +378,16 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
         if (r)
           return r;
 
-        if (value < 0 || value > MAX_BRIGHTNESS)
+        if (value < 0 || value > MAX_BRIGHTNESS) {
+          printk(KERN_ERR LOG_TAG "Failed to brightness_store: "
+                 "invalid brightness: %i\n", value);
           return -EINVAL;
+        }
+
+        if (!notle_data->enabled) {
+          printk(KERN_WARNING LOG_TAG "Failed to brightness_store: panel disabled\n");
+          return -EINVAL;
+        }
 
         led_config.brightness = value;
         led_config_to_fpga_config(&led_config, &fpga_config);
@@ -385,6 +401,7 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
         }
 
         if (fpga_write_config(&fpga_config)) {
+          printk(KERN_ERR LOG_TAG "Failed to brightness_store: i2c write failed\n");
           return -EIO;
         }
 
@@ -509,7 +526,7 @@ static int panel_write_register(u8 reg, u8 value) {
         struct i2c_msg msgs[1];
 
         if (!i2c_data || !i2c_data->panel_client) {
-                printk(KERN_ERR "No I2C data set for Notle panel init\n");
+                printk(KERN_ERR LOG_TAG "No I2C data set in panel_write_register\n");
                 return -1;
         }
 
@@ -535,7 +552,7 @@ static int fpga_read_config(struct fpga_config *config) {
         struct i2c_msg msgs[1];
 
         if (!i2c_data || !i2c_data->fpga_client) {
-                printk(KERN_ERR "No I2C data set for Notle FPGA init\n");
+                printk(KERN_ERR LOG_TAG "No I2C data set in fpga_read_config\n");
                 return -1;
         }
 
@@ -546,7 +563,7 @@ static int fpga_read_config(struct fpga_config *config) {
 
         r = i2c_transfer(i2c_data->fpga_client->adapter, msgs, 1);
         if (r < 0) {
-                printk(KERN_ERR "Failed to read FPGA config\n");
+                printk(KERN_ERR LOG_TAG "Failed to read FPGA config: i2c read failed\n");
                 return r;
         }
         config->config   = buf[0];
@@ -568,7 +585,7 @@ static int fpga_write_config(struct fpga_config *config) {
           (u8)(config->blue >> 1)};
 
         if (!i2c_data || !i2c_data->fpga_client) {
-                printk(KERN_ERR "No I2C data set for Notle FPGA init\n");
+                printk(KERN_ERR LOG_TAG "No I2C data set in fpga_write_config\n");
                 return -1;
         }
 
@@ -579,7 +596,7 @@ static int fpga_write_config(struct fpga_config *config) {
 
         r = i2c_transfer(i2c_data->fpga_client->adapter, msgs, 1);
         if (r < 0) {
-                printk(KERN_ERR "Failed to write FPGA config\n");
+                printk(KERN_ERR LOG_TAG "Failed to write FPGA config: i2c write failed\n");
                 return r;
         }
 
@@ -599,7 +616,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
 
         r = omapdss_dpi_display_enable(dssdev);
         if (r) {
-          printk(KERN_ERR "Notle panel driver failed to enable DPI\n");
+          printk(KERN_ERR LOG_TAG "Failed to enable DPI\n");
           goto err0;
         }
 
@@ -610,8 +627,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
         if (panel_data->platform_enable) {
           r = panel_data->platform_enable(dssdev);
           if (r) {
-            printk(KERN_ERR "Notle panel driver failed to "
-                   "platform_enable\n");
+            printk(KERN_ERR LOG_TAG "Failed to platform_enable\n");
             goto err1;
           }
         }
@@ -621,8 +637,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
             if (panel_data->panel_enable) {
               r = panel_data->panel_enable();
               if (r) {
-                printk(KERN_ERR "Notle panel driver failed to "
-                       "panel_enable\n");
+                printk(KERN_ERR LOG_TAG "Failed to panel_enable\n");
                 goto err1;
               }
             }
@@ -632,7 +647,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
 
           if (panel_write_register(panel_init_regs[i].reg,
                                    panel_init_regs[i].value)) {
-            printk(KERN_ERR "Failed to write panel config to Notle panel\n");
+            printk(KERN_ERR LOG_TAG "Failed to write panel config\n");
             goto err2;
           }
         }
@@ -641,7 +656,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
         if (led_config.brightness > 0) {
           fpga_config.config |= FPGA_CONFIG_LED_EN;
           if (fpga_write_config(&fpga_config)) {
-            printk(KERN_ERR "Failed to write FPGA config for Notle panel\n");
+            printk(KERN_ERR LOG_TAG "Failed to enable FPGA LED_EN\n");
           }
         }
 
@@ -668,7 +683,7 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
         /* Disable LED backlight */
         fpga_config.config &= ~FPGA_CONFIG_LED_EN;
         if (fpga_write_config(&fpga_config)) {
-          printk(KERN_ERR "Failed to write FPGA config for Notle panel\n");
+          printk(KERN_ERR LOG_TAG "Failed to disable FPGA LED_EN\n");
         }
 
         for (i = 0; i < ARRAY_SIZE(panel_shutdown_regs); ++i) {
@@ -679,7 +694,7 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
 
           if(panel_write_register(panel_shutdown_regs[i].reg,
                                   panel_shutdown_regs[i].value)) {
-            printk(KERN_ERR "Failed to shutdown Notle panel\n");
+            printk(KERN_ERR LOG_TAG "Failed to shutdown panel\n");
           }
         }
 
@@ -728,7 +743,7 @@ static int panel_notle_probe(struct omap_dss_device *dssdev) {
         r = kobject_init_and_add(&drv_data->kobj, &panel_notle_ktype,
                         &dssdev->manager->kobj, "panel-notle-dpi");
         if (r) {
-                printk(KERN_WARNING "Notle panel failed to create sysfs directory\n");
+                printk(KERN_WARNING LOG_TAG "Failed to create sysfs directory\n");
         }
 
         return 0;
@@ -841,7 +856,7 @@ static int __devinit i2c_probe(struct i2c_client *client,
             i2c_data->panel_client = client;
             break;
           default:
-            printk(KERN_WARNING "Unrecognized i2c device in Notle panel driver\n");
+            printk(KERN_WARNING LOG_TAG "Unrecognized i2c device\n");
             return -EINVAL;
         }
 
@@ -881,13 +896,13 @@ static int __init panel_notle_drv_init(void) {
         int r = 0;
         r = i2c_add_driver(&i2c_driver);
         if (r < 0) {
-                printk(KERN_WARNING "Notle panel i2c driver registration failed\n");
+                printk(KERN_WARNING LOG_TAG "I2C driver registration failed\n");
                 goto err0;
         }
 
         r = omap_dss_register_driver(&dpi_driver);
         if (r < 0) {
-                printk(KERN_WARNING "Notle panel dss driver registration failed\n");
+                printk(KERN_WARNING LOG_TAG "DSS driver registration failed\n");
                 goto err1;
         }
 
@@ -906,8 +921,6 @@ static void __exit panel_notle_drv_exit(void) {
 
 module_init(panel_notle_drv_init);
 module_exit(panel_notle_drv_exit);
-
-
 
 MODULE_DESCRIPTION("Notle FPGA and Panel Driver");
 MODULE_LICENSE("GPL");
