@@ -384,11 +384,6 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
           return -EINVAL;
         }
 
-        if (!notle_data->enabled) {
-          printk(KERN_WARNING LOG_TAG "Failed to brightness_store: panel disabled\n");
-          return -EINVAL;
-        }
-
         led_config.brightness = value;
         led_config_to_fpga_config(&led_config, &fpga_config);
 
@@ -400,7 +395,11 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
           fpga_config.config &= ~FPGA_CONFIG_LED_EN;
         }
 
-        if (fpga_write_config(&fpga_config)) {
+        /*
+         * If the display is enabled, write the new FPGA config immediately,
+         * otherwise it will be written when the display is enabled.
+         */
+        if (notle_data->enabled && fpga_write_config(&fpga_config)) {
           printk(KERN_ERR LOG_TAG "Failed to brightness_store: i2c write failed\n");
           return -EIO;
         }
@@ -614,6 +613,8 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
           return 0;
         }
 
+        printk(KERN_INFO LOG_TAG "Powering on\n");
+
         r = omapdss_dpi_display_enable(dssdev);
         if (r) {
           printk(KERN_ERR LOG_TAG "Failed to enable DPI\n");
@@ -679,6 +680,8 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
         if (dssdev->state != OMAP_DSS_DISPLAY_ACTIVE) {
           return;
         }
+
+        printk(KERN_INFO LOG_TAG "Powering off\n");
 
         /* Disable LED backlight */
         fpga_config.config &= ~FPGA_CONFIG_LED_EN;
