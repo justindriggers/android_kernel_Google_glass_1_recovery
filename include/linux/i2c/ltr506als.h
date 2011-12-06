@@ -49,7 +49,8 @@
 #define LTR506_ALS_THRES_LOW_1	0xA1
 #define LTR506_INTERRUPT_PRST	0xA4
 
-
+#define SET_BIT 1
+#define CLR_BIT 0
 
 /* Default Settings (Bitshift left: Setting << Bit Number) */
 #define ADC_RESOLUTION		(7 << 5)
@@ -57,15 +58,16 @@
 #define ALS_SW_RESET		(1 << 2)
 #define ALS_MODE		(1 << 1)
 #define ALS_MEAS_RATE		(2 << 0)
-#define ALS_INT_PRST		(1 << 3)
+#define ALS_INT_PRST		(0xf << 0)
 
 #define ALS_INT_FLAG		(1 << 3)
 #define ALS_NEWDATA		(1 << 2)
 
+#define PS_SW_RESET		(1 << 2)
 #define PS_GAIN			(1 << 2)
 #define PS_MODE			(1 << 1)
 #define PS_MEAS_RATE		(7 << 0)
-#define PS_INT_PRST		(3 << 4)
+#define PS_INT_PRST		(0xf << 4)
 
 #define PS_INT_FLAG		(1 << 1)
 #define PS_NEWDATA		(1 << 0)
@@ -82,13 +84,15 @@
 #define PON_DELAY	600
 #define WAKEUP_DELAY	10
 
-/* Interrupt vector number to use when probing IRQ number.
- * User changeable depending on sys interrupt.
- * For IRQ numbers used, see /proc/interrupts.
- */
-#define GPIO_INT_NO	32
+#define ALS_MIN_MEASURE_VAL	0
+#define ALS_MAX_MEASURE_VAL	65535
+#define ALS_VALID_MEASURE_MASK	ALS_MAX_MEASURE_VAL
+#define PS_MIN_MEASURE_VAL	0x0
+#define PS_MAX_MEASURE_VAL	4095
+#define PS_VALID_MEASURE_MASK   PS_MAX_MEASURE_VAL
 
-/* 
+
+/*
  * Magic Number
  * ============
  * Refer to file ioctl-number.txt for allocation
@@ -102,17 +106,19 @@
 #define LTR506_IOCTL_ALS_GET_ENABLED	_IOW(LTR506_IOCTL_MAGIC, 4, int *)
 
 struct ltr506_platform_data {
-        /* ALS */
-        uint16_t pfd_levels[5];
-        uint16_t pfd_als_lowthresh;
-        uint16_t pfd_als_highthresh;
+	/* ALS */
+	uint16_t pfd_levels[5];
+	uint16_t pfd_als_lowthresh;
+	uint16_t pfd_als_highthresh;
+	int pfd_disable_als_on_suspend;
 
-        /* PS */
-        uint16_t pfd_ps_lowthresh;
-        uint16_t pfd_ps_highthresh;
+	/* PS */
+	uint16_t pfd_ps_lowthresh;
+	uint16_t pfd_ps_highthresh;
+	int pfd_disable_ps_on_suspend;
 
-        /* Interrupt */
-        int pfd_gpio_int_no;
+	/* Interrupt */
+	int pfd_gpio_int_no;
 };
 
 #endif

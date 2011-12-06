@@ -106,7 +106,7 @@
 #define GPIO_EN_10V                     84
 #define MUX_EN_10V                      MUX(USBB1_ULPITLL_CLK)
 #define GPIO_PROX_INT                   90
-#define MUX_PROX_INT                    MUX(USBB1_ULPITLL_DAT2)
+#define MUX_PROX_INT_N                  MUX(USBB1_ULPITLL_DAT2)
 #define GPIO_CAMERA_DOG                 94
 #define MUX_CAMERA_DOG                  MUX(USBB1_ULPITLL_DAT6)
 #define GPIO_CAMERA_EMU                 121
@@ -1218,16 +1218,14 @@ static struct lsm303dlhc_mag_platform_data notle_lsm303dlh_mag_data = {
 
 #ifdef CONFIG_INPUT_LTR506ALS
 static struct ltr506_platform_data notle_ltr506als_data = {
-        .pfd_levels = { 0,0,0,0,0 },
-        .pfd_als_lowthresh = 0,
-        .pfd_als_highthresh = 0,
+	/* Disable als on suspend flag */
+	.pfd_disable_als_on_suspend = 1,
 
-        /* PS */
-        .pfd_ps_lowthresh = 0,
-        .pfd_ps_highthresh = 0,
+	/* Disable ps on suspend flag */
+	.pfd_disable_ps_on_suspend = 0,
 
-        /* Interrupt */
-        .pfd_gpio_int_no = GPIO_PROX_INT,
+	/* Interrupt */
+	.pfd_gpio_int_no = GPIO_PROX_INT,
 };
 #endif
 
@@ -1670,6 +1668,7 @@ static void __init my_mux_init(void) {
           __raw_writew(flags, CORE_BASE_ADDR + MUX_CAMERA_EMU);
         }
         __raw_writew(flags, CORE_BASE_ADDR + MUX_TOUCHPAD_INT_N);
+        __raw_writew(flags, CORE_BASE_ADDR + MUX_PROX_INT_N);
 
 }
 
