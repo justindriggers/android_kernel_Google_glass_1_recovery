@@ -352,6 +352,7 @@ static int rprm_gpio_request(struct rprm_elem *e, struct rprm_gpio *obj)
 	if (!gd)
 		return -ENOMEM;
 
+	gpio_free(obj->id);
 	ret = gpio_request(obj->id , "rpmsg_resmgr");
 	if (ret) {
 		pr_err("%s: error providing gpio %d\n", __func__, obj->id);
@@ -365,7 +366,7 @@ static int rprm_gpio_request(struct rprm_elem *e, struct rprm_gpio *obj)
 
 static void rprm_gpio_release(struct rprm_gpio *obj)
 {
-	gpio_free(obj->id);
+//	gpio_free(obj->id);
 	kfree(obj);
 }
 
