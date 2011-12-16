@@ -53,20 +53,35 @@
 #define CLR_BIT 0
 
 /* Default Settings (Bitshift left: Setting << Bit Number) */
-#define ADC_RESOLUTION		(7 << 5)
-#define ALS_GAIN		(3 << 2)
+#define ADC_RESOLUTION_BITS     0x7
+#define ADC_RESOLUTION_SHIFT    5
+#define ADC_RESOLUTION          (ADC_RESOLUTION_BITS << ADC_RESOLUTION_SHIFT)
+#define ALS_GAIN_BITS           0x3
+#define ALS_GAIN_SHIFT          2
+#define ALS_GAIN                (ALS_GAIN_BITS << ALS_GAIN_SHIFT)
 #define ALS_SW_RESET		(1 << 2)
 #define ALS_MODE		(1 << 1)
-#define ALS_MEAS_RATE		(2 << 0)
+#define ALS_MEAS_RATE_BITS      0x7
+#define ALS_MEAS_RATE_SHIFT     0
+#define ALS_MEAS_RATE           (ALS_MEAS_RATE_BITS << ALS_MEAS_RATE_SHIFT)
+
 #define ALS_INT_PRST		(0xf << 0)
 
 #define ALS_INT_FLAG		(1 << 3)
 #define ALS_NEWDATA		(1 << 2)
 
 #define PS_SW_RESET		(1 << 2)
-#define PS_GAIN			(1 << 2)
+
+#define PS_GAIN_BITS            0x3
+#define PS_GAIN_SHIFT           2
+#define PS_GAIN                 (PS_GAIN_BITS << PS_GAIN_SHIFT)
+
 #define PS_MODE			(1 << 1)
-#define PS_MEAS_RATE		(7 << 0)
+
+#define PS_MEAS_RATE_BITS       0x7
+#define PS_MEAS_RATE_SHIFT      0
+#define PS_MEAS_RATE            (PS_MEAS_RATE_BITS << PS_MEAS_RATE_SHIFT)
+
 #define PS_INT_PRST		(0xf << 4)
 
 #define PS_INT_FLAG		(1 << 1)
@@ -76,9 +91,15 @@
 #define INTERRUPT_POL		(1 << 2)
 #define INTERRUPT_OUTPUT_MODE	(1 << 3)
 
-#define LED_PULSE_FREQ		(7 << 5)
-#define LED_DUTY_CYC		(3 << 3)
-#define LED_PEAK_CURR		(7 << 0)
+#define LED_PULSE_FREQ_BITS     0x7
+#define LED_PULSE_FREQ_SHIFT    5
+#define LED_PULSE_FREQ          (LED_PULSE_FREQ_BITS << LED_PULSE_FREQ_SHIFT)
+#define LED_DUTY_CYC_BITS       0x3
+#define LED_DUTY_CYC_SHIFT      3
+#define LED_DUTY_CYC            (LED_DUTY_CYC_BITS << LED_DUTY_CYC_SHIFT)
+#define LED_PEAK_CURR_BITS      0x7
+#define LED_PEAK_CURR_SHIFT     0
+#define LED_PEAK_CURR           (LED_PEAK_CURR_BITS << LED_PEAK_CURR_SHIFT)
 
 /* Power On response time in ms */
 #define PON_DELAY	600

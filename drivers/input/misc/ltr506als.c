@@ -68,8 +68,11 @@ struct ltr506_data {
 	uint16_t default_als_lowthresh;
 	uint16_t default_als_highthresh;
 	uint16_t *adc_levels;
+	uint8_t als_resolution:3;
+	uint8_t als_meas_rate:3;
 	/* Flag to suspend ALS on suspend or not */
 	int disable_als_on_suspend;
+	int als_filter_interrupts;
 
 	/* PS */
 	int ps_enable_flag;
@@ -80,14 +83,16 @@ struct ltr506_data {
 	uint16_t ps_highthresh;
 	uint16_t default_ps_lowthresh;
 	uint16_t default_ps_highthresh;
+	uint8_t ps_meas_rate:3;
 	/* Flag to suspend PS on suspend or not */
 	int disable_ps_on_suspend;
+	int ps_filter_interrupts;
 
 	/* LED */
-	int led_pulse_freq;
-	int led_duty_cyc;
-	int led_peak_curr;
-	int led_pulse_count;
+	uint8_t led_pulse_freq:3;
+	uint8_t led_duty_cyc:2;
+	uint8_t led_peak_curr:3;
+	uint8_t led_pulse_count;
 
 	/* Interrupt */
 	int irq;
@@ -178,6 +183,34 @@ static int _ltr506_set_bit(struct i2c_client *client, u8 set, u8 cmd, u8 data)
 		value |= data;
 	else
 		value &= ~data;
+
+	buffer[0] = cmd;
+	buffer[1] = value;
+	ret = I2C_Write(buffer, 2);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s | 0x%02X", __func__, buffer[0]);
+		return -EIO;
+	}
+
+	return ret;
+}
+
+/* Set register field */
+static int _ltr506_set_field(struct i2c_client *client, u8 mask, u8 cmd, u8 data)
+{
+	char buffer[2];
+	u8 value;
+	int ret = 0;
+
+	buffer[0] = cmd;
+	ret = I2C_Read(buffer, 1);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s | 0x%02X", __func__, buffer[0]);
+		return -EIO;
+	}
+
+	value = buffer[0] & ~(mask);
+	value |= data;
 
 	buffer[0] = cmd;
 	buffer[1] = value;
@@ -303,6 +336,10 @@ static void report_ps_input_event(struct ltr506_data *ltr506)
 	input_report_abs(ltr506->ps_input_dev, ABS_DISTANCE, adc_value);
 	input_sync(ltr506->ps_input_dev);
 
+	if (!ltr506->ps_filter_interrupts) {
+		return;
+	}
+
 	/* Adjust measurement range using a crude filter to prevent interrupt
 	 *  jitter. */
 	thresh_delta = (adc_value >> 10)+2;
@@ -331,6 +368,9 @@ static void report_als_input_event(struct ltr506_data *ltr506)
 	input_report_abs(ltr506->als_input_dev, ABS_MISC, adc_value);
 	input_sync(ltr506->als_input_dev);
 
+	if (!ltr506->als_filter_interrupts) {
+		return;
+	}
 	/* Adjust measurement range using a crude filter to prevent interrupt
 	 *  jitter. */
 	thresh_delta = (adc_value >> 12)+2;
@@ -449,8 +489,11 @@ static int ps_led_setup(struct ltr506_data *ltr506)
 	char buffer[3];
 
 	buffer[0] = LTR506_PS_LED;
-	buffer[1] = 0xe8;
-	ret = I2C_Write(buffer, 2);
+	buffer[1] = (ltr506->led_pulse_freq << LED_PULSE_FREQ_SHIFT)
+		| (ltr506->led_duty_cyc << LED_DUTY_CYC_SHIFT)
+		| (ltr506->led_peak_curr << LED_PEAK_CURR_SHIFT);
+	buffer[2] = ltr506->led_pulse_count;
+	ret = I2C_Write(buffer, 3);
 	if (ret < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s | 0x%02X", __func__, buffer[0]);
 	}
@@ -465,7 +508,7 @@ static int ps_meas_rate_setup(struct ltr506_data *ltr506)
 	char buffer[2];
 
 	buffer[0] = LTR506_PS_MEAS_RATE;
-	buffer[1] = 0x04;
+	buffer[1] = ltr506->ps_meas_rate;
 	ret = I2C_Write(buffer, 2);
 	if (ret < 0)
 		dev_err(&ltr506->i2c_client->dev, "%s | 0x%02X", __func__, buffer[0]);
@@ -479,7 +522,8 @@ static int als_meas_rate_setup(struct ltr506_data *ltr506)
 	char buffer[2];
 
 	buffer[0] = LTR506_ALS_MEAS_RATE;
-	buffer[1] = 0x03;
+	buffer[1] = (ltr506->als_resolution << ADC_RESOLUTION_SHIFT)
+		| (ltr506->als_meas_rate << ALS_MEAS_RATE_SHIFT);
 	ret = I2C_Write(buffer, 2);
 	if (ret < 0)
 		dev_err(&ltr506->i2c_client->dev, "%s | 0x%02X", __func__, buffer[0]);
@@ -511,12 +555,20 @@ static int ps_enable(struct ltr506_data *ltr506)
 		return rc;
 	}
 
+	/* TODO(cmanton) Get values from platform options */
+	ltr506->led_pulse_freq = 7;
+	ltr506->led_duty_cyc = 1;
+	ltr506->led_peak_curr = 0;
+	ltr506->led_pulse_count = 127;
+
 	rc = ps_led_setup(ltr506);
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s: PS LED Setup Fail...\n", __func__);
 		return rc;
 	}
 
+	/* TODO(cmanton) Get values from platform options */
+	ltr506->ps_meas_rate = 0x4;
 	rc = ps_meas_rate_setup(ltr506);
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s: PS MeasRate Setup Fail...\n", __func__);
@@ -529,6 +581,7 @@ static int ps_enable(struct ltr506_data *ltr506)
 		return rc;
 	}
 
+	dev_info(&ltr506->i2c_client->dev, "%s Turned on proximity sensor\n", __func__);
 	ltr506->ps_enable_flag = 1;
 	return rc;
 }
@@ -631,7 +684,8 @@ static int als_enable(struct ltr506_data *ltr506)
 		dev_err(&ltr506->i2c_client->dev, "%s: ALS already enabled...\n", __func__);
 		return rc;
 	}
-
+	/* TODO(cmanton) Put this value in the platform setup */
+	ltr506->als_meas_rate = 0x3;
 	rc = als_meas_rate_setup(ltr506);
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s: ALS MeasRate Setup Fail...\n", __func__);
@@ -650,6 +704,7 @@ static int als_enable(struct ltr506_data *ltr506)
 		dev_err(&ltr506->i2c_client->dev, "%s: ALS Enable Fail...\n", __func__);
 		return rc;
 	}
+	dev_info(&ltr506->i2c_client->dev, "%s Turned on ambient light sensor\n", __func__);
 	ltr506->als_enable_flag = 1;
 
 	return rc;
@@ -757,54 +812,47 @@ static DEVICE_ATTR(ps_adc, 0666, ps_adc_show, NULL);
 static ssize_t ps_led_show(struct device *dev,
                            struct device_attribute *attr, char *buf)
 {
-	char buffer[2];
-	uint8_t value, value1;
 	int ret = 0;
+	uint8_t value;
 	struct ltr506_data *ltr506 = sensor_info;
+	char buffer[2] = {LTR506_PS_LED, 0};
+	int led_pulse_freq, led_duty_cyc, led_peak_curr;
 
-	buffer[0] = LTR506_PS_LED;
-	ret = I2C_Read(buffer, 2);
+	ret = I2C_Read(buffer, 1);
 	if (ret < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s | 0x%02X", __func__, buffer[0]);
 		return ret;
 	}
 	value = buffer[0];
-	value1 = buffer[1];
-	dev_info(&ltr506->i2c_client->dev, "%s: PS_LED reg = 0x%x, PS_Pulses reg = 0x%x\n", __func__, value, value1);
 
-	ltr506->led_pulse_freq = (value & 0xE0) >> 5;
-	ltr506->led_duty_cyc = (value & 0x18) >> 3;
-	ltr506->led_peak_curr = (value & 0x07);
-	ltr506->led_pulse_count = value1;
+	led_pulse_freq = (value & LED_PULSE_FREQ) >> LED_PULSE_FREQ_SHIFT;
+	led_duty_cyc = (value & LED_DUTY_CYC) >> LED_DUTY_CYC_SHIFT;
+	led_peak_curr = (value & LED_PEAK_CURR) >> LED_PEAK_CURR_SHIFT;
 
-	dev_info(&ltr506->i2c_client->dev, "%s: led_pulse_freq = 0x%x, led_duty_cyc = 0x%x, led_peak_curr = 0x%x, led_pulse_count = 0x%x\n", 
-	         __func__, ltr506->led_pulse_freq, ltr506->led_duty_cyc, ltr506->led_peak_curr, ltr506->led_pulse_count);
-
-	return ret;
+	return sprintf(buf, "%d %d %d\n", led_pulse_freq, led_duty_cyc, led_peak_curr);
 }
 
 static ssize_t ps_led_store(struct device *dev, struct device_attribute *attr,
                             const char *buf, size_t count)
 {
-	int param;
-	int ret;
+	int ret = 0;
 	struct ltr506_data *ltr506 = sensor_info;
+	int led_pulse_freq, led_duty_cyc, led_peak_curr;
 
-	sscanf(buf, "%d", &param);
+	sscanf(buf, "%d %d %d", &led_pulse_freq, &led_duty_cyc, &led_peak_curr);
 
-	dev_dbg(&ltr506->i2c_client->dev, "%s: store value = %d\n", __func__, param);
+	if (led_pulse_freq & ~(LED_PULSE_FREQ_BITS)
+	    || led_duty_cyc & ~(LED_DUTY_CYC_BITS)
+	    || led_peak_curr & ~(LED_PEAK_CURR_BITS)) {
+		return -EINVAL;
+	}
 
-	if (param == 1) {
-		/* Need to create routine for setting LED */
-		ret = ps_led_setup(ltr506); 
-		if (ret < 0) {
-			dev_err(&ltr506->i2c_client->dev, "%s : Set LED Fail...\n", __func__);
-			return -1;
-		}
-	} else
-		dev_info(&ltr506->i2c_client->dev, "%s: PS LED used with Default Settings.\n", __func__);
+	ltr506->led_pulse_freq = led_pulse_freq;
+	ltr506->led_duty_cyc = led_duty_cyc;
+	ltr506->led_peak_curr = led_peak_curr;
 
-	return count;
+	ret = ps_led_setup(ltr506);
+	return (ret == 0) ? count : -EIO;
 }
 
 static DEVICE_ATTR(ps_led, 0666, ps_led_show, ps_led_store);
@@ -865,10 +913,137 @@ static ssize_t als_enable_store(struct device *dev,
 	} else if (!als_en && (ltr506->als_enable_flag == 1)) {
 		rc = als_disable(ltr506);
 	}
-	return (rc == 0)?count:rc;
+	return (rc == 0) ? count : rc;
 }
 
 static DEVICE_ATTR(als_enable, 0666, als_enable_show, als_enable_store);
+
+
+static ssize_t als_gain_show(struct device *dev,
+                            struct device_attribute *attr, char *buf)
+{
+	int rc;
+	struct ltr506_data *ltr506 = sensor_info;
+	uint8_t buffer[2];
+	int als_gain;
+
+	buffer[0] = LTR506_PS_CONTR;
+	rc = I2C_Read(buffer, 1);
+	if (rc < 0) {
+		dev_err(&ltr506->i2c_client->dev, "%s | 0x%02X", __func__, buffer[0]);
+		return rc;
+	}
+
+	als_gain = (buffer[0] & ALS_GAIN) >> ALS_GAIN_SHIFT;
+
+	return (rc < 0) ? rc : sprintf(buf, "%d\n", als_gain);
+}
+
+static ssize_t als_gain_store(struct device *dev,
+                              struct device_attribute *attr,
+                              const char *buf, size_t count)
+{
+	int rc = 0;
+	int als_gain;
+	struct ltr506_data *ltr506 = sensor_info;
+
+	sscanf(buf, "%d", &als_gain);
+	if (als_gain & ~(ALS_GAIN_BITS)) {
+		return -EINVAL;
+	}
+
+	rc = _ltr506_set_field(ltr506->i2c_client, ALS_GAIN, LTR506_ALS_CONTR,
+	                       als_gain << ALS_GAIN_SHIFT);
+
+	return (rc == 0) ? count : rc;
+}
+static DEVICE_ATTR(als_gain, 0666, als_gain_show, als_gain_store);
+
+static ssize_t als_resolution_show(struct device *dev,
+                                   struct device_attribute *attr, char *buf)
+{
+	int rc;
+	uint8_t value;
+	struct ltr506_data *ltr506 = sensor_info;
+	uint8_t buffer[2] = { LTR506_ALS_MEAS_RATE, 0 };
+	int als_adc_resolution;
+
+	rc = I2C_Read(buffer, 1);
+	if (rc < 0) {
+		dev_err(&ltr506->i2c_client->dev, "%s | 0x%02X", __func__, buffer[0]);
+		return rc;
+	}
+
+	value = buffer[0];
+	als_adc_resolution = (value & ADC_RESOLUTION) >> ADC_RESOLUTION_SHIFT;
+
+	return (rc < 0) ? rc : sprintf(buf, "%d\n", als_adc_resolution);
+}
+
+static ssize_t als_resolution_store(struct device *dev,
+                             struct device_attribute *attr,
+                             const char *buf, size_t count)
+{
+	int rc = 0;
+	struct ltr506_data *ltr506 = sensor_info;
+	int als_adc_resolution;
+
+	sscanf(buf, "%d", &als_adc_resolution);
+	if (als_adc_resolution & ~(ADC_RESOLUTION_BITS)) {
+		return -EINVAL;
+	}
+
+	ltr506->als_resolution = als_adc_resolution;
+
+	rc = als_meas_rate_setup(ltr506);
+
+	return (rc == 0) ? count : rc;
+}
+
+static DEVICE_ATTR(als_resolution, 0666, als_resolution_show, als_resolution_store);
+
+
+static ssize_t als_meas_rate_show(struct device *dev,
+                                  struct device_attribute *attr, char *buf)
+{
+	uint8_t value;
+	int ret;
+	struct ltr506_data *ltr506 = sensor_info;
+	char buffer[2] = { LTR506_ALS_MEAS_RATE, 0 };
+
+	ret = I2C_Read(buffer, 1);
+	if (ret < 0) {
+		dev_err(&ltr506->i2c_client->dev, "%s | 0x%02X", __func__,
+		        buffer[0]);
+		return ret;
+	}
+	value = buffer[0];
+
+	ret = sprintf(buf, "%d\n", ((value & ALS_MEAS_RATE) >> 0));
+
+	return ret;
+}
+
+static ssize_t als_meas_rate_store(struct device *dev,
+                                   struct device_attribute *attr,
+                                   const char *buf, size_t count)
+{
+	int rc = 0;
+	int als_meas_rate;
+	struct ltr506_data *ltr506 = sensor_info;
+
+	sscanf(buf, "%d", &als_meas_rate);
+	if (als_meas_rate & ~(ALS_MEAS_RATE_BITS)) {
+		return -EINVAL;
+	}
+
+	ltr506->als_meas_rate = als_meas_rate;
+	rc = als_meas_rate_setup(ltr506);
+
+	return (rc == 0) ? count : rc;
+}
+
+static DEVICE_ATTR(als_meas_rate, 0666, als_meas_rate_show, als_meas_rate_store);
 
 static ssize_t ps_enable_show(struct device *dev,
                               struct device_attribute *attr, char *buf)
@@ -913,6 +1088,133 @@ static ssize_t ps_enable_store(struct device *dev,
 }
 
 static DEVICE_ATTR(ps_enable, 0666, ps_enable_show, ps_enable_store);
+
+static ssize_t ps_gain_show(struct device *dev,
+                            struct device_attribute *attr, char *buf)
+{
+	int rc;
+	struct ltr506_data *ltr506 = sensor_info;
+	uint8_t buffer[2];
+	int ps_gain;
+
+	buffer[0] = LTR506_PS_CONTR;
+	rc = I2C_Read(buffer, 1);
+	if (rc < 0) {
+		dev_err(&ltr506->i2c_client->dev, "%s | 0x%02X", __func__, buffer[0]);
+		return rc;
+	}
+
+	ps_gain = (buffer[0] & PS_GAIN) >> PS_GAIN_SHIFT;
+
+	return (rc < 0) ? rc : sprintf(buf, "%d\n", ps_gain);
+}
+
+static ssize_t ps_gain_store(struct device *dev,
+                             struct device_attribute *attr,
+                             const char *buf, size_t count)
+{
+	int rc = 0;
+	int ps_gain;
+	struct ltr506_data *ltr506 = sensor_info;
+
+	sscanf(buf, "%d", &ps_gain);
+	if (ps_gain & ~(PS_GAIN_BITS)) {
+		return -EINVAL;
+	}
+
+	rc = _ltr506_set_field(ltr506->i2c_client, PS_GAIN, LTR506_PS_CONTR,
+	                       ps_gain << PS_GAIN_SHIFT);
+
+	return (rc == 0) ? count : rc;
+}
+
+static DEVICE_ATTR(ps_gain, 0666, ps_gain_show, ps_gain_store);
+
+static ssize_t ps_pulse_cnt_show(struct device *dev,
+                                 struct device_attribute *attr, char *buf)
+{
+	int rc;
+	uint8_t value;
+	struct ltr506_data *ltr506 = sensor_info;
+	uint8_t buffer[2] = { LTR506_PS_N_PULSES, 0 };
+
+	rc = I2C_Read(buffer, 1);
+	if (rc < 0) {
+		dev_err(&ltr506->i2c_client->dev, "%s | 0x%02X", __func__, buffer[0]);
+		return rc;
+	}
+
+	value = buffer[0];
+
+	return (rc < 0) ? rc : sprintf(buf, "%d\n", value);
+}
+
+static ssize_t ps_pulse_cnt_store(struct device *dev,
+                             struct device_attribute *attr,
+                             const char *buf, size_t count)
+{
+	int rc = 0;
+	int ps_pulse_cnt;
+	struct ltr506_data *ltr506 = sensor_info;
+	uint8_t buffer[2] = { LTR506_PS_N_PULSES, 0 };
+
+	sscanf(buf, "%d", &ps_pulse_cnt);
+	if (ps_pulse_cnt & ~(0xff)) {
+		return -EINVAL;
+	}
+
+	buffer[1] = ps_pulse_cnt;
+	rc = I2C_Write(buffer, 2);
+	if (rc < 0) {
+		dev_err(&ltr506->i2c_client->dev, "%s | 0x%02X", __func__, buffer[0]);
+		return -EIO;
+	}
+
+	return (rc == 0) ? count : rc;
+}
+
+static DEVICE_ATTR(ps_pulse_cnt, 0666, ps_pulse_cnt_show, ps_pulse_cnt_store);
+
+static ssize_t ps_meas_rate_show(struct device *dev,
+                                 struct device_attribute *attr, char *buf)
+{
+	int rc;
+	uint8_t value;
+	struct ltr506_data *ltr506 = sensor_info;
+	uint8_t buffer[2] = { LTR506_PS_MEAS_RATE, 0 };
+
+	rc = I2C_Read(buffer, 1);
+	if (rc < 0) {
+		dev_err(&ltr506->i2c_client->dev, "%s | 0x%02X", __func__, buffer[0]);
+		return rc;
+	}
+
+	value = (buffer[0] & PS_MEAS_RATE) >> PS_MEAS_RATE_SHIFT;
+
+	return (rc < 0) ? rc : sprintf(buf, "%d\n", value);
+}
+
+static ssize_t ps_meas_rate_store(struct device *dev,
+                             struct device_attribute *attr,
+                             const char *buf, size_t count)
+{
+	int rc = 0;
+	int ps_meas_rate;
+	struct ltr506_data *ltr506 = sensor_info;
+
+	sscanf(buf, "%d", &ps_meas_rate);
+	if (ps_meas_rate & ~(PS_MEAS_RATE_BITS)) {
+		return -EINVAL;
+	}
+
+	ltr506->ps_meas_rate = ps_meas_rate;
+	rc = ps_meas_rate_setup(ltr506);
+
+	return (rc == 0) ? count : rc;
+}
+
+static DEVICE_ATTR(ps_meas_rate, 0666, ps_meas_rate_show, ps_meas_rate_store);
+
 
 #define HOLE_REG_SPACE(a,b) buffer[0] = a; \
 	I2C_Read(buffer, (b+1)-a); \
@@ -976,26 +1278,108 @@ static ssize_t status_show(struct device *dev,
 }
 static DEVICE_ATTR(status, 0666, status_show, NULL);
 
+
+
+static ssize_t als_filter_interrupts_show(struct device *dev,
+                                 struct device_attribute *attr, char *buf)
+{
+	struct ltr506_data *ltr506 = sensor_info;
+	return sprintf(buf, "%d\n", ltr506->als_filter_interrupts);
+}
+
+static ssize_t als_filter_interrupts_store(struct device *dev,
+                             struct device_attribute *attr,
+                             const char *buf, size_t count)
+{
+	int rc;
+	int als_filter_interrupts;
+	struct ltr506_data *ltr506 = sensor_info;
+
+	sscanf(buf, "%d", &als_filter_interrupts);
+	if (als_filter_interrupts != 0 && als_filter_interrupts != 1) {
+		return -EINVAL;
+	}
+
+	rc = set_als_range(0,0);
+	if (rc < 0) {
+		dev_err(&ltr506->i2c_client->dev, "%s : ALS Thresholds Write Fail...\n", __func__);
+		return -EIO;
+	}
+
+	ltr506->als_filter_interrupts = als_filter_interrupts;
+
+	return count;
+}
+
+static DEVICE_ATTR(als_filter_interrupts, 0666, als_filter_interrupts_show,
+                   als_filter_interrupts_store);
+
+static ssize_t ps_filter_interrupts_show(struct device *dev,
+                                 struct device_attribute *attr, char *buf)
+{
+	struct ltr506_data *ltr506 = sensor_info;
+	return sprintf(buf, "%d\n", ltr506->ps_filter_interrupts);
+}
+
+static ssize_t ps_filter_interrupts_store(struct device *dev,
+                             struct device_attribute *attr,
+                             const char *buf, size_t count)
+{
+	int rc;
+	int ps_filter_interrupts;
+	struct ltr506_data *ltr506 = sensor_info;
+
+	sscanf(buf, "%d", &ps_filter_interrupts);
+	if (ps_filter_interrupts != 0 && ps_filter_interrupts != 1) {
+		return -EINVAL;
+	}
+
+	rc = set_ps_range(0,0);
+	if (rc < 0) {
+		dev_err(&ltr506->i2c_client->dev, "%s : PS Thresholds Write Fail...\n", __func__);
+		return -EIO;
+	}
+	ltr506->ps_filter_interrupts = ps_filter_interrupts;
+
+	return count;
+}
+
+static DEVICE_ATTR(ps_filter_interrupts, 0666, ps_filter_interrupts_show,
+                   ps_filter_interrupts_store);
+
+/*
+ * These sysfs routines are not used by the Android HAL layer
+ * as they are located in the i2c bus device portion of the
+ * sysfs tree.
+ */
 static void sysfs_register_device(struct i2c_client *client) {
 	int rc = 0;
 
-	rc += device_create_file(&client->dev, &dev_attr_ps_adc);
-	rc += device_create_file(&client->dev, &dev_attr_ps_led);
-	rc += device_create_file(&client->dev, &dev_attr_als_adc);
 	rc += device_create_file(&client->dev, &dev_attr_als_enable);
 	rc += device_create_file(&client->dev, &dev_attr_ps_enable);
 	rc += device_create_file(&client->dev, &dev_attr_dump_regs);
 	rc += device_create_file(&client->dev, &dev_attr_status);
+	rc += device_create_file(&client->dev, &dev_attr_als_filter_interrupts);
+	rc += device_create_file(&client->dev, &dev_attr_ps_filter_interrupts);
+
 	if (rc) {
 		dev_err(&client->dev, "%s Unable to create sysfs files\n", __func__);
 	} else {
 		dev_dbg(&client->dev, "%s Created sysfs files\n", __func__);
 	}
 }
+
+/*
+ * These sysfs routines are exposed to the Android HAL layer as they are
+ * created in the class/input portion of the sysfs tree.
+ */
 static void sysfs_register_als_device(struct i2c_client *client, struct device *dev) {
 	int rc = 0;
 	rc += device_create_file(dev, &dev_attr_als_adc);
+	rc += device_create_file(dev, &dev_attr_als_resolution);
 	rc += device_create_file(dev, &dev_attr_als_enable);
+	rc += device_create_file(dev, &dev_attr_als_gain);
+	rc += device_create_file(dev, &dev_attr_als_meas_rate);
 	if (rc) {
 		dev_err(&client->dev, "%s Unable to create als input sysfs files\n", __func__);
 	} else {
@@ -1003,13 +1387,19 @@ static void sysfs_register_als_device(struct i2c_client *client, struct device *
 	}
 }
 
-
+/*
+ * These sysfs routines are exposed to the Android HAL layer as they are
+ * created in the class/input portion of the sysfs tree.
+ */
 static void sysfs_register_ps_device(struct i2c_client *client, struct device *dev) {
 	int rc = 0;
 
 	rc += device_create_file(dev, &dev_attr_ps_adc);
-	rc += device_create_file(dev, &dev_attr_ps_led);
 	rc += device_create_file(dev, &dev_attr_ps_enable);
+	rc += device_create_file(dev, &dev_attr_ps_gain);
+	rc += device_create_file(dev, &dev_attr_ps_led);
+	rc += device_create_file(dev, &dev_attr_ps_meas_rate);
+	rc += device_create_file(dev, &dev_attr_ps_pulse_cnt);
 	if (rc) {
 		dev_err(&client->dev, "%s Unable to create ps input sysfs files\n", __func__);
 	} else {
@@ -1185,14 +1575,12 @@ static int ltr506_setup(struct ltr506_data *ltr506)
 		dev_err(&ltr506->i2c_client->dev, "%s Unable to enable ALS", __func__);
 		goto err_out2;
 	}
-	dev_info(&ltr506->i2c_client->dev, "%s Turned on ambient light sensor\n", __func__);
 
 	ret = ps_enable(ltr506);
 	if (ret < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s Unable to enable PS", __func__);
 		goto err_out2;
 	}
-	dev_info(&ltr506->i2c_client->dev, "%s Turned on proximity sensor\n", __func__);
 
 	return ret;
 
@@ -1284,6 +1672,12 @@ static int  __devinit ltr506_probe(struct i2c_client *client, const struct i2c_d
 	/* Set initial defaults */
 	ltr506->als_enable_flag = 0;
 	ltr506->ps_enable_flag = 0;
+
+	/* Typically we want to restrict interrupts unless the sensor
+	 * value has exceeded some envelope.
+	 */
+	ltr506->als_filter_interrupts = 1;
+	ltr506->ps_filter_interrupts = 1;
 
 	ltr506->i2c_client = client;
 	ltr506->irq = client->irq;
