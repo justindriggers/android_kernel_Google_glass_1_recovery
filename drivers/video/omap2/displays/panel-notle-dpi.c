@@ -179,7 +179,7 @@ static struct panel_config notle_config = {
         .timings = {
                 .x_res          = 640,
                 .y_res          = 360,
-                .pixel_clock    = 85333,
+                .pixel_clock    = 59076,
 
                 .hfp            = 10,
                 .hsw            = 68,
