@@ -1739,6 +1739,7 @@ static int  __devinit ltr506_probe(struct i2c_client *client, const struct i2c_d
 	}
 
 	/* Setup the suspend and resume functionality */
+	INIT_LIST_HEAD(&ltr506->early_suspend.link);
 	ltr506->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
 	ltr506->early_suspend.suspend = ltr506_early_suspend;
 	ltr506->early_suspend.resume = ltr506_late_resume;
