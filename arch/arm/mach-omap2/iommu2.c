@@ -141,8 +141,10 @@ static int omap2_iommu_enable(struct iommu *obj)
 static void omap2_iommu_disable(struct iommu *obj)
 {
 	int ret = 0;
-
 	u32 l = iommu_read_reg(obj, MMU_CNTL);
+
+	/* Sanity soft-reset before disabling iommu */
+	iommu_write_reg(obj, MMU_SYS_SOFTRESET, MMU_SYSCONFIG);
 
 	l &= ~MMU_CNTL_MASK;
 	iommu_write_reg(obj, l, MMU_CNTL);
