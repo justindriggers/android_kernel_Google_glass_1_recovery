@@ -1553,6 +1553,11 @@ static struct dmtimer_pwm_ops notle_dmtimer_pwm_ops = {
 static int __init notle_pwm_backlight_init(void) {
         int r;
         struct pwm_device *pwm;
+#ifdef CONFIG_REMOTEPROC_WATCHDOG
+        // the watchdog uses gpt9.
+        pr_err("NOT setting up backlight pwm!  Turn off REMOTERPOC_WATCHDOG.\n");
+        return -1;
+#endif
         pwm = pwm_request_dmtimer(PWM_TIMER, "backlight",
                                   &notle_dmtimer_pwm_ops);
 
