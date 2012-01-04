@@ -122,12 +122,13 @@ static struct init_register_value panel_shutdown_regs[] = {
  *                   determined by the current value of fpga_config fields.
  *                   Note that this disables color sequencing.
  */
-#define FPGA_CONFIG_MASK          ((u8)0x1F)   /* Mask of all valid config bits */
+#define FPGA_CONFIG_MASK          ((u8)0x3F)   /* Mask of all valid config bits */
 #define FPGA_CONFIG_TEST_MONO     ((u8)0x01)   /* Enable monochrome test mode */
 #define FPGA_CONFIG_TEST_PATTERN  ((u8)0x02)   /* Ouput test pattern */
 #define FPGA_CONFIG_LED_EN        ((u8)0x04)   /* Enable LED backlight */
 #define FPGA_CONFIG_CP_SEL        ((u8)0x08)   /* Chargepump select */
 #define FPGA_CONFIG_MONO          ((u8)0x10)   /* Enable monochrome mode */
+#define FPGA_CONFIG_OVERDRIVE     ((u8)0x20)   /* Enable brightness overdrive */
 
 struct led_config {
   unsigned red_percent;     /* 100 * percent red in output (100 = 1% red) */
@@ -149,7 +150,7 @@ static struct led_config led_config = {
   .red_percent = 2353,    /* 23.53% Red by default */
   .green_percent = 4706,  /* 47.06% Green by default */
   .blue_percent = 2941,   /* 29.41% Blue by default */
-  .brightness = 128,      /* 50% brightness by default */
+  .brightness = 0,        /* 0 brightness by default */
 };
 
 static struct fpga_config fpga_config;
@@ -179,7 +180,7 @@ static struct panel_config notle_config = {
         .timings = {
                 .x_res          = 640,
                 .y_res          = 360,
-                .pixel_clock    = 59076,
+                .pixel_clock    = 85333,
 
                 .hfp            = 10,
                 .hsw            = 68,
@@ -385,7 +386,6 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
         }
 
         led_config.brightness = value;
-        led_config_to_fpga_config(&led_config, &fpga_config);
 
         /*
          * Make sure we don't turn the backlight on just because brightness
@@ -399,9 +399,12 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
          * If the display is enabled, write the new FPGA config immediately,
          * otherwise it will be written when the display is enabled.
          */
-        if (notle_data->enabled && fpga_write_config(&fpga_config)) {
-          printk(KERN_ERR LOG_TAG "Failed to brightness_store: i2c write failed\n");
-          return -EIO;
+        if (notle_data->enabled) {
+          led_config_to_fpga_config(&led_config, &fpga_config);
+          if (fpga_write_config(&fpga_config)) {
+            printk(KERN_ERR LOG_TAG "Failed to brightness_store: i2c write failed\n");
+            return -EIO;
+          }
         }
 
         return size;
@@ -487,11 +490,24 @@ static struct kobj_type panel_notle_ktype = {
 static void led_config_to_fpga_config(struct led_config *led,
                                       struct fpga_config *fpga) {
         /* TODO(madsci): Move these to be configurable or in a better place. */
-        const int total_lines = 380;  /* Display height + vertical blanking */
+        int total_lines;
         const int red_max_mw = 41;    /* LED power when full on */
         const int green_max_mw = 62;
         const int blue_max_mw = 62;
         const int limit_mw = 40;      /* Max backlight power */
+
+        switch (fpga->revision & 0xF0) {
+          case 0x10:
+            total_lines = 380;  /* Display height + vertical blanking */
+            break;
+          case 0x20:
+            total_lines = 358;  /* Display height - 2 */
+            break;
+          default:
+            total_lines = 358;  /* Default to minimum of above cases */
+            printk(KERN_ERR LOG_TAG "Unrecognized FPGA revision: 0x%02x\n", fpga->revision);
+            break;
+        }
 
         fpga->red =   (total_lines *
                         (10000 - (
@@ -655,9 +671,20 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
 
         /* Enable LED backlight if we have nonzero brightness */
         if (led_config.brightness > 0) {
-          fpga_config.config |= FPGA_CONFIG_LED_EN;
-          if (fpga_write_config(&fpga_config)) {
-            printk(KERN_ERR LOG_TAG "Failed to enable FPGA LED_EN\n");
+          /*
+           * We need to read the fpga config first to get the revision,
+           * as it is required to do the led_config -> fpga_config
+           * conversion.
+           */
+          if (fpga_read_config(&fpga_config)) {
+            printk(KERN_ERR LOG_TAG "Failed to read FPGA revision, not "
+                                    "enabling backlight\n");
+          } else {
+            led_config_to_fpga_config(&led_config, &fpga_config);
+            fpga_config.config |= FPGA_CONFIG_LED_EN;
+            if (fpga_write_config(&fpga_config)) {
+              printk(KERN_ERR LOG_TAG "Failed to enable FPGA LED_EN\n");
+            }
           }
         }
 
@@ -741,7 +768,6 @@ static int panel_notle_probe(struct omap_dss_device *dssdev) {
         drv_data->enabled = 0;
 
         dev_set_drvdata(&dssdev->dev, drv_data);
-        led_config_to_fpga_config(&led_config, &fpga_config);
 
         r = kobject_init_and_add(&drv_data->kobj, &panel_notle_ktype,
                         &dssdev->manager->kobj, "panel-notle-dpi");
