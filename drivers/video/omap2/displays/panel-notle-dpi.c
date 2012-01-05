@@ -686,6 +686,8 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
               printk(KERN_ERR LOG_TAG "Failed to enable FPGA LED_EN\n");
             }
           }
+        } else if (fpga_read_config(&fpga_config)) {
+            printk(KERN_ERR LOG_TAG "Failed to read FPGA revision\n");
         }
 
         drv_data->enabled = 1;
