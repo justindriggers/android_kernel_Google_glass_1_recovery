@@ -210,6 +210,7 @@ static inline struct panel_notle_data
 }
 
 /* Local functions used by the sysfs interface */
+static int fpga_rev = -1;
 static void panel_notle_power_off(struct omap_dss_device *dssdev);
 static int panel_notle_power_on(struct omap_dss_device *dssdev);
 static int fpga_write_config(struct fpga_config *config);
@@ -232,9 +233,17 @@ static ssize_t sysfs_reset(struct notle_drv_data *notle_data,
 static ssize_t fpga_revision(struct notle_drv_data *notle_data, char *buf) {
         struct fpga_config config;
         if (fpga_read_config(&config)) {
+          printk(KERN_ERR LOG_TAG "Failed to read FPGA revision\n");
+        } else {
+          fpga_rev = config.revision;
+        }
+
+        if (fpga_rev < 0) {
+          printk(KERN_ERR LOG_TAG "No cached FPGA revision\n");
           return -EIO;
         }
-        return snprintf(buf, PAGE_SIZE, "0x%x\n", config.revision);
+
+        return snprintf(buf, PAGE_SIZE, "0x%02x\n", fpga_rev);
 }
 static ssize_t enabled_show(struct notle_drv_data *notle_data, char *buf) {
         return snprintf(buf, PAGE_SIZE, "%d\n",
