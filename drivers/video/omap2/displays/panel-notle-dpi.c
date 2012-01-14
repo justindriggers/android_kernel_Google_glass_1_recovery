@@ -215,7 +215,8 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev);
 static int panel_notle_power_on(struct omap_dss_device *dssdev);
 static int fpga_write_config(struct fpga_config *config);
 static int fpga_read_config(struct fpga_config *config);
-static void led_config_to_fpga_config(struct led_config *led,
+static void led_config_to_fpga_config(struct omap_dss_device *dssdev,
+                                      struct led_config *led,
                                       struct fpga_config *fpga);
 
 /* Sysfs interface */
@@ -409,7 +410,7 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
          * otherwise it will be written when the display is enabled.
          */
         if (notle_data->enabled) {
-          led_config_to_fpga_config(&led_config, &fpga_config);
+          led_config_to_fpga_config(notle_data->dssdev, &led_config, &fpga_config);
           if (fpga_write_config(&fpga_config)) {
             printk(KERN_ERR LOG_TAG "Failed to brightness_store: i2c write failed\n");
             return -EIO;
@@ -496,14 +497,43 @@ static struct kobj_type panel_notle_ktype = {
 };
 
 /* Utility functions */
-static void led_config_to_fpga_config(struct led_config *led,
+static void led_config_to_fpga_config(struct omap_dss_device *dssdev,
+                                      struct led_config *led,
                                       struct fpga_config *fpga) {
+        struct panel_notle_data *panel_data = get_panel_data(dssdev);
         /* TODO(madsci): Move these to be configurable or in a better place. */
         int total_lines;
-        const int red_max_mw = 41;    /* LED power when full on */
-        const int green_max_mw = 62;
-        const int blue_max_mw = 62;
-        const int limit_mw = 40;      /* Max backlight power */
+        int red_max_mw;    /* LED power when full on */
+        int green_max_mw;
+        int blue_max_mw;
+        int limit_mw;      /* Max backlight power */
+
+        /*
+         * See arch/arm/mach-omap2/board-notle.c for the
+         * enum with these values.
+         */
+        switch (panel_data->notle_version) {
+          case 4:  /* Fly */
+            red_max_mw = 41;
+            green_max_mw = 62;
+            blue_max_mw = 62;
+            limit_mw = 40;
+            break;
+          case 5:  /* Gnu */
+            red_max_mw = 63;
+            green_max_mw = 96;
+            blue_max_mw = 96;
+            limit_mw = 60;
+            break;
+          default:  /* Some reasonable defaults */
+            red_max_mw = 40;
+            green_max_mw = 60;
+            blue_max_mw = 60;
+            limit_mw = 40;
+            printk(KERN_ERR LOG_TAG "Unrecognized notle_version: %d\n",
+                   panel_data->notle_version);
+            break;
+        };
 
         switch (fpga->revision & 0xF0) {
           case 0x10:
@@ -689,7 +719,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
             printk(KERN_ERR LOG_TAG "Failed to read FPGA revision, not "
                                     "enabling backlight\n");
           } else {
-            led_config_to_fpga_config(&led_config, &fpga_config);
+            led_config_to_fpga_config(dssdev, &led_config, &fpga_config);
             fpga_config.config |= FPGA_CONFIG_LED_EN;
             if (fpga_write_config(&fpga_config)) {
               printk(KERN_ERR LOG_TAG "Failed to enable FPGA LED_EN\n");

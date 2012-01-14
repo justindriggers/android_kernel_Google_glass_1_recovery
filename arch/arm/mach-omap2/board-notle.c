@@ -1876,6 +1876,7 @@ static void __init notle_init(void)
           case V5_GNU:
             err = notle_dpi_init();
             if (!err) {
+                    panel_notle.notle_version = NOTLE_VERSION;
                     omap_display_init(&panel_notle_dss_data);
             } else {
                     pr_err("DPI initialization failed: %d\n", err);
