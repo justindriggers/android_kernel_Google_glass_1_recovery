@@ -861,6 +861,7 @@ static struct omap_uart_port_info omap_serial_port_info[] = {
                 .dma_rx_poll_rate = DEFAULT_RXDMA_POLLRATE,
                 .dma_rx_timeout = DEFAULT_RXDMA_TIMEOUT,
                 .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
+                .wer = 0,
         },
         { /* ttyO1 bluetooth */
                 .use_dma        = 0,
@@ -870,6 +871,7 @@ static struct omap_uart_port_info omap_serial_port_info[] = {
                 .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
                 .wake_peer = bcm_bt_lpm_exit_lpm_locked,
                 .rts_mux_driver_control = 1,
+                .wer = (OMAP_UART_WER_TX | OMAP_UART_WER_RX | OMAP_UART_WER_CTS),
         },
         { /* ttyO2 console port */
                 .use_dma        = 0,
@@ -877,6 +879,7 @@ static struct omap_uart_port_info omap_serial_port_info[] = {
                 .dma_rx_poll_rate = DEFAULT_RXDMA_POLLRATE,
                 .dma_rx_timeout = DEFAULT_RXDMA_TIMEOUT,
                 .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
+                .wer = (OMAP_UART_WER_TX | OMAP_UART_WER_RX | OMAP_UART_WER_CTS),
         },
         {  /* ttyO3 GPS */
                 .use_dma        = 1,
@@ -885,6 +888,7 @@ static struct omap_uart_port_info omap_serial_port_info[] = {
                 .dma_rx_poll_rate = 100000,  // units in usec
                 .dma_rx_timeout = DEFAULT_RXDMA_TIMEOUT,
                 .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
+                .wer = (OMAP_UART_WER_TX | OMAP_UART_WER_RX | OMAP_UART_WER_CTS),
         },
 };
 
