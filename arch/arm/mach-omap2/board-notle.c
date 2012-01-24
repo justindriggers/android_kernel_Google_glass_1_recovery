@@ -360,6 +360,7 @@ struct omap_dss_device panel_notle_device = {
         .phy.dpi.data_lines       = 24,
         .reset_gpio               = GPIO_LCD_RESET_N,
         .channel                  = OMAP_DSS_CHANNEL_LCD2,
+        .vsync_gpio               = -1,
 };
 
 static struct tc358762_board_data dsi_panel = {

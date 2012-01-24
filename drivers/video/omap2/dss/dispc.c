@@ -22,6 +22,7 @@
 
 #define DSS_SUBSYS_NAME "DISPC"
 
+#include <linux/gpio.h>
 #include <linux/kernel.h>
 #include <linux/dma-mapping.h>
 #include <linux/vmalloc.h>
@@ -63,6 +64,14 @@
 
 static struct clockdomain *l3_1_clkdm, *l3_2_clkdm;
 
+static int vsync_divider = 1;
+void dispc_set_vsync_divider(int divider) {
+	vsync_divider = divider;
+}
+int dispc_get_vsync_divider(void) {
+	return vsync_divider;
+}
+
 struct omap_dispc_isr_data {
 	omap_dispc_isr_t	isr;
 	void			*arg;
@@ -99,6 +108,8 @@ static struct {
 
 	int irq;
 	struct clk *dss_clk;
+
+	int vsync_gpio;
 
 	u32	fifo_size[MAX_DSS_OVERLAYS];
 
@@ -3981,6 +3992,7 @@ static void print_irq_status(u32 status)
  * clock later in the function. */
 static irqreturn_t omap_dispc_irq_handler(int irq, void *arg)
 {
+        static int vsync_counter = 0;
 	int i;
 	u32 irqstatus, irqenable;
 	u32 handledirqs = 0;
@@ -4022,6 +4034,20 @@ static irqreturn_t omap_dispc_irq_handler(int irq, void *arg)
 			sizeof(registered_isr));
 
 	spin_unlock(&dispc.irq_lock);
+
+	/* Only handle 1 out of every vsync_divider vsyncs */
+	if (irqstatus & DISPC_IRQ_VSYNC2 && vsync_divider > 1) {
+		if (++vsync_counter % vsync_divider) {
+			irqstatus &= ~DISPC_IRQ_VSYNC2;
+		} else {
+			if (dispc.vsync_gpio > -1) {
+				/* Notify that we are in "real" vsync */
+				gpio_set_value(dispc.vsync_gpio, 1);
+				gpio_set_value(dispc.vsync_gpio, 0);
+			}
+			vsync_counter = 0;
+		}
+	}
 
 	for (i = 0; i < DISPC_MAX_NR_ISRS; i++) {
 		isr_data = &registered_isr[i];
@@ -4457,6 +4483,8 @@ static int omap_dispchw_probe(struct platform_device *pdev)
 	int r = 0;
 	struct resource *dispc_mem;
 	struct clk *clk;
+	struct omap_display_platform_data *pdata = pdev->dev.platform_data;
+	int vsync_gpio = pdata->board_data->default_device->vsync_gpio;
 
 	dispc.pdev = pdev;
 
@@ -4522,6 +4550,12 @@ static int omap_dispchw_probe(struct platform_device *pdev)
 
 	dispc_runtime_put();
 
+	/* Configure vsync gpio to handle vsync dividing */
+	dispc.vsync_gpio = vsync_gpio;
+	if (dispc.vsync_gpio > -1) {
+		gpio_request_one(dispc.vsync_gpio, GPIOF_OUT_INIT_LOW, "vsync");
+	}
+
 	return 0;
 
 err_runtime_get:
@@ -4537,6 +4571,10 @@ err_get_clk:
 
 static int omap_dispchw_remove(struct platform_device *pdev)
 {
+	if (dispc.vsync_gpio > -1) {
+		gpio_free(dispc.vsync_gpio);
+	}
+
 	pm_runtime_disable(&pdev->dev);
 
 	clk_put(dispc.dss_clk);
