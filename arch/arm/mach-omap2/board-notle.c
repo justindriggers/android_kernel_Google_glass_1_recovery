@@ -51,6 +51,10 @@
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
 #include "../../../drivers/input/touchscreen/rmi_i2c.h"
 #endif
+#ifdef CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C
+#include <linux/rmi.h>
+#endif
+
 #ifdef CONFIG_INPUT_TOUCHPAD_FTK
 #include <linux/i2c/ftk_patch.h>
 #endif  /* CONFIG_INPUT_TOUCHPAD_FTK */
@@ -1082,6 +1086,43 @@ static struct twl4030_platform_data fly_twldata = {
 #error "Can only define either FTK or Synaptics touchpad"
 #endif
 
+#if defined(CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C) && defined(CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C)
+#error "Can only define touchpad (v2) or touchscreen (v1) Synaptics touchpad"
+#endif
+
+#ifdef CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C
+static struct rmi_device_platform_data synaptics_platformdata = {
+	.driver_name = "rmi-generic",
+	.gpio_config = NULL,
+
+	.irq = GPIO_TOUCHPAD_INT_N,
+
+	/* function handler pdata */
+	.f11_ctrl = NULL,
+	.axis_align = {
+		.swap_axes = true,
+		.flip_x = true,
+		.flip_y = true,
+		.clip_X_low = 0,
+		.clip_Y_low = 0,
+		.clip_X_high = 0,
+		.clip_Y_high = 0,
+		.offset_X = 0,
+		.offset_Y = 0,
+		.rel_report_enabled = 0,
+	},
+	.button_map = NULL,
+#ifdef CONFIG_PM
+	.pm_data = NULL,
+	.pre_suspend = NULL,
+	.post_resume = NULL,
+#endif
+};
+#ifndef RMI_F11_INDEX
+#define RMI_F11_INDEX 0x11
+#endif  // RMI_F11_INDEX
+#endif
+
 #ifdef CONFIG_INPUT_TOUCHPAD_FTK
 static struct ftk_i2c_platform_data ftk_platformdata = {
   /* TODO(cmanton) Implement this based upon pending information from ST
@@ -1132,6 +1173,12 @@ static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
         {
                 I2C_BOARD_INFO("rmi4_ts", 0x20),
+                .platform_data = &synaptics_platformdata,
+        },
+#endif
+#ifdef CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C
+        {
+                I2C_BOARD_INFO("rmi", 0x20),
                 .platform_data = &synaptics_platformdata,
         },
 #endif
