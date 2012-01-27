@@ -141,6 +141,13 @@ int rmi_register_sensor(struct rmi_phys_driver *rpd,
 	/* Get some information from the device */
 	pr_debug("%s: Identifying sensors by presence of F01...", __func__);
 
+	/* CMM HACK Reset the device before reading */
+	rpd->write(rpd, 0x5c, 0x01);
+
+	/* CMM HACK Wait some time for device to come back */
+	msleep(100);
+
+	pr_err("%s CMM HACK force reset to prevent warm restart failure from device", __FUNCTION__);
 	/* Scan the page descriptor table until we find F01.  If we find that,
 	 * we assume that we can reliably talk to this sensor.
 	 */
