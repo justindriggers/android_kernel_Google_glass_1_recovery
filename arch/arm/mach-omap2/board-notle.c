@@ -1091,17 +1091,136 @@ static struct twl4030_platform_data fly_twldata = {
 #endif
 
 #ifdef CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C
+
+static union rmi_f11_2d_ctrl0 f11_ctrl0 = {
+	{
+		/* ReportingMode = ‘000’: Continuous, when finger present.
+		 * ReportingMode = ‘001’: Reduced reporting mode.
+		 * ReportingMode = ‘010’: Finger-state change reporting mode.
+		 * ReportingMode = ‘011’: Finger-presence change reporting mode. */
+		.reporting_mode = 1,
+		/* Enable filtering of the reported absolute positioning. */
+		.abs_pos_filt = 0,
+		/* Enable filtering of the reported relative positioning. */
+		.rel_pos_filt = 0,
+		/* Enable ballistics processing for relative finger motion. */
+		.rel_ballistics = 0,
+		.dribble = 0,
+		.report_beyond_clip = 0,
+	},
+};
+
+static union rmi_f11_2d_ctrl1 f11_ctrl1 = {
+	{
+		/* Specifies threshold at which a finger is considered a palm.
+		 * Zero disables. */
+		.palm_detect_thres = 0,
+		/* Motion sensitivity.
+		 * '00': Low
+		 * '01': Medium
+		 * '10': High
+		 * '11': Infinite */
+		.motion_sensitivity = 0,
+		/* '0': Firmware determines tracked finger.
+		 * '1': Host determines tracked finger. */
+		.man_track_en = 0,
+		/* Which finger being tracked.
+		 * '0': Track finger 0
+		 * '1': Track finger 1 */
+		.man_tracked_finger = 0,
+	},
+};
+
+static union rmi_f11_2d_ctrl2__3 f11_ctrl2__3 = {
+	{
+		.delta_x_threshold = 1,
+		.delta_y_threshold = 1,
+	},
+};
+
+static union rmi_f11_2d_ctrl4 f11_ctrl4 = {
+	{
+		/* Define velocity ballistic parameter to all relative
+		 * motion events.  Zero disables. */
+		.velocity = 0,
+	},
+};
+
+static union rmi_f11_2d_ctrl5 f11_ctrl5 = {
+	{
+		/* Define acceleration ballistic parameter to all relative
+		 * motion events.  Zero disables. */
+		.acceleration = 0,
+	},
+};
+
+static union rmi_f11_2d_ctrl6__7 f11_ctrl6__7 = {
+	{
+		/* Maximum sensor X position. */
+		.sensor_max_x_pos = 0x0490,
+	},
+};
+
+static union rmi_f11_2d_ctrl8__9 f11_ctrl8__9 = {
+	{
+		/* Maximum sensor Y position. */
+		.sensor_max_y_pos = 0x00b8,
+	},
+};
+
+static union rmi_f11_2d_ctrl10 f11_ctrl10 = {
+	{
+		/* These bits enable the feature iff the corresponding bit
+		 * is set in the query register. */
+		.single_tap_int_enable = 1,
+		.tap_n_hold_int_enable = 1,
+		.double_tap_int_enable = 1,
+		.early_tap_int_enable = 1,
+		.flick_int_enable = 1,
+		.press_int_enable = 1,
+		.pinch_int_enable = 1,
+	},
+};
+
+static union rmi_f11_2d_ctrl11 f11_ctrl11 = {
+	{
+		/* These bits enable the feature iff the corresponding bit
+		 * is set in the query register. */
+		.palm_detect_int_enable = 1,
+		.rotate_int_enable = 1,
+		.touch_shape_int_enable = 1,
+		.scroll_zone_int_enable = 1,
+		.multi_finger_scroll_int_enable = 1,
+	},
+};
+
+/* All the bits of this data structures must have accurate default
+ * control data because of the way the rmi driver writes the control
+ * registers to the device. */
+static struct rmi_f11_2d_ctrl f11_ctrl = {
+	.ctrl0 = &f11_ctrl0,
+	.ctrl1 = &f11_ctrl1,
+	.ctrl2__3 = &f11_ctrl2__3,
+	.ctrl4 = &f11_ctrl4,
+	.ctrl5 = &f11_ctrl5,
+	.ctrl6__7 = &f11_ctrl6__7,
+	.ctrl8__9 = &f11_ctrl8__9,
+	.ctrl10 = &f11_ctrl10,
+	.ctrl11 = &f11_ctrl11,
+};
+
 static struct rmi_device_platform_data synaptics_platformdata = {
 	.driver_name = "rmi-generic",
-	.gpio_config = NULL,
 
 	.irq = GPIO_TOUCHPAD_INT_N,
+	.irq_polarity = RMI_IRQ_ACTIVE_LOW,
+	.gpio_config = NULL,
 
 	/* function handler pdata */
-	.f11_ctrl = NULL,
+	.f11_ctrl = &f11_ctrl,
 	.axis_align = {
-		.swap_axes = true,
-		.flip_x = true,
+		.swap_axes = false,
+		.flip_x = false,
 		.flip_y = true,
 		.clip_X_low = 0,
 		.clip_Y_low = 0,
@@ -1601,6 +1720,11 @@ static int __init notle_touchpad_init(void) {
         r = gpio_request_one(GPIO_TOUCHPAD_INT_N, GPIOF_IN, "touchpad_int_n");
         if (r) {
                 pr_err("Failed to get touchpad_int_n gpio\n");
+        }
+        /* Allow this interrupt to wake the system */
+        r = irq_set_irq_wake(gpio_to_irq(GPIO_TOUCHPAD_INT_N), 1);
+        if (r) {
+                pr_err("%s Unable to set irq to wake device\n", __FUNCTION__);
         }
         return r;
 }

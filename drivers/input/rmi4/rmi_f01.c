@@ -17,7 +17,12 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#define DEBUG
+/* TODO(cmanton) The default behavior of the driver during
+ * suspend/resume is to put the touchpad into/out of sleep mode.  We
+ * require the touchpad to wake up the device.  There isn't a formal
+ * way to specify actions during suspend/resume, so just bracket
+ * with this define */
+#define WINGMAN_NO_SUSPEND
 
 #include <linux/kernel.h>
 #include <linux/rmi.h>
@@ -662,6 +667,13 @@ static int rmi_f01_suspend(struct rmi_function_container *fc)
 	if (data->suspended)
 		return 0;
 
+#ifndef WINGMAN_NO_SUSPEND
+	/* TODO(cmanton) The default behavior of the driver during
+	 * suspend/resume is to put the touchpad into/out of sleep mode.  We
+	 * require the touchpad to wake up the device.  There isn't a formal
+	 * way to specify actions during suspend/resume, so just bracket
+	 * with this define */
+
 	data->old_nosleep = data->device_control.nosleep;
 	data->device_control.nosleep = 0;
 	data->device_control.sleep_mode = RMI_SLEEP_MODE_SENSOR_SLEEP;
@@ -679,6 +691,7 @@ static int rmi_f01_suspend(struct rmi_function_container *fc)
 		data->suspended = true;
 		retval = 0;
 	}
+#endif  /* WINGMAN_NO_SUSPEND */
 
 	return retval;
 }
@@ -693,6 +706,13 @@ static int rmi_f01_resume(struct rmi_function_container *fc)
 	dev_dbg(&fc->dev, "Resuming...\n");
 	if (!data->suspended)
 		return 0;
+
+#ifndef WINGMAN_NO_SUSPEND
+	/* TODO(cmanton) The default behavior of the driver during
+	 * suspend/resume is to put the touchpad into/out of sleep mode.  We
+	 * require the touchpad to wake up the device.  There isn't a formal
+	 * way to specify actions during suspend/resume, so just bracket
+	 * with this define */
 
 	data->device_control.nosleep = data->old_nosleep;
 	data->device_control.sleep_mode = RMI_SLEEP_MODE_NORMAL;
@@ -709,6 +729,7 @@ static int rmi_f01_resume(struct rmi_function_container *fc)
 		retval = 0;
 	}
 
+#endif  /* WINGMAN_NO_SUSPEND */
 	return retval;
 }
 #endif /* CONFIG_PM */

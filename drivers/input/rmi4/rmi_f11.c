@@ -97,8 +97,15 @@ static ssize_t rmi_f11_rezero_store(struct device *dev,
 					 struct device_attribute *attr,
 					 const char *buf, size_t count);
 
+static ssize_t rmi_fn_11_deltapos_show(struct device *dev,
+				       struct device_attribute *attr,
+				       char *buf);
 
-static struct device_attribute attrs[] = {
+static ssize_t rmi_fn_11_deltapos_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+
+	static struct device_attribute attrs[] = {
 	__ATTR(flip, RMI_RW_ATTR, rmi_fn_11_flip_show, rmi_fn_11_flip_store),
 	__ATTR(clip, RMI_RW_ATTR, rmi_fn_11_clip_show, rmi_fn_11_clip_store),
 	__ATTR(offset, RMI_RW_ATTR,
@@ -107,7 +114,8 @@ static struct device_attribute attrs[] = {
 	__ATTR(relreport, RMI_RW_ATTR,
 		rmi_fn_11_relreport_show, rmi_fn_11_relreport_store),
 	__ATTR(maxPos, RMI_RO_ATTR, rmi_fn_11_maxPos_show, rmi_store_error),
-	__ATTR(rezero, RMI_WO_ATTR, rmi_show_error, rmi_f11_rezero_store)
+	__ATTR(rezero, RMI_WO_ATTR, rmi_show_error, rmi_f11_rezero_store),
+	__ATTR(deltapos, RMI_RW_ATTR, rmi_fn_11_deltapos_show, rmi_fn_11_deltapos_store),
 };
 
 
@@ -1503,6 +1511,63 @@ static ssize_t rmi_f11_rezero_store(struct device *dev,
 	return count;
 }
 
+static ssize_t rmi_fn_11_deltapos_show(struct device *dev,
+                                       struct device_attribute *attr,
+                                       char *buf)
+{
+	struct rmi_function_container *fc = NULL;
+	int retval = 0;
+	union rmi_f11_2d_ctrl2__3 ctrl = {};
+
+	fc = to_rmi_function_container(dev);
+
+	retval = rmi_read_block(fc->rmi_dev, fc->fd.control_base_addr + 2,
+	                       ctrl.regs, sizeof(ctrl.regs));
+	if (retval < 0) {
+		dev_err(&fc->rmi_dev->dev,
+		        "Failed to read F11 ctrl2__3, code: %d.\n",
+		        retval);
+		return retval;
+	}
+
+	return snprintf(buf, PAGE_SIZE, "%u %u\n",
+	                ctrl.delta_x_threshold, ctrl.delta_y_threshold);
+}
+
+static ssize_t rmi_fn_11_deltapos_store(struct device *dev,
+                                        struct device_attribute *attr,
+                                        const char *buf,
+                                        size_t count)
+{
+	struct rmi_function_container *fc = NULL;
+	unsigned int new_delta_pos_X;
+	unsigned int new_delta_pos_Y;
+	int retval = 0;
+	/* Command register always reads as 0, so we can just use a local. */
+	union rmi_f11_2d_ctrl2__3 ctrl = {};
+	fc = to_rmi_function_container(dev);
+
+	if (sscanf(buf, "%u %u", &new_delta_pos_X, &new_delta_pos_Y) != 2)
+		return -EINVAL;
+	if (new_delta_pos_X > 255) {
+		return -EINVAL;
+	}
+	if (new_delta_pos_X > 255) {
+		return -EINVAL;
+	}
+	ctrl.delta_x_threshold = new_delta_pos_X;
+	ctrl.delta_y_threshold = new_delta_pos_Y;
+
+	retval = rmi_write_block(fc->rmi_dev, fc->fd.control_base_addr + 2,
+	                         ctrl.regs, sizeof(ctrl.regs));
+	if (retval < 0) {
+		dev_err(dev, "%s: failed to specify delta position control, "
+		        "error = %d.", __func__, retval);
+		return retval;
+	}
+
+	return count;
+}
 
 module_init(rmi_f11_module_init);
 module_exit(rmi_f11_module_exit);
