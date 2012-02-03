@@ -378,6 +378,13 @@ static void release_attn_irq(struct rmi_phys_driver *physdrvr)
 
 	dev_info(&physdrvr->sensor->sensor_device->dev,
 		 "Releasing ATTN irq.\n");
+
+#ifdef CONFIG_SYNA_WAKE_ON_TOUCH
+	if (irq_set_irq_wake(instance_data->irq, 0)) {
+		dev_err(&physdrvr->sensor->sensor_device->dev,
+		        "Unable to disable interrupt from waking system\n");
+	}
+#endif
 	disable_irq(instance_data->irq);
 	free_irq(instance_data->irq, instance_data);
 }

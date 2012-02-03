@@ -93,6 +93,13 @@ static ssize_t rmi_sensor_enabled_store(struct device *dev,
 static ssize_t rmi_sensor_phy_show(struct device *dev,
 				   struct device_attribute *attr, char *buf);
 
+static ssize_t rmi_sensor_suspend_show(struct device *dev,
+                                       struct device_attribute *attr, char *buf);
+
+static ssize_t rmi_sensor_suspend_store(struct device *dev,
+                                        struct device_attribute *attr,
+                                        const char *buf, size_t count);
+
 static struct device_attribute attrs[] = {
 	__ATTR(hasbsr, 0444,
 	       rmi_sensor_hasbsr_show, rmi_store_error),	/* RO attr */
@@ -101,8 +108,15 @@ static struct device_attribute attrs[] = {
 	__ATTR(enabled, 0666,
 	       rmi_sensor_enabled_show, rmi_sensor_enabled_store), /* RW attr */
 	__ATTR(phy, 0444,
-	       rmi_sensor_phy_show, rmi_store_error)		/* RO attr */
+	       rmi_sensor_phy_show, rmi_store_error),	/* RO attr */
+	__ATTR(suspend, 0666,
+	       rmi_sensor_suspend_show,
+	       rmi_sensor_suspend_store),
 };
+
+
+static int _rmi_sensor_suspend(struct device *dev, pm_message_t state);
+static int _rmi_sensor_resume(struct device *dev);
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void rmi_sensor_early_suspend(struct early_suspend *h);
@@ -533,6 +547,12 @@ static int rmi_sensor_suspend(struct device *dev, pm_message_t state)
 #else
 static int rmi_sensor_suspend(struct device *dev, pm_message_t state)
 {
+        return _rmi_sensor_suspend(dev, state);
+}
+#endif  /* CONFIG_SYNA_WAKE_ON_TOUCH */
+
+static int _rmi_sensor_suspend(struct device *dev, pm_message_t state)
+{
 	struct rmi_sensor_device *sensor_device =
 	    container_of(dev, struct rmi_sensor_device, dev);
 	struct rmi_phys_driver *phys_drvr = sensor_device->driver->rpd;
@@ -635,7 +655,6 @@ exit:
 	mutex_unlock(&sensor_drvr->sensor_device->setup_suspend_flag);
 	return retval;
 }
-#endif
 
 /*
  *  final implementation of resume/late_resume function
@@ -647,6 +666,11 @@ static int rmi_sensor_resume(struct device *dev)
 }
 #else
 static int rmi_sensor_resume(struct device *dev)
+{
+        return _rmi_sensor_resume(dev);
+}
+#endif  /* CONFIG_SYNA_WAKE_ON_TOUCH */
+static int _rmi_sensor_resume(struct device *dev)
 {
 	struct rmi_sensor_device *sensor_device =
 	    container_of(dev, struct rmi_sensor_device, dev);
@@ -690,7 +714,6 @@ static int rmi_sensor_resume(struct device *dev)
 	mutex_unlock(&sensor_drvr->sensor_device->setup_suspend_flag);
 	return 0;
 }
-#endif
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 /*
@@ -1063,6 +1086,46 @@ static ssize_t rmi_sensor_enabled_store(struct device *dev,
 
 	return count;
 }
+
+static ssize_t rmi_sensor_suspend_show(struct device *dev,
+                                       struct device_attribute *attr, char *buf)
+{
+	struct rmi_sensor_device *sensor = dev_get_drvdata(dev);
+	return snprintf(buf, PAGE_SIZE, "%u\n", sensor->device_is_suspended);
+}
+
+
+static ssize_t rmi_sensor_suspend_store(struct device *dev,
+                                        struct device_attribute *attr,
+                                        const char *buf, size_t count)
+{
+	bool new_value;
+	struct rmi_sensor_device *sensor = dev_get_drvdata(dev);
+	pm_message_t pm;
+
+	if (sysfs_streq(buf, "0"))
+		new_value = false;
+	else if (sysfs_streq(buf, "1"))
+		new_value = true;
+	else
+		return -EINVAL;
+
+	if (new_value) {
+		/* Suspend the device */
+		if (sensor->device_is_suspended) {
+			return -EAGAIN;
+		}
+		_rmi_sensor_suspend(dev, pm);
+	} else {
+		/* Resume the device */
+		if (!sensor->device_is_suspended) {
+			return -EAGAIN;
+		}
+		_rmi_sensor_resume(dev);
+	}
+	return count;
+}
+
 
 /* Call this to instantiate a new sensor driver.
  */
