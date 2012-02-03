@@ -235,9 +235,9 @@ static ssize_t fpga_revision(struct notle_drv_data *notle_data, char *buf) {
         struct fpga_config config;
         if (fpga_read_config(&config)) {
           printk(KERN_ERR LOG_TAG "Failed to read FPGA revision\n");
-        } else {
-          fpga_rev = config.revision;
         }
+
+        /* fpga_rev is set in fpga_read_config if successful */
 
         if (fpga_rev < 0) {
           printk(KERN_ERR LOG_TAG "No cached FPGA revision\n");
@@ -625,6 +625,9 @@ static int fpga_read_config(struct fpga_config *config) {
         config->green    = (u16)buf[2] << 1;
         config->blue     = (u16)buf[3] << 1;
         config->revision = buf[4];
+
+        /* Cache the revision so we can print it even if the display is off */
+        fpga_rev = config->revision;
 
         return 0;
 };
