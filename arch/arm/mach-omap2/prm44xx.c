@@ -191,29 +191,6 @@ int omap4_prm_deassert_hardreset(void __iomem *rstctrl_reg, u8 shift)
 static struct device fake_reset_dev;
 #endif
 
-/* Use this as the scratchpad memory to communicate
- * to bootloader from kernel for warm-reset cases
- */
-#define PUBLIC_SAR_RAM_1_FREE  (0x4a326000 + 0xA0C)
-
-void omap4_prm_global_set_warm_reset_cmd_string(const char *cmd)
-{
-
-	if ( !cmd )
-	{
-		*((char *)PUBLIC_SAR_RAM_1_FREE) = 0;
-		return;
-	}
-
-	if ( strlen(cmd) <= 0 )
-	{
-		*((char *)PUBLIC_SAR_RAM_1_FREE) = 0;
-		return;
-	}
-
-	strcpy((char*)PUBLIC_SAR_RAM_1_FREE, cmd);
-}
-
 void omap4_prm_global_warm_sw_reset(void)
 {
 	u32 v;

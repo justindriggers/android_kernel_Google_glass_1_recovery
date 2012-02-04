@@ -1908,6 +1908,9 @@ static void __init my_mux_init(void) {
 
 }
 
+#define TWL6030_PHOENIX_DEV_ON_REGISTER (0x25)
+#define TWL6030_SW_RESET_BIT_MASK       (0x40)
+
 static int notle_notifier_call(struct notifier_block *this,
                                unsigned long code, void *cmd)
 {
@@ -1934,10 +1937,19 @@ static int notle_notifier_call(struct notifier_block *this,
                 }
         }
 
-        omap4_prm_write_inst_reg(0xfff, OMAP4430_PRM_DEVICE_INST,
-                                 OMAP4_RM_RSTST);
-        omap4_prm_write_inst_reg(v, OMAP4430_PRM_DEVICE_INST, OMAP4_RM_RSTCTRL);
-        v = omap4_prm_read_inst_reg(WKUP_MOD, OMAP4_RM_RSTCTRL);
+        if (v == OMAP4430_RST_GLOBAL_COLD_SW_MASK) {
+
+                /* Here we are certain we have no commands              */
+                /* that need to be passed to the bootloader.            */
+                /* Request a full power down / power up cycle from pmic */
+
+                twl_i2c_write_u8(TWL_MODULE_RTC,
+                                 TWL6030_SW_RESET_BIT_MASK,
+                                 TWL6030_PHOENIX_DEV_ON_REGISTER);
+        }
+
+        /* if for some reason communication to pmic failed, */
+        /* proceed to regular cold sw reset                 */
 
         return NOTIFY_DONE;
 }
