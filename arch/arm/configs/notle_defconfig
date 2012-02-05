@@ -469,3 +469,6 @@ CONFIG_INPUT_TWL6030_PWRBUTTON=y
 
 # NOTE(abliss): this disables the backlight on pre-fly devices.
 CONFIG_REMOTEPROC_WATCHDOG=y
+
+CONFIG_OPROFILE=y
+CONFIG_PROFILING=y
