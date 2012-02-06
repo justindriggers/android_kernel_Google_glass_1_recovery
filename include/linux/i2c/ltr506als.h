@@ -127,19 +127,26 @@
 #define LTR506_IOCTL_ALS_GET_ENABLED	_IOW(LTR506_IOCTL_MAGIC, 4, int *)
 
 struct ltr506_platform_data {
-	/* ALS */
-	uint16_t pfd_levels[5];
-	uint16_t pfd_als_lowthresh;
-	uint16_t pfd_als_highthresh;
-	int pfd_disable_als_on_suspend;
-
-	/* PS */
-	uint16_t pfd_ps_lowthresh;
-	uint16_t pfd_ps_highthresh;
-	int pfd_disable_ps_on_suspend;
-
 	/* Interrupt */
 	int pfd_gpio_int_no;
+
+	/* ALS */
+	int pfd_disable_als_on_suspend;
+	int pfd_als_filter_interrupts;
+	int pfd_als_meas_rate;
+	int pfd_als_gain;
+
+	/* PS */
+	int pfd_disable_ps_on_suspend;
+	int pfd_ps_filter_interrupts;
+	int pfd_ps_meas_rate;
+	int pfd_ps_gain;
+
+	/* LED */
+	int pfd_led_pulse_freq;
+	int pfd_led_duty_cyc;
+	int pfd_led_peak_curr;
+	int pfd_led_pulse_count;
 };
 
 #endif

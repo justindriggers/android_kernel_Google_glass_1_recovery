@@ -1405,14 +1405,97 @@ static struct lsm303dlhc_mag_platform_data notle_lsm303dlh_mag_data = {
 
 #ifdef CONFIG_INPUT_LTR506ALS
 static struct ltr506_platform_data notle_ltr506als_data = {
+	/* Interrupt */
+	.pfd_gpio_int_no = GPIO_PROX_INT,
+
 	/* Disable als on suspend flag */
 	.pfd_disable_als_on_suspend = 1,
+
+	/* ALS enable filtering interrupts
+	 * by suppressing interrupts when measured value
+	 * falls within some driver calculated threshold.  This
+	 * can be manually set by setting a '0' here and writing
+	 * to the sysfs threshold file.
+	 * e.g.
+	 *  echo "1000 1020" > /sys/class/input/input7/als_threshold
+	 */
+	.pfd_als_filter_interrupts = 1,
+
+	/* ALS measurement repeat rate
+	 * '000:  100ms
+	 * '001:  200ms
+	 * '010:  500ms
+	 * '011: 1000ms
+	 * '1xx: 2000ms */
+	.pfd_als_meas_rate = 3,
+
+	/* ALS gain.
+	 * '00: 1 lux/count (1-64k lux)
+	 * '01: 0.5 lux/count (0.5-32k lux)
+	 * '10: 0.01 lux/count (0.02-640 lux)
+	 * '11: 0.005 lux/count (0.01-32.0 lux) */
+	.pfd_als_gain = 0,
 
 	/* Disable ps on suspend flag */
 	.pfd_disable_ps_on_suspend = 0,
 
-	/* Interrupt */
-	.pfd_gpio_int_no = GPIO_PROX_INT,
+	/* PS enable filtering interrupts
+	 * by suppressing interrupts when measured value
+	 * falls within some driver calculated threshold.  This
+	 * can be manually set by setting a '0' here and writing
+	 * to the sysfs threshold file.
+	 * e.g.
+	 *  echo "1000 1020" > /sys/class/input/input7/als_threshold
+	 */
+	.pfd_ps_filter_interrupts = 1,
+
+	/* PS measurement repeate rate
+	 * '000:   12.5ms (ALS auto-disabled)
+	 * '001:   50ms
+	 * '010:   70ms
+	 * '011:  100ms
+	 * '100:  200ms
+	 * '101:  500ms
+	 * '110: 1000ms
+	 * '111: 2000ms */
+	.pfd_ps_meas_rate = 4,
+
+	/* PS gain.
+	 * '00:  x8 gain
+	 * '01: x16 gain
+	 * '10: x32 gain
+	 * '11: x64 gain */
+	.pfd_ps_gain = 1,
+
+	/* LED pulse frequency.
+	 * '000: 30kHz
+	 * '001: 40kHz
+	 * '010: 50kHz
+	 * '011: 60kHz
+	 * '100: 70kHz
+	 * '101: 80kHz
+	 * '110: 90kHz
+	 * '111: 100kHz */
+	.pfd_led_pulse_freq = 7,
+
+	/* LED Duty cycle.
+	 * '00:  25%
+	 * '01:  50%
+	 * '10:  75%
+	 * '11: 100% */
+	.pfd_led_duty_cyc = 1,
+
+	/* LED peak current.
+	 * '000:   5mA
+	 * '001:  10mA
+	 * '010:  20mA
+	 * '011:  50mA
+	 * '1xx: 100mA */
+	.pfd_led_peak_curr = 0,
+
+	/* LED Pulse count. Number of LED pulses to be
+	 * emitted for a measurement. */
+	.pfd_led_pulse_count = 127,
 };
 #endif
 
