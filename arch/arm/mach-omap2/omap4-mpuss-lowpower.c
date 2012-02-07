@@ -680,7 +680,52 @@ cpu_prepare:
 		/* Clear SAR BACKUP status on GP devices */
 		if (omap_type() == OMAP2_DEVICE_TYPE_GP)
 			__raw_writel(0x0, sar_base + SAR_BACKUP_STATUS_OFFSET);
-		/* Enable GIC distributor and interface on CPU0*/
+
+#ifdef CONFIG_CACHE_L2X0
+		/*
+		 * Restore POR on a GP device.
+		 * omap4_cpu_resume restores por only on non GP devices.
+		 * POR initialization code picked from omap_l2_cache_init
+		 */
+#define L2X0_POR_OFFSET_VALUE           0x7
+		if (omap_type() == OMAP2_DEVICE_TYPE_GP) {
+			void __iomem *l2cache_base;
+			u32 por_ctrl = 0;
+			bool mpu_prefetch_disable_errata = false;
+
+#ifdef CONFIG_OMAP_ALLOW_OSWR
+			if (omap_rev() == OMAP4460_REV_ES1_0)
+				mpu_prefetch_disable_errata = true;
+#endif
+			l2cache_base = omap4_get_l2cache_base();
+			por_ctrl = readl_relaxed(l2cache_base +
+						 L2X0_PREFETCH_CTRL);
+
+			/*
+			 * Double linefill is available only on OMAP4460 L2X0.
+			 * It may cause single cache line memory corruption,
+			 * leave it disabled on all devices
+			 */
+			por_ctrl &= ~(1 << L2X0_PREFETCH_DOUBLE_LINEFILL_SHIFT);
+			if (!mpu_prefetch_disable_errata) {
+				por_ctrl |= 1 <<
+					    L2X0_PREFETCH_DATA_PREFETCH_SHIFT;
+				por_ctrl |= L2X0_POR_OFFSET_VALUE;
+			}
+
+			if (omap_rev() >= OMAP4430_REV_ES2_1) {
+				/* Disable PL310 Cache Controller first or the
+				 * por update hangs the system with eventual
+				 * reboot.
+				 */
+				omap_smc1(0x102, 0x0);
+				omap_smc1(0x113, por_ctrl);
+				omap_smc1(0x102, 0x1);
+			}
+		}
+#endif /* CONFIG_CACHE_L2X0 */
+
+		/* Enable GIC distributor and inteface on CPU0*/
 		gic_cpu_enable();
 		gic_dist_enable();
 
@@ -857,4 +902,3 @@ int __init omap4_mpuss_init(void)
 }
 
 #endif
-
