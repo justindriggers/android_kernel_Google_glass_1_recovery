@@ -43,7 +43,6 @@
 #define GPIO_WLAN_PMENA		GPIO_WL_BT_REG_ON
 #define GPIO_WLAN_IRQ		GPIO_BCM_WLAN_HOST_WAKE
 
-
 // NOTE(abliss): These numbers were taken from tuna and I have no idea why they
 // are what they are.
 #define PREALLOC_WLAN_NUMBER_OF_SECTIONS	4
@@ -362,6 +361,9 @@ static int __init notle_wlan_gpio(void) {
                 return 0;
 
         pr_info("%s()+\n", __func__);
+
+        /* Mux power signal.  GPIO config done by regulator driver */
+        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_WL_BT_REG_ON);
 
         /* Configuration of requested GPIO lines */
         __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN,
