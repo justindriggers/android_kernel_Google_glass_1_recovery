@@ -785,7 +785,6 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 
 		.dynamic = 1, /* BE is dynamic */
 		.dsp_link = &fe_media,
-		.no_host_mode = SND_SOC_DAI_LINK_OPT_HOST,
 	},
 	{
 		.name = "SDP4430 Tones Playback",
