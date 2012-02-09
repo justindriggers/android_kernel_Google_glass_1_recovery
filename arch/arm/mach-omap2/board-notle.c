@@ -42,7 +42,9 @@
 #ifdef CONFIG_INPUT_LTR506ALS
 #include <linux/i2c/ltr506als.h>
 #endif
-
+#ifdef CONFIG_INPUT_SI114X
+#include <linux/i2c/si114x.h>
+#endif
 #include <linux/mpu.h>
 
 #include <linux/regulator/fixed.h>
@@ -1657,6 +1659,14 @@ static struct i2c_board_info __initdata notle_dog_i2c_4_boardinfo[] = {
         {
                 I2C_BOARD_INFO("notle_himax", 0x48),
         },
+#ifdef CONFIG_INPUT_SI114X
+        {
+                I2C_BOARD_INFO("si114x", 0x5a),
+//                .flags = I2C_CLIENT_WAKE,
+ //               .irq = OMAP_GPIO_IRQ(GPIO_PROX_INT),
+  //              .platform_data = &notle_ltr506als_data,
+        },
+#endif
         {
                 I2C_BOARD_INFO("ov9726", 0x10),
                 .flags = I2C_CLIENT_WAKE,

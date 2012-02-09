@@ -576,4 +576,10 @@ config INPUT_LTR506ALS
           This driver implements the i2c communication to the ambient
           light sensor driver.
 
+config INPUT_SI114X
+	bool "Silicon Labs 1141/42/43 Driver"
+	depends on I2C && SYSFS
+	help
+	  Say Y here if you want to use the Si1141, Si1142 or Si1143
+	  ALS/Proximity Sensor Driver through the I2C interface.
 endif
