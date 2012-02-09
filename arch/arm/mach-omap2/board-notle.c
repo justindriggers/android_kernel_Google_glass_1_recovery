@@ -673,6 +673,11 @@ static struct regulator_init_data notle_vaux1 = {
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
 		.always_on		= true,
+		.state_mem = {
+			.enabled        = true,
+		},
+		.initial_state          = PM_SUSPEND_MEM,
+
 	},
 	.num_consumer_supplies  = 1,
 	.consumer_supplies      = notle_vaux_supply,
@@ -697,6 +702,10 @@ static struct regulator_init_data notle_vaux2 = {
 					| REGULATOR_CHANGE_STATUS
 					| REGULATOR_CHANGE_VOLTAGE,
 		.always_on		= true,
+		.state_mem = {
+			.enabled        = true,
+		},
+		.initial_state          = PM_SUSPEND_MEM,
 	},
         .num_consumer_supplies = 1,
         .consumer_supplies = notle_cam2_supply,
@@ -718,6 +727,10 @@ static struct regulator_init_data dog_vaux3 = {
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
 		.always_on		= true,
+		.state_mem = {
+			.enabled        = true,
+		},
+		.initial_state          = PM_SUSPEND_MEM,
 	},
 };
 
@@ -731,6 +744,10 @@ static struct regulator_init_data emu_vaux3 = {
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
 		.always_on		= true,
+		.state_mem = {
+			.enabled        = true,
+		},
+		.initial_state          = PM_SUSPEND_MEM,
 	},
 	.num_consumer_supplies	= ARRAY_SIZE(notle_vcxio_supply),
 	.consumer_supplies	= notle_vcxio_supply,
@@ -746,9 +763,14 @@ static struct regulator_init_data fly_vaux3 = {
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
 		.always_on		= true,
+		.state_mem = {
+			.enabled        = true,
+		},
+		.initial_state          = PM_SUSPEND_MEM,
 	},
 };
 
+#ifdef CONFIG_MMC_NOTLE
 /* Voltage for SD card */
 static struct regulator_init_data notle_vmmc = {
 	.constraints = {
@@ -760,11 +782,36 @@ static struct regulator_init_data notle_vmmc = {
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
 		.always_on		= true,
+		.state_mem = {
+			.enabled        = true,
+		},
+		.initial_state          = PM_SUSPEND_MEM,
 	},
 	.num_consumer_supplies  = 1,
 	.consumer_supplies      = notle_vmmc_supply,
 };
+#else
+/* Unused mmc slot 1 on standard notle */
+static struct regulator_init_data notle_vmmc = {
+	.constraints = {
+		.min_uV			= 2900000,
+		.max_uV			= 2900000,
+		.apply_uV		= true,
+		.valid_modes_mask	= REGULATOR_MODE_NORMAL
+					| REGULATOR_MODE_STANDBY,
+		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
+					| REGULATOR_CHANGE_STATUS,
+		.state_mem = {
+			.disabled        = true,
+		},
+		.initial_state          = PM_SUSPEND_MEM,
+	},
+	.num_consumer_supplies  = 1,
+	.consumer_supplies      = notle_vmmc_supply,
+};
+#endif
 
+/* unused */
 static struct regulator_init_data notle_vpp = {
 	.constraints = {
 		.min_uV			= 1800000,
@@ -775,7 +822,10 @@ static struct regulator_init_data notle_vpp = {
 		.valid_ops_mask	 = REGULATOR_CHANGE_VOLTAGE
 					| REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
-		.always_on		= true,
+		.state_mem = {
+			.disabled        = true,
+		},
+		.initial_state          = PM_SUSPEND_MEM,
 	},
 };
 
@@ -790,9 +840,14 @@ static struct regulator_init_data notle_vusim = {
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
 		.always_on		= true,
+		.state_mem = {
+			.enabled        = true,
+		},
+		.initial_state          = PM_SUSPEND_MEM,
 	},
 };
 
+/* unused */
 static struct regulator_init_data notle_vana = {
 	.constraints = {
 		.min_uV			= 2100000,
@@ -804,10 +859,14 @@ static struct regulator_init_data notle_vana = {
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
-		.always_on		= true,
+		.state_mem = {
+			.disabled        = true,
+		},
+		.initial_state          = PM_SUSPEND_MEM,
 	},
 };
 
+/* 1.8V for "lots of important stuff" - clocks, plls, etc. */
 static struct regulator_init_data notle_vcxio = {
 	.constraints = {
 		.min_uV			= 1800000,
@@ -820,9 +879,14 @@ static struct regulator_init_data notle_vcxio = {
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
 		.always_on		= true,
+		.state_mem = {
+			.enabled        = true,
+		},
+		.initial_state          = PM_SUSPEND_MEM,
 	},
 };
 
+/* A/D convertor? */
 static struct regulator_init_data notle_vdac = {
 	.constraints = {
 		.min_uV			= 1800000,
@@ -834,10 +898,22 @@ static struct regulator_init_data notle_vdac = {
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
-		.always_on		= true,
+		.state_mem = {
+			.disabled        = true,
+		},
+		.initial_state          = PM_SUSPEND_MEM,
 	},
 };
 
+static struct regulator_consumer_supply notle_vusb_supply[] = {
+	REGULATOR_SUPPLY("vusb", "twl6030_usb"),
+};
+
+/* Powers OMAP's USB controller */
+/* TODO(rocky): This still doesn't seem to get hooked up properly with the
+ * twl6030 driver.  i.e. I still see these in the kernel log:
+ * [   77.002502] suspend_set_state: VUSB: No configuration
+ */
 static struct regulator_init_data notle_vusb = {
 	.constraints = {
 		.min_uV			= 3300000,
@@ -848,7 +924,13 @@ static struct regulator_init_data notle_vusb = {
 		.valid_ops_mask	 =	REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
 		.always_on		= true,
+		.state_mem = {
+			.enabled        = true,
+		},
+		.initial_state          = PM_SUSPEND_MEM,
 	},
+	.num_consumer_supplies  = ARRAY_SIZE(notle_vusb_supply),
+	.consumer_supplies      = notle_vusb_supply,
 };
 
 static struct regulator_init_data omap4_notle_clk32kg = {
@@ -2097,10 +2179,6 @@ static void __init notle_init(void)
 #ifndef CONFIG_MMC_NOTLE
         // Disable support for sd card:
         mmc[2].mmc = 0;
-        // Also disable vmmc voltage regulator used for sd card:
-        dog_twldata.vmmc = NULL;
-        emu_twldata.vmmc = NULL;
-        fly_twldata.vmmc = NULL;
 #endif
 
         err = notle_imu_init();
