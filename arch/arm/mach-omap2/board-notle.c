@@ -2296,7 +2296,7 @@ static void __init notle_init(void)
             break;
           case V4_FLY:
           case V5_GNU:
-          case v6_HOG:
+          case V6_HOG:
             err = notle_dpi_init();
             if (!err) {
                     panel_notle.notle_version = NOTLE_VERSION;
