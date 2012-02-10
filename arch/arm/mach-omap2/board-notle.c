@@ -156,6 +156,7 @@ typedef enum {
         V3_EMU      = 0,
         V4_FLY      = 4,
         V5_GNU      = 5,
+        V6_HOG      = 6,
 } notle_version;
 
 static notle_version NOTLE_VERSION = UNVERSIONED;
@@ -205,6 +206,8 @@ static char * notle_version_str(notle_version board_ver)
                 return "V4 FLY";
         case V5_GNU:
                 return "V5 GNU";
+        case V6_HOG:
+                return "V6 HOG";
         }
         return "UNVERSIONED";
 }
@@ -485,6 +488,7 @@ int __init notle_dpi_init(void)
             break;
           case V4_FLY:
           case V5_GNU:
+          case V6_HOG:
             r = gpio_request_one(GPIO_EN_10V, GPIOF_OUT_INIT_LOW, "enable_10V");
             if (r) {
                     pr_err("Failed to get enable_10V gpio\n");
@@ -757,6 +761,23 @@ static struct regulator_init_data fly_vaux3 = {
 	.constraints = {
 		.min_uV			= 1500000,
 		.max_uV			= 1500000,
+		.apply_uV		= true,
+		.valid_modes_mask	= REGULATOR_MODE_NORMAL
+					| REGULATOR_MODE_STANDBY,
+		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
+					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
+		.state_mem = {
+			.enabled        = true,
+		},
+		.initial_state          = PM_SUSPEND_MEM,
+	},
+};
+
+static struct regulator_init_data hog_vaux3 = {
+	.constraints = {
+		.min_uV			= 1200000,
+		.max_uV			= 1200000,
 		.apply_uV		= true,
 		.valid_modes_mask	= REGULATOR_MODE_NORMAL
 					| REGULATOR_MODE_STANDBY,
@@ -1155,6 +1176,30 @@ static struct twl4030_platform_data fly_twldata = {
 	.vaux1		= &notle_vaux1,
 	.vaux2		= &notle_vaux2,
 	.vaux3		= &fly_vaux3,
+        .clk32kg        = &omap4_notle_clk32kg,
+	.usb		= &omap4_usbphy_data,
+
+	/* children */
+        .codec          = &twl6040_codec,
+	.bci            = &notle_bci_data,
+	.madc           = &notle_gpadc_data,
+};
+
+static struct twl4030_platform_data hog_twldata = {
+	.irq_base	= TWL6030_IRQ_BASE,
+	.irq_end	= TWL6030_IRQ_END,
+
+	/* Regulators */
+	.vmmc		= &notle_vmmc,
+	.vpp		= &notle_vpp,
+	.vusim		= &notle_vusim,
+	.vana		= &notle_vana,
+	.vcxio		= &notle_vcxio,
+	.vdac		= &notle_vdac,
+	.vusb		= &notle_vusb,
+	.vaux1		= &notle_vaux1,
+	.vaux2		= &notle_vaux2,
+	.vaux3		= &hog_vaux3,
         .clk32kg        = &omap4_notle_clk32kg,
 	.usb		= &omap4_usbphy_data,
 
@@ -1761,6 +1806,19 @@ static int __init notle_i2c_init(void)
             omap_register_i2c_bus(4, 400, notle_fly_i2c_4_boardinfo,
                             ARRAY_SIZE(notle_fly_i2c_4_boardinfo));
             break;
+          case V6_HOG:
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
+            synaptics_f11_data.flip_X = false;
+            synaptics_f11_data.flip_Y = true;
+            synaptics_f11_data.swap_axes = false;
+#endif  /* CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C */
+            omap4_pmic_init("twl6030", &hog_twldata);
+            omap_register_i2c_bus(2, 400, NULL, 0);
+            omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
+                            ARRAY_SIZE(notle_i2c_3_boardinfo));
+            omap_register_i2c_bus(4, 400, notle_fly_i2c_4_boardinfo,
+                            ARRAY_SIZE(notle_fly_i2c_4_boardinfo));
+            break;
           default:
             pr_err("Unrecognized Notle version: %i\n", NOTLE_VERSION);
             return -1;
@@ -2238,6 +2296,7 @@ static void __init notle_init(void)
             break;
           case V4_FLY:
           case V5_GNU:
+          case v6_HOG:
             err = notle_dpi_init();
             if (!err) {
                     panel_notle.notle_version = NOTLE_VERSION;
