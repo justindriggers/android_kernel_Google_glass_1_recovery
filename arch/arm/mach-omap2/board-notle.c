@@ -77,6 +77,7 @@
 #include <plat/mmc.h>
 #include <plat/remoteproc.h>
 #include <plat/vram.h>
+#include <plat/omap-pm.h>
 #include <plat/omap-serial.h>
 #include <plat/dmtimer-pwm.h>
 
@@ -2322,6 +2323,7 @@ static void __init notle_init(void)
         }
 
         omap_enable_smartreflex_on_init();
+        omap_pm_enable_off_mode();
 }
 
 static void __init notle_map_io(void)
