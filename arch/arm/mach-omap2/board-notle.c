@@ -1705,6 +1705,13 @@ static struct i2c_board_info __initdata notle_emu_i2c_4_boardinfo[] = {
         },
 };
 
+static void __init notle_pmic_mux_init(void)
+{
+
+        omap_mux_init_signal("sys_nirq1", OMAP_PIN_INPUT_PULLUP |
+                                          OMAP_WAKEUP_EN);
+}
+
 static void __init omap_i2c_hwspinlock_init(int bus_id, int spinlock_id,
                                 struct omap_i2c_bus_board_data *pdata)
 {
@@ -2235,6 +2242,7 @@ static void __init notle_init(void)
         omap4_mux_init(empty_board_mux, empty_board_mux, package);
         notle_version_init();
         my_mux_init();
+        notle_pmic_mux_init();
 
         printk("Notle board revision: %s(%d)", notle_version_str(NOTLE_VERSION), NOTLE_VERSION);
 
