@@ -143,8 +143,6 @@
 #define GPIO_BCM_WLAN_HOST_WAKE                 86
 */
 
-extern int tuna_wlan_init(void);
-
 // Notle board version detection gpios
 #define GPIO_ID2                        42
 #define MUX_ID2                         MUX(GPMC_A18)
@@ -2234,6 +2232,7 @@ static void __init notle_init(void)
 {
         int package = OMAP_PACKAGE_CBS;
         int err;
+        int wifi_power_gpio;
 
         omap_emif_setup_device_details(&emif_devices, &emif_devices);
 
@@ -2282,7 +2281,18 @@ static void __init notle_init(void)
                 pr_err("GPS initialization failed: %d\n", err);
         }
 
-        err = notle_wlan_init();
+        switch (NOTLE_VERSION) {
+          case V1_DOG:
+          case V3_EMU:
+          case V4_FLY:
+          case V5_GNU:
+            wifi_power_gpio = GPIO_WL_BT_REG_ON;
+            break;
+          case V6_HOG:
+          default:
+            wifi_power_gpio = GPIO_WL_RST_N;
+        }
+        err = notle_wlan_init(wifi_power_gpio);
         if (err) {
                 pr_err("Wifi initialization failed: %d\n", err);
         }

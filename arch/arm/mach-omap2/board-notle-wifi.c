@@ -40,7 +40,6 @@
 // tuna name (and tuna's distinct gpio terminology) in many places, in order to
 // simplify merges of future tuna improvements into this file.
 
-#define GPIO_WLAN_PMENA		GPIO_WL_BT_REG_ON
 #define GPIO_WLAN_IRQ		GPIO_BCM_WLAN_HOST_WAKE
 
 // NOTE(abliss): These numbers were taken from tuna and I have no idea why they
@@ -103,7 +102,6 @@ int __init tuna_init_wifi_mem(void)
 static struct resource tuna_wifi_resources[] = {
 	[0] = {
 		.name		= "bcmdhd_wlan_irq",
-                    // NOTE(abliss): interrupts not currently used; driver polls instead.
 		.start		= OMAP_GPIO_IRQ(GPIO_WLAN_IRQ),
 		.end		= OMAP_GPIO_IRQ(GPIO_WLAN_IRQ),
 		.flags          = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL | IORESOURCE_IRQ_SHAREABLE,
@@ -178,7 +176,7 @@ static struct regulator_init_data tuna_vmmc5 = {
 static struct fixed_voltage_config tuna_vwlan = {
 	.supply_name = "vbcm4329",
 	.microvolts = 2000000, /* 2.0V */
-	.gpio = GPIO_WLAN_PMENA,
+         // .gpio is set below in notle_wlan_init
 	.startup_delay = 70000, /* 70msec */
 	.enable_high = 1,
 	.enabled_at_boot = 0,
@@ -197,7 +195,7 @@ static int tuna_wifi_power(int on)
 {
         pr_info("%s: %d\n", __func__, on);
 	mdelay(100);
-	gpio_set_value(GPIO_WLAN_PMENA, on);
+	gpio_set_value(tuna_vwlan.gpio, on);
 	mdelay(200);
 
 	tuna_wifi_power_state = on;
@@ -408,8 +406,9 @@ error:
         return r;
 }
 
-int __init notle_wlan_init(void)
+int __init notle_wlan_init(int wifi_power_gpio)
 {
+        tuna_vwlan.gpio = wifi_power_gpio;
 	notle_wlan_gpio();
 	tuna_init_wifi_mem();
 	platform_device_register(&omap_vwlan_device);
