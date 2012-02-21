@@ -346,7 +346,11 @@ int omap2_clk_enable(struct clk *clk)
 	}
 
 	/* If clockdomain supports hardware control, enable it */
-	if (clk->clkdm)
+	/*
+	 * FIXME: The HW_AUTO configuration here should ideally be left to
+	 * the upper layers, so just deal with the Ducati case for now.
+	 */
+	if (clk->clkdm && strcmp("ducati_clkdm", clk->clkdm->name))
 		clkdm_allow_idle(clk->clkdm);
 
 	return 0;
