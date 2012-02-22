@@ -18,7 +18,7 @@ CONFIG_OMAP2_DSS_DPI=y
 CONFIG_OMAP2_DSS_DSI=y
 
 CONFIG_BCMDHD=y
-CONFIG_BCMDHD_FW_PATH="/system/etc/firmware/fw_bcm4329.bin"
+CONFIG_BCMDHD_FW_PATH="/system/etc/firmware/fw_bcmdhd.bin"
 #CONFIG_BCMDHD_NVRAM_PATH="/system/etc/firmware/bcm4329.cal"
 #CONFIG_BCMDHD_WEXT=y
 CONFIG_WIFI_CONTROL_FUNC=y
