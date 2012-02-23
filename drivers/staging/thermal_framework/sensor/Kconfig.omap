@@ -16,6 +16,13 @@ config OMAP4_PCB_SENSOR
 	  Enabling this config will give support for the pcb
 	  temp sensor for the OMAP platform.
 
+config NOTLE_PCB_SENSOR
+	bool "Notle PCB temp sensor support"
+	depends on THERMAL_FRAMEWORK && OMAP_THERMAL && OMAP_TEMP_SENSOR
+	help
+	  Enabling this config will give support for the pcb
+	  temp sensor for the notle board.
+
 config OMAP4_TMP102_SENSOR
 	bool "OMAP TMP102 temp sensor support"
 	depends on OMAP_THERMAL

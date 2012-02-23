@@ -1081,6 +1081,21 @@ static struct platform_device *notle_devices[] __initdata = {
         &bcm4330_bluetooth_device,
 };
 
+static struct platform_device notle_pcb_temp_sensor = {
+	.name = "notle_pcb_sensor",
+};
+
+static int notle_batt_table[] = {
+        /* adc code for temperature in degree C */
+        929, 925, /* -2 ,-1 */
+        920, 917, 912, 908, 904, 899, 895, 890, 885, 880, /* 00 - 09 */
+        875, 869, 864, 858, 853, 847, 841, 835, 829, 823, /* 10 - 19 */
+        816, 810, 804, 797, 790, 783, 776, 769, 762, 755, /* 20 - 29 */
+        748, 740, 732, 725, 718, 710, 703, 695, 687, 679, /* 30 - 39 */
+        671, 663, 655, 647, 639, 631, 623, 615, 607, 599, /* 40 - 49 */
+        591, 583, 575, 567, 559, 551, 543, 535, 527, 519, /* 50 - 59 */
+        511, 504, 496 /* 60 - 62 */
+};
 
 static struct twl4030_bci_platform_data notle_bci_data = {
         .monitoring_interval            = 10,
@@ -2300,6 +2315,12 @@ static void __init notle_init(void)
         // Do this after the wlan_init, which inits the regulator shared
         // with the bluetooth device and muxes the bt signals.
         platform_add_devices(notle_devices, ARRAY_SIZE(notle_devices));
+        if (NOTLE_VERSION == V6_HOG) {
+                err = platform_device_register(&notle_pcb_temp_sensor);
+                if (err) {
+                        pr_err("notle_pcb_temp_sensor registration failed: %d\n", err);
+                }
+        }
 
         err = notle_touchpad_init();
         if (err) {
