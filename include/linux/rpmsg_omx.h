@@ -54,8 +54,9 @@ struct omx_pvr_data {
 #define OMX_IOCIONREGISTER	_IOWR(OMX_IOC_MAGIC, 2, struct ion_fd_data)
 #define OMX_IOCIONUNREGISTER	_IOWR(OMX_IOC_MAGIC, 3, struct ion_fd_data)
 #define OMX_IOCPVRREGISTER	_IOWR(OMX_IOC_MAGIC, 4, struct omx_pvr_data)
+#define OMX_GET_TIMER		_IOWR(OMX_IOC_MAGIC, 5, struct omx_get_timer)
 
-#define OMX_IOC_MAXNR	(4)
+#define OMX_IOC_MAXNR	(5)
 
 #ifdef __KERNEL__
 
@@ -153,6 +154,11 @@ struct omx_packet {
 	uint32_t      data_size;/* Size of in/out data to/from the function. */
 	uint32_t      data[0];	/* Payload of data_size char's passed to
 				   function. */
+};
+
+struct omx_get_timer {
+    long long int persistent_timer;
+    unsigned int clock32k;
 };
 
 #endif /* RPMSG_OMX_H */
