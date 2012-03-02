@@ -208,6 +208,29 @@ void read_persistent_clock(struct timespec *ts)
 	spin_unlock_irqrestore(&read_persistent_clock_lock, flags);
 }
 
+static u64 accumulated_cycles = 0;
+static cycles_t last_clk_cycles = 0;
+
+u64 read_robust_clock(void)
+{
+    u64 nsecs;
+    cycles_t cycles;
+
+    cycles = omap_readl(OMAP4430_32KSYNCT_BASE + 0x10);
+
+    if (cycles < last_clk_cycles)  {
+        accumulated_cycles += cycles + (0xFFFFFFFFu - last_clk_cycles);
+    } else {
+        accumulated_cycles += (cycles - last_clk_cycles);
+    }
+    nsecs = ((u64) accumulated_cycles * NSEC_PER_SEC) >> 15;
+
+    last_clk_cycles = cycles;
+
+    return nsecs;
+}
+
+
 int __init omap_init_clocksource_32k(void)
 {
 	static char err[] __initdata = KERN_ERR

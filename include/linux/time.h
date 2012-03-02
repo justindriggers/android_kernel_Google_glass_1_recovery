@@ -114,6 +114,7 @@ static inline struct timespec timespec_sub(struct timespec lhs,
 	(((ts)->tv_sec >= 0) && (((unsigned long) (ts)->tv_nsec) < NSEC_PER_SEC))
 
 extern void read_persistent_clock(struct timespec *ts);
+extern u64 read_robust_clock(void);
 extern void read_boot_clock(struct timespec *ts);
 extern int update_persistent_clock(struct timespec now);
 extern int no_sync_cmos_clock __read_mostly;
