@@ -210,11 +210,15 @@ void read_persistent_clock(struct timespec *ts)
 
 static u64 accumulated_cycles = 0;
 static cycles_t last_clk_cycles = 0;
+static DEFINE_SPINLOCK(read_robust_clock_lock);
 
 u64 read_robust_clock(void)
 {
     u64 nsecs;
     cycles_t cycles;
+    unsigned long flags;
+
+	spin_lock_irqsave(&read_robust_clock_lock, flags);
 
     cycles = omap_readl(OMAP4430_32KSYNCT_BASE + 0x10);
 
@@ -226,6 +230,9 @@ u64 read_robust_clock(void)
     nsecs = ((u64) accumulated_cycles * NSEC_PER_SEC) >> 15;
 
     last_clk_cycles = cycles;
+
+
+	spin_unlock_irqrestore(&read_robust_clock_lock, flags);
 
     return nsecs;
 }
