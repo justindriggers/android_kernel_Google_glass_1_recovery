@@ -29,13 +29,16 @@ struct omap_dss_device;
  * @platform_disable: platform specific panel disable function
  */
 struct panel_notle_data {
-        /* See arch/arm/mach-omap2/board-notle.c for enum of values */
-        int notle_version;
         struct omap_dss_device *dssdev;
         int (*platform_enable)(struct omap_dss_device *dssdev);
         void (*platform_disable)(struct omap_dss_device *dssdev);
         int (*panel_enable)(void);
         void (*panel_disable)(void);
+        int notle_version;
+        int red_max_mw;
+        int green_max_mw;
+        int blue_max_mw;
+        int limit_mw;
 };
 
 #endif /* __OMAP_PANEL_NOTLE_H */

@@ -21,6 +21,7 @@
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/spi/spi.h>
 
 #include <video/omapdss.h>
 #include <video/omap-panel-notle.h>
@@ -30,6 +31,38 @@
 #define REG_DELAY       0xFF
 #define MAX_BRIGHTNESS  0xFF
 
+/* iCE40 registers */
+#define ICE40_REVISION   0x00
+
+#define ICE40_PIPELINE   0x01
+#define ICE40_PIPELINE_AUTO     0x70
+#define ICE40_PIPELINE_TESTPAT  0x07
+
+#define ICE40_BACKLIGHT  0x10
+#define ICE40_BACKLIGHT_SYNC    0xC0
+#define ICE40_BACKLIGHT_MONO    0x20
+#define ICE40_BACKLIGHT_LEDEN   0x10
+#define ICE40_BACKLIGHT_CPSEL   0x08
+#define ICE40_BACKLIGHT_FORCER  0x04
+#define ICE40_BACKLIGHT_FORCEG  0x02
+#define ICE40_BACKLIGHT_FORCEB  0x01
+
+#define ICE40_LED_RED_H    0x11
+#define ICE40_LED_RED_L    0x12
+#define ICE40_LED_GREEN_H  0x13
+#define ICE40_LED_GREEN_L  0x14
+#define ICE40_LED_BLUE_H   0x15
+#define ICE40_LED_BLUE_L   0x16
+
+typedef enum {
+        UNVERSIONED = 7,
+        V1_DOG      = 7,
+        V3_EMU      = 0,
+        V4_FLY      = 4,
+        V5_GNU      = 5,
+        V6_HOG      = 6,
+} notle_version;
+
 enum {
         NOTLE_I2C_FPGA  = 0,
         NOTLE_I2C_PANEL = 1,
@@ -38,6 +71,18 @@ enum {
 struct init_register_value {
         u8 reg;
         u8 value;
+};
+
+static const u8 ice40_regs[] = {
+  ICE40_REVISION,
+  ICE40_PIPELINE,
+  ICE40_BACKLIGHT,
+  ICE40_LED_RED_H,
+  ICE40_LED_RED_L,
+  ICE40_LED_GREEN_H,
+  ICE40_LED_GREEN_L,
+  ICE40_LED_BLUE_H,
+  ICE40_LED_BLUE_L,
 };
 
 static struct init_register_value panel_init_regs[] = {
@@ -110,8 +155,10 @@ static struct init_register_value panel_shutdown_regs[] = {
   { 0x00, 0x80 },
 };
 
+static notle_version version;
+
 /*
- * FPGA configuration options:
+ * Actel FPGA configuration options:
  *   TEST_MONO:      Turn on all backlight LEDs at full brightness
  *                   simultaneously.  This disables color sequencing.
  *   TEST_PATTERN:   Generate a checkerboard test pattern.  This
@@ -119,16 +166,16 @@ static struct init_register_value panel_shutdown_regs[] = {
  *   LED_EN:         Enable/disable the backlight.
  *   CP_SEL:         Enable/disable the charge pump on the backlight LEDs.
  *   MONO:           Enable/disable monochrome mode.  The color mix is
- *                   determined by the current value of fpga_config fields.
+ *                   determined by the current value of actel_fpga_config fields.
  *                   Note that this disables color sequencing.
  */
-#define FPGA_CONFIG_MASK          ((u8)0x3F)   /* Mask of all valid config bits */
-#define FPGA_CONFIG_TEST_MONO     ((u8)0x01)   /* Enable monochrome test mode */
-#define FPGA_CONFIG_TEST_PATTERN  ((u8)0x02)   /* Ouput test pattern */
-#define FPGA_CONFIG_LED_EN        ((u8)0x04)   /* Enable LED backlight */
-#define FPGA_CONFIG_CP_SEL        ((u8)0x08)   /* Chargepump select */
-#define FPGA_CONFIG_MONO          ((u8)0x10)   /* Enable monochrome mode */
-#define FPGA_CONFIG_OVERDRIVE     ((u8)0x20)   /* Enable brightness overdrive */
+#define ACTEL_FPGA_CONFIG_MASK          ((u8)0x3F)   /* Mask of all valid config bits */
+#define ACTEL_FPGA_CONFIG_TEST_MONO     ((u8)0x01)   /* Enable monochrome test mode */
+#define ACTEL_FPGA_CONFIG_TEST_PATTERN  ((u8)0x02)   /* Ouput test pattern */
+#define ACTEL_FPGA_CONFIG_LED_EN        ((u8)0x04)   /* Enable LED backlight */
+#define ACTEL_FPGA_CONFIG_CP_SEL        ((u8)0x08)   /* Chargepump select */
+#define ACTEL_FPGA_CONFIG_MONO          ((u8)0x10)   /* Enable monochrome mode */
+#define ACTEL_FPGA_CONFIG_OVERDRIVE     ((u8)0x20)   /* Enable brightness overdrive */
 
 struct led_config {
   unsigned red_percent;     /* 100 * percent red in output (100 = 1% red) */
@@ -137,7 +184,7 @@ struct led_config {
   unsigned brightness;      /* Total brightness, max of MAX_BRIGHTNESS */
 };
 
-struct fpga_config {
+struct actel_fpga_config {
   u8 config;
   u16 red;
   u16 green;
@@ -153,13 +200,13 @@ static struct led_config led_config = {
   .brightness = 0,        /* 0 brightness by default */
 };
 
-static struct fpga_config fpga_config;
+static struct actel_fpga_config actel_fpga_config;
 
-struct panel_notle_i2c {
-        struct i2c_client *fpga_client;
+static struct panel_notle_busses {
+        struct i2c_client *actel_fpga_client;
         struct i2c_client *panel_client;
-};
-static struct panel_notle_i2c *i2c_data;
+        struct spi_device *ice40_device;
+} bus_data;
 
 struct panel_config {
         struct omap_video_timings timings;
@@ -197,12 +244,35 @@ static struct panel_config notle_config = {
         .power_off_delay        = 0,
 };
 
+/* Note that this enum and the string array below must match. */
+typedef enum {
+        TESTPATTERN_NONE = 0,
+        TESTPATTERN_COARSE_CHECK,
+        TESTPATTERN_FINE_CHECK,
+        TESTPATTERN_COLORBARS,
+        TESTPATTERN_ALIGNMENT,
+        TESTPATTERN_CALIBRATION,
+} testpattern;
+static const char* const testpattern_names[] = {
+        "none",
+        "coarse_checkerboard",
+        "fine_checkerboard",
+        "colorbars",
+        "alignment",
+        "calibration",
+};
+
 struct notle_drv_data {
         struct omap_dss_device *dssdev;
         struct panel_config *panel_config;
         struct kobject kobj;
         int enabled;
+        testpattern pattern;
 };
+
+static inline const char* testpattern_name(testpattern pattern) {
+        return testpattern_names[pattern];
+}
 
 static inline struct panel_notle_data
 *get_panel_data(const struct omap_dss_device *dssdev) {
@@ -213,11 +283,18 @@ static inline struct panel_notle_data
 static int fpga_rev = -1;
 static void panel_notle_power_off(struct omap_dss_device *dssdev);
 static int panel_notle_power_on(struct omap_dss_device *dssdev);
-static int fpga_write_config(struct fpga_config *config);
-static int fpga_read_config(struct fpga_config *config);
-static void led_config_to_fpga_config(struct omap_dss_device *dssdev,
-                                      struct led_config *led,
-                                      struct fpga_config *fpga);
+static int actel_fpga_write_config(struct actel_fpga_config *config);
+static int actel_fpga_read_config(struct actel_fpga_config *config);
+static void ice40_dump_regs(void);
+static int ice40_read_register(u8 reg_addr);
+static int ice40_write_register(u8 reg_addr, u8 reg_value);
+static int ice40_set_backlight(int led_en, int r, int g, int b);
+static int fpga_read_revision(void);
+static void led_config_to_fpga_config(struct led_config *led,
+                                      struct actel_fpga_config *fpga);
+static void led_config_to_linecuts(struct omap_dss_device *dssdev,
+                                   struct led_config *led, int *red_linecut,
+                                   int *green_linecut, int *blue_linecut);
 
 /* Sysfs interface */
 static ssize_t sysfs_reset(struct notle_drv_data *notle_data,
@@ -232,12 +309,19 @@ static ssize_t sysfs_reset(struct notle_drv_data *notle_data,
         return size;
 }
 static ssize_t fpga_revision(struct notle_drv_data *notle_data, char *buf) {
-        struct fpga_config config;
-        if (fpga_read_config(&config)) {
-          printk(KERN_ERR LOG_TAG "Failed to read FPGA revision\n");
-        }
+        int rev = fpga_read_revision();
 
-        /* fpga_rev is set in fpga_read_config if successful */
+        ice40_dump_regs();
+
+        if (rev < 0) {
+          printk(KERN_ERR LOG_TAG "Failed to read FPGA revision\n");
+        } else {
+          /*
+           * Cache the fpga revision so we can still print this when
+           * the panel is powered off.
+           */
+           fpga_rev = rev;
+        }
 
         if (fpga_rev < 0) {
           printk(KERN_ERR LOG_TAG "No cached FPGA revision\n");
@@ -270,70 +354,148 @@ static ssize_t enabled_store(struct notle_drv_data *notle_data,
 
         return size;
 }
-static ssize_t fpga_config_show(struct notle_drv_data *notle_data, char *buf) {
-        struct fpga_config config;
-        if (fpga_read_config(&config)) {
+
+static u8 reg_addr = 0;
+static ssize_t reg_addr_show(struct notle_drv_data *notle_data, char *buf) {
+        return snprintf(buf, PAGE_SIZE, "0x%02x\n",
+                        reg_addr);
+}
+static ssize_t reg_addr_store(struct notle_drv_data *notle_data,
+                              const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+
+        reg_addr = (u8)(value & 0xff);
+
+        return size;
+}
+static ssize_t reg_value_show(struct notle_drv_data *notle_data, char *buf) {
+        return snprintf(buf, PAGE_SIZE, "0x%02x\n",
+                        ice40_read_register(reg_addr));
+}
+static ssize_t reg_value_store(struct notle_drv_data *notle_data,
+                               const char *buf, size_t size) {
+        int r, value;
+        r = kstrtoint(buf, 0, &value);
+        if (r)
+                return r;
+
+        ice40_write_register(reg_addr, (u8)(value & 0xff));
+
+        return size;
+}
+static ssize_t actel_fpga_config_show(struct notle_drv_data *notle_data, char *buf) {
+        struct actel_fpga_config config;
+        if (actel_fpga_read_config(&config)) {
           return -EIO;
         }
         return snprintf(buf, PAGE_SIZE, "0x%x/%d/%d/%d\n",
                         config.config, config.red,
                         config.green, config.blue);
 }
-static ssize_t fpga_config_store(struct notle_drv_data *notle_data,
+static ssize_t actel_fpga_config_store(struct notle_drv_data *notle_data,
                                  const char *buf, size_t size) {
         int config;
         unsigned int red, green, blue;
 
         if (sscanf(buf, "0x%x/%u/%u/%u", &config, &red, &green, &blue) != 4) {
-          printk(KERN_ERR LOG_TAG "Failed to fpga_config_store: malformed config: %s\n", buf);
+          printk(KERN_ERR LOG_TAG "Failed to actel_fpga_config_store: malformed config: %s\n", buf);
           return -EINVAL;
         }
 
-        if (((config & FPGA_CONFIG_MASK) != config) ||
+        if (((config & ACTEL_FPGA_CONFIG_MASK) != config) ||
             (red > 511) || (green > 511) || (blue > 511)) {
-          printk(KERN_ERR LOG_TAG "Failed to fpga_config_store: invalid config: %s\n", buf);
+          printk(KERN_ERR LOG_TAG "Failed to actel_fpga_config_store: invalid config: %s\n", buf);
           return -EINVAL;
         }
 
-        fpga_config.config = (u8)config;
-        fpga_config.red    = (u16)red;
-        fpga_config.green  = (u16)green;
-        fpga_config.blue   = (u16)blue;
+        actel_fpga_config.config = (u8)config;
+        actel_fpga_config.red    = (u16)red;
+        actel_fpga_config.green  = (u16)green;
+        actel_fpga_config.blue   = (u16)blue;
 
-        if (fpga_write_config(&fpga_config)) {
-          printk(KERN_ERR LOG_TAG "Failed to fpga_config_store: i2c write failed\n");
+        if (actel_fpga_write_config(&actel_fpga_config)) {
+          printk(KERN_ERR LOG_TAG "Failed to actel_fpga_config_store: i2c write failed\n");
           return -EIO;
         }
 
         return size;
 }
+static ssize_t list_testpatterns(struct notle_drv_data *notle_data, char *buf) {
+        int i;
+
+        *buf = '\0';
+        for (i = 0; i < sizeof(testpattern_names) / sizeof(testpattern_names[0]); ++i) {
+                if (strlen(buf) + strlen(testpattern_names[i]) + 2 > PAGE_SIZE) {
+                        return -EINVAL;
+                }
+                strcat(buf, testpattern_names[i]);
+                strcat(buf, "\n");
+        }
+        return strlen(buf);
+}
 static ssize_t testpattern_show(struct notle_drv_data *notle_data, char *buf) {
-        return snprintf(buf, PAGE_SIZE, "%d\n",
-                        !!(fpga_config.config & FPGA_CONFIG_TEST_PATTERN));
+        return snprintf(buf, PAGE_SIZE, "%s\n", testpattern_name(notle_data->pattern));
 }
 static ssize_t testpattern_store(struct notle_drv_data *notle_data,
                                  const char *buf, size_t size) {
-        int r, value;
-        r = kstrtoint(buf, 0, &value);
-        if (r)
-                return r;
+        int i;
+        char value[128];
 
-        if (value) {
-          fpga_config.config |= FPGA_CONFIG_TEST_PATTERN;
-        } else {
-          fpga_config.config &= ~FPGA_CONFIG_TEST_PATTERN;
+        if (size > 128) return -EINVAL;
+
+        sscanf(buf, "%s", value);
+
+        for (i = 0; i < sizeof(testpattern_names) / sizeof(testpattern_names[0]); i++) {
+                if (!strncmp(value, testpattern_names[i], size)) {
+                        notle_data->pattern = (testpattern)i;
+                }
         }
 
-        if (fpga_write_config(&fpga_config)) {
-          printk(KERN_ERR LOG_TAG "Failed to testpattern_store: i2c write failed\n");
-          return -EIO;
+        switch (version) {
+          case V4_FLY:
+          case V5_GNU:
+                if (notle_data->pattern == TESTPATTERN_NONE) {
+                        actel_fpga_config.config &= ~ACTEL_FPGA_CONFIG_TEST_PATTERN;
+                } else {
+                        actel_fpga_config.config |= ACTEL_FPGA_CONFIG_TEST_PATTERN;
+                }
+
+                if (actel_fpga_write_config(&actel_fpga_config)) {
+                        printk(KERN_ERR LOG_TAG "Failed to testpattern_store: "
+                               "i2c write failed\n");
+                        return -EIO;
+                }
+                break;
+          case V6_HOG:
+
+                i = ice40_read_register(ICE40_PIPELINE);
+                if (i < 0) {
+                        printk(KERN_ERR LOG_TAG "Failed to testpattern_store: "
+                               "register read failed: %i\n", i);
+                        return -EIO;
+                }
+                i = (i & ~ICE40_PIPELINE_TESTPAT) | notle_data->pattern;
+                if ((i = ice40_write_register(ICE40_PIPELINE, (u8)(i & 0xff))) < 0) {
+                        printk(KERN_ERR LOG_TAG "Failed to testpattern_store: "
+                               "register write failed: %i\n", i);
+                        return -EIO;
+                }
+                break;
+          case V1_DOG:
+          case V3_EMU:
+                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
+                       version);
+                return -EINVAL;
         }
 
         return size;
 }
 static ssize_t testmono_show(struct notle_drv_data *notle_data, char *buf) {
         return snprintf(buf, PAGE_SIZE, "%d\n",
-                        !!(fpga_config.config & FPGA_CONFIG_TEST_MONO));
+                        !!(actel_fpga_config.config & ACTEL_FPGA_CONFIG_TEST_MONO));
 }
 static ssize_t testmono_store(struct notle_drv_data *notle_data,
                                  const char *buf, size_t size) {
@@ -343,21 +505,237 @@ static ssize_t testmono_store(struct notle_drv_data *notle_data,
                 return r;
 
         if (value) {
-          fpga_config.config |= FPGA_CONFIG_TEST_MONO;
+          actel_fpga_config.config |= ACTEL_FPGA_CONFIG_TEST_MONO;
         } else {
-          fpga_config.config &= ~FPGA_CONFIG_TEST_MONO;
+          actel_fpga_config.config &= ~ACTEL_FPGA_CONFIG_TEST_MONO;
         }
 
-        if (fpga_write_config(&fpga_config)) {
-          printk(KERN_ERR LOG_TAG "Failed to testmono_store: i2c write failed\n");
-          return -EIO;
+        switch (version) {
+          case V4_FLY:
+          case V5_GNU:
+                if (actel_fpga_write_config(&actel_fpga_config)) {
+                        printk(KERN_ERR LOG_TAG "Failed to testmono_store: "
+                               "i2c write failed\n");
+                        return -EIO;
+                }
+                break;
+          case V6_HOG:
+                value = ice40_read_register(ICE40_BACKLIGHT);
+                if (value < 0) {
+                        printk(KERN_ERR LOG_TAG "Failed to testmono_store: "
+                               "spi read failed: %i\n", value);
+                        return -EIO;
+                }
+                if (actel_fpga_config.config & ACTEL_FPGA_CONFIG_TEST_MONO) {
+                        value |= ICE40_BACKLIGHT_FORCER |
+                                 ICE40_BACKLIGHT_FORCEG |
+                                 ICE40_BACKLIGHT_FORCEB;
+                } else {
+                        value &= ~(ICE40_BACKLIGHT_FORCER |
+                                   ICE40_BACKLIGHT_FORCEG |
+                                   ICE40_BACKLIGHT_FORCEB);
+                }
+                value = ice40_write_register(ICE40_BACKLIGHT, (u8)(value & 0xff));
+                if (value < 0) {
+                        printk(KERN_ERR LOG_TAG "Failed to testmono_store: "
+                               "spi write failed: %i\n", value);
+                        return -EIO;
+                }
+                break;
+          case V1_DOG:
+          case V3_EMU:
+                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
+                       version);
+                return -EINVAL;
+        }
+
+        return size;
+}
+static ssize_t forcer_show(struct notle_drv_data *notle_data, char *buf) {
+        int val;
+
+        if (version != V6_HOG) {
+                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
+                       version);
+                return -EINVAL;
+        }
+
+        val = ice40_read_register(ICE40_BACKLIGHT);
+        if (val < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to forcer_store: "
+                       "spi read failed: %i\n", val);
+                return -EIO;
+        }
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                !!(val & ICE40_BACKLIGHT_FORCER));
+}
+static ssize_t forcer_store(struct notle_drv_data *notle_data,
+                                 const char *buf, size_t size) {
+        int r, val;
+
+        if (version != V6_HOG) {
+                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
+                       version);
+                return -EINVAL;
+        }
+
+        r = kstrtoint(buf, 0, &val);
+        if (r)
+                return r;
+
+        r = ice40_read_register(ICE40_BACKLIGHT);
+        if (r < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to forcer_store: "
+                       "spi read failed: %i\n", r);
+                return -EIO;
+        }
+
+        if (val) {
+                r |= ICE40_BACKLIGHT_FORCER;
+        } else {
+                r &= ~ICE40_BACKLIGHT_FORCER;
+        }
+
+        r = ice40_write_register(ICE40_BACKLIGHT, r);
+        if (r < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to forcer_store: "
+                       "spi write failed: %i\n", r);
+                return -EIO;
+        }
+
+        return size;
+}
+static ssize_t forceg_show(struct notle_drv_data *notle_data, char *buf) {
+        int val;
+
+        if (version != V6_HOG) {
+                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
+                       version);
+                return -EINVAL;
+        }
+
+        val = ice40_read_register(ICE40_BACKLIGHT);
+        if (val < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to forceg_store: "
+                       "spi read failed: %i\n", val);
+                return -EIO;
+        }
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                !!(val & ICE40_BACKLIGHT_FORCEG));
+}
+static ssize_t forceg_store(struct notle_drv_data *notle_data,
+                                 const char *buf, size_t size) {
+        int r, val;
+
+        if (version != V6_HOG) {
+                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
+                       version);
+                return -EINVAL;
+        }
+
+        r = kstrtoint(buf, 0, &val);
+        if (r)
+                return r;
+
+        r = ice40_read_register(ICE40_BACKLIGHT);
+        if (r < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to forceg_store: "
+                       "spi read failed: %i\n", r);
+                return -EIO;
+        }
+
+        if (val) {
+                r |= ICE40_BACKLIGHT_FORCEG;
+        } else {
+                r &= ~ICE40_BACKLIGHT_FORCEG;
+        }
+
+        r = ice40_write_register(ICE40_BACKLIGHT, r);
+        if (r < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to forceg_store: "
+                       "spi write failed: %i\n", r);
+                return -EIO;
+        }
+
+        return size;
+}
+static ssize_t forceb_show(struct notle_drv_data *notle_data, char *buf) {
+        int val;
+
+        if (version != V6_HOG) {
+                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
+                       version);
+                return -EINVAL;
+        }
+
+        val = ice40_read_register(ICE40_BACKLIGHT);
+        if (val < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to forceb_store: "
+                       "spi read failed: %i\n", val);
+                return -EIO;
+        }
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                !!(val & ICE40_BACKLIGHT_FORCEB));
+}
+static ssize_t forceb_store(struct notle_drv_data *notle_data,
+                                 const char *buf, size_t size) {
+        int r, val;
+
+        if (version != V6_HOG) {
+                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
+                       version);
+                return -EINVAL;
+        }
+
+        r = kstrtoint(buf, 0, &val);
+        if (r)
+                return r;
+
+        r = ice40_read_register(ICE40_BACKLIGHT);
+        if (r < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to forceb_store: "
+                       "spi read failed: %i\n", r);
+                return -EIO;
+        }
+
+        if (val) {
+                r |= ICE40_BACKLIGHT_FORCEB;
+        } else {
+                r &= ~ICE40_BACKLIGHT_FORCEB;
+        }
+
+        r = ice40_write_register(ICE40_BACKLIGHT, r);
+        if (r < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to forceb_store: "
+                       "spi write failed: %i\n", r);
+                return -EIO;
         }
 
         return size;
 }
 static ssize_t mono_show(struct notle_drv_data *notle_data, char *buf) {
-        return snprintf(buf, PAGE_SIZE, "%d\n",
-                        !!(fpga_config.config & FPGA_CONFIG_MONO));
+        int val;
+
+        switch (version) {
+            case V4_FLY:
+            case V5_GNU:
+              val = !!(actel_fpga_config.config & ACTEL_FPGA_CONFIG_MONO);
+              break;
+            case V6_HOG:
+              val = ice40_read_register(ICE40_BACKLIGHT);
+              if (val < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to read iCE40 register: "
+                       "0x%02x\n", ICE40_BACKLIGHT);
+                return -EIO;
+              }
+              val = !!(val & ICE40_BACKLIGHT_MONO);
+              break;
+            default:
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version: %d\n", version);
+              return -EINVAL;
+        }
+
+        return snprintf(buf, PAGE_SIZE, "%d\n", val);
 }
 static ssize_t mono_store(struct notle_drv_data *notle_data,
                                  const char *buf, size_t size) {
@@ -366,15 +744,41 @@ static ssize_t mono_store(struct notle_drv_data *notle_data,
         if (r)
                 return r;
 
-        if (value) {
-          fpga_config.config |= FPGA_CONFIG_MONO;
-        } else {
-          fpga_config.config &= ~FPGA_CONFIG_MONO;
-        }
-
-        if (fpga_write_config(&fpga_config)) {
-          printk(KERN_ERR LOG_TAG "Failed to mono_store: i2c write failed\n");
-          return -EIO;
+        switch (version) {
+            case V4_FLY:
+            case V5_GNU:
+              if (value) {
+                actel_fpga_config.config |= ACTEL_FPGA_CONFIG_MONO;
+              } else {
+                actel_fpga_config.config &= ~ACTEL_FPGA_CONFIG_MONO;
+              }
+              if (actel_fpga_write_config(&actel_fpga_config)) {
+                printk(KERN_ERR LOG_TAG "Failed to mono_store: i2c write failed\n");
+                return -EIO;
+              }
+              break;
+            case V6_HOG:
+              r = ice40_read_register(ICE40_BACKLIGHT);
+              if (r < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to read iCE40 register: "
+                       "0x%02x\n", ICE40_BACKLIGHT);
+                return -EIO;
+              }
+              if (value) {
+                r |= ICE40_BACKLIGHT_MONO;
+              } else {
+                r &= ~ICE40_BACKLIGHT_MONO;
+              }
+              r = ice40_write_register(ICE40_BACKLIGHT, r);
+              if (r < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to write iCE40 register: "
+                       "0x%02x\n", ICE40_BACKLIGHT);
+                return -EIO;
+              }
+              break;
+            default:
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version: %d\n", version);
+              return -EINVAL;
         }
 
         return size;
@@ -384,7 +788,7 @@ static ssize_t brightness_show(struct notle_drv_data *notle_data, char *buf) {
 }
 static ssize_t brightness_store(struct notle_drv_data *notle_data,
                                 const char *buf, size_t size) {
-        int r, value;
+        int r, g, b, value;
         r = kstrtoint(buf, 0, &value);
         if (r)
           return r;
@@ -398,22 +802,34 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
         led_config.brightness = value;
 
         /*
-         * Make sure we don't turn the backlight on just because brightness
-         * was set.
-         */
-        if (notle_data->dssdev->state != OMAP_DSS_DISPLAY_ACTIVE) {
-          fpga_config.config &= ~FPGA_CONFIG_LED_EN;
-        }
-
-        /*
          * If the display is enabled, write the new FPGA config immediately,
          * otherwise it will be written when the display is enabled.
          */
         if (notle_data->enabled) {
-          led_config_to_fpga_config(notle_data->dssdev, &led_config, &fpga_config);
-          if (fpga_write_config(&fpga_config)) {
-            printk(KERN_ERR LOG_TAG "Failed to brightness_store: i2c write failed\n");
-            return -EIO;
+          switch (version) {
+            case V4_FLY:
+            case V5_GNU:
+              led_config_to_fpga_config(&led_config, &actel_fpga_config);
+              if (actel_fpga_write_config(&actel_fpga_config)) {
+                printk(KERN_ERR LOG_TAG "Failed to brightness_store: i2c write failed\n");
+                return -EIO;
+              }
+              break;
+            case V6_HOG:
+              if (led_config.brightness) {
+                led_config_to_linecuts(notle_data->dssdev, &led_config, &r, &g, &b);
+                if (ice40_set_backlight(1, r, g, b)) {
+                  printk(KERN_ERR LOG_TAG "Failed to brightness_store: spi write failed\n");
+                }
+              } else {
+                if (ice40_set_backlight(0, -1, -1, -1)) {
+                  printk(KERN_ERR LOG_TAG "Failed to brightness_store: spi write failed\n");
+                }
+              }
+              break;
+            default:
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version: %d\n", version);
+              break;
           }
         }
 
@@ -433,14 +849,25 @@ struct panel_notle_attribute {
 
 static NOTLE_ATTR(reset, S_IWUSR, NULL, sysfs_reset);
 static NOTLE_ATTR(fpga_revision, S_IRUGO, fpga_revision, NULL);
+static NOTLE_ATTR(list_testpatterns, S_IRUGO, list_testpatterns, NULL);
 static NOTLE_ATTR(enabled, S_IRUGO|S_IWUSR,
                   enabled_show, enabled_store);
-static NOTLE_ATTR(fpga_config, S_IRUGO|S_IWUSR,
-                  fpga_config_show, fpga_config_store);
+static NOTLE_ATTR(reg_addr, S_IRUGO|S_IWUSR,
+                  reg_addr_show, reg_addr_store);
+static NOTLE_ATTR(reg_value, S_IRUGO|S_IWUSR,
+                  reg_value_show, reg_value_store);
+static NOTLE_ATTR(actel_fpga_config, S_IRUGO|S_IWUSR,
+                  actel_fpga_config_show, actel_fpga_config_store);
 static NOTLE_ATTR(testpattern, S_IRUGO|S_IWUSR,
                   testpattern_show, testpattern_store);
 static NOTLE_ATTR(testmono, S_IRUGO|S_IWUSR,
                   testmono_show, testmono_store);
+static NOTLE_ATTR(forcer, S_IRUGO|S_IWUSR,
+                  forcer_show, forcer_store);
+static NOTLE_ATTR(forceg, S_IRUGO|S_IWUSR,
+                  forceg_show, forceg_store);
+static NOTLE_ATTR(forceb, S_IRUGO|S_IWUSR,
+                  forceb_show, forceb_store);
 static NOTLE_ATTR(mono, S_IRUGO|S_IWUSR,
                   mono_show, mono_store);
 static NOTLE_ATTR(brightness, S_IRUGO|S_IWUSR,
@@ -449,10 +876,16 @@ static NOTLE_ATTR(brightness, S_IRUGO|S_IWUSR,
 static struct attribute *panel_notle_sysfs_attrs[] = {
         &panel_notle_attr_reset.attr,
         &panel_notle_attr_fpga_revision.attr,
+        &panel_notle_attr_list_testpatterns.attr,
         &panel_notle_attr_enabled.attr,
-        &panel_notle_attr_fpga_config.attr,
+        &panel_notle_attr_reg_addr.attr,
+        &panel_notle_attr_reg_value.attr,
+        &panel_notle_attr_actel_fpga_config.attr,
         &panel_notle_attr_testpattern.attr,
         &panel_notle_attr_testmono.attr,
+        &panel_notle_attr_forcer.attr,
+        &panel_notle_attr_forceg.attr,
+        &panel_notle_attr_forceb.attr,
         &panel_notle_attr_mono.attr,
         &panel_notle_attr_brightness.attr,
         NULL,
@@ -497,11 +930,35 @@ static struct kobj_type panel_notle_ktype = {
 };
 
 /* Utility functions */
-static void led_config_to_fpga_config(struct omap_dss_device *dssdev,
-                                      struct led_config *led,
-                                      struct fpga_config *fpga) {
+static void led_config_to_linecuts(struct omap_dss_device *dssdev,
+                                   struct led_config *led, int *red_linecut,
+                                   int *green_linecut, int *blue_linecut) {
+        int total_lines = dssdev->panel.timings.y_res +
+            dssdev->panel.timings.vfp +
+            dssdev->panel.timings.vsw +
+            dssdev->panel.timings.vbp;
         struct panel_notle_data *panel_data = get_panel_data(dssdev);
-        /* TODO(madsci): Move these to be configurable or in a better place. */
+
+        *red_linecut   = (total_lines *
+                          (10000 - (
+                           (3 * led->red_percent * led->brightness * panel_data->limit_mw) /
+                           (panel_data->red_max_mw * MAX_BRIGHTNESS)))) /
+                         10000;
+        *green_linecut = (total_lines *
+                          (10000 - (
+                           (3 * led->green_percent * led->brightness * panel_data->limit_mw) /
+                           (panel_data->green_max_mw * MAX_BRIGHTNESS)))) /
+                         10000;
+        *blue_linecut  = (total_lines *
+                          (10000 - (
+                           (3 * led->blue_percent * led->brightness * panel_data->limit_mw) /
+                           (panel_data->blue_max_mw * MAX_BRIGHTNESS)))) /
+                         10000;
+        return;
+}
+
+static void led_config_to_fpga_config(struct led_config *led,
+                                      struct actel_fpga_config *fpga) {
         int total_lines;
         int red_max_mw;    /* LED power when full on */
         int green_max_mw;
@@ -512,27 +969,23 @@ static void led_config_to_fpga_config(struct omap_dss_device *dssdev,
          * See arch/arm/mach-omap2/board-notle.c for the
          * enum with these values.
          */
-        switch (panel_data->notle_version) {
-          case 4:  /* Fly */
+        switch (version) {
+          case V4_FLY:
             red_max_mw = 41;
             green_max_mw = 62;
             blue_max_mw = 62;
             limit_mw = 40;
             break;
-          case 5:  /* Gnu */
+          case V5_GNU:
             red_max_mw = 63;
             green_max_mw = 96;
             blue_max_mw = 96;
             limit_mw = 60;
             break;
           default:  /* Some reasonable defaults */
-            red_max_mw = 40;
-            green_max_mw = 60;
-            blue_max_mw = 60;
-            limit_mw = 40;
-            printk(KERN_ERR LOG_TAG "Unrecognized notle_version: %d\n",
-                   panel_data->notle_version);
-            break;
+            printk(KERN_ERR LOG_TAG "Unsupported notle_version in "
+                   "led_config_to_fpga_config: %d\n", version);
+            return;
         };
 
         switch (fpga->revision & 0xF0) {
@@ -566,9 +1019,9 @@ static void led_config_to_fpga_config(struct omap_dss_device *dssdev,
 
         /* 0 is a special case for disabling the backlight LED */
         if (led->brightness == 0) {
-          fpga->config &= ~FPGA_CONFIG_LED_EN;
+          fpga->config &= ~ACTEL_FPGA_CONFIG_LED_EN;
         } else {
-          fpga->config |= FPGA_CONFIG_LED_EN;
+          fpga->config |= ACTEL_FPGA_CONFIG_LED_EN;
         }
 
         return;
@@ -579,7 +1032,7 @@ static int panel_write_register(u8 reg, u8 value) {
         int r;
         struct i2c_msg msgs[1];
 
-        if (!i2c_data || !i2c_data->panel_client) {
+        if (!bus_data.panel_client) {
                 printk(KERN_ERR LOG_TAG "No I2C data set in panel_write_register\n");
                 return -1;
         }
@@ -587,35 +1040,145 @@ static int panel_write_register(u8 reg, u8 value) {
         buf[0] = reg;
         buf[1] = value;
 
-        msgs[0].addr = i2c_data->panel_client->addr;
+        msgs[0].addr = bus_data.panel_client->addr;
         msgs[0].flags = 0;
         msgs[0].len = sizeof(buf);
         msgs[0].buf = buf;
 
-        r = i2c_transfer(i2c_data->panel_client->adapter, msgs, 1);
+        r = i2c_transfer(bus_data.panel_client->adapter, msgs, 1);
         if (r < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to write 0x%02x to panel "
+                       "register 0x%02x: %i\n", value, reg, r);
                 return r;
         }
 
         return 0;
 }
 
-static int fpga_read_config(struct fpga_config *config) {
+static int ice40_read_register(u8 reg_addr) {
+  int val;
+
+  if (!bus_data.ice40_device) {
+    printk(KERN_ERR LOG_TAG "No iCE40 bus data set in ice40_read_register()\n");
+    return -1;
+  }
+  val = spi_w8r8(bus_data.ice40_device, (reg_addr & 0x7f));
+  return val;
+}
+
+static int ice40_write_register(u8 reg_addr, u8 reg_value) {
+  u8 buf[] = {reg_addr | 0x80, reg_value};
+
+  if (!bus_data.ice40_device) {
+    printk(KERN_ERR LOG_TAG "No iCE40 bus data set in ice40_read_register()\n");
+    return -1;
+  }
+  return spi_write(bus_data.ice40_device, buf, sizeof(buf));
+}
+
+static void ice40_dump_regs(void) {
+  int i, val;
+
+  printk(KERN_INFO LOG_TAG "*** iCE40 Register Dump ***\n");
+
+  for (i = 0; i < sizeof(ice40_regs); ++i) {
+    val = ice40_read_register(ice40_regs[i]);
+    if (val < 0) {
+      printk(KERN_INFO LOG_TAG "  0x%02x: FAILED\n", ice40_regs[i]);
+    } else {
+      printk(KERN_INFO LOG_TAG "  0x%02x: 0x%02x\n",
+             ice40_regs[i], (u8)(val & 0xff));
+    }
+  }
+
+  return;
+}
+
+/*
+ * Set backlight parameters.  Pass -1 to any argument to ignore that value and
+ * not set it in the relevant register.
+ */
+static int ice40_set_backlight(int led_en, int r, int g, int b) {
+  int val;
+  int ret = 0;
+
+  ice40_read_register(ICE40_BACKLIGHT);
+
+  if (r > -1) {
+    ret |= ice40_write_register(ICE40_LED_RED_H, (r & 0xff00) >> 8);
+    ret |= ice40_write_register(ICE40_LED_RED_L, (r & 0xff));
+  }
+  if (g > -1) {
+    ret |= ice40_write_register(ICE40_LED_GREEN_H, (g & 0xff00) >> 8);
+    ret |= ice40_write_register(ICE40_LED_GREEN_L, (g & 0xff));
+  }
+  if (b > -1) {
+    ret |= ice40_write_register(ICE40_LED_BLUE_H, (b & 0xff00) >> 8);
+    ret |= ice40_write_register(ICE40_LED_BLUE_L, (b & 0xff));
+  }
+
+  if (led_en > -1) {
+    val = ice40_read_register(ICE40_BACKLIGHT);
+    if (val < 0) {
+      ret |= val;
+    } else if (led_en) {
+      val |= ICE40_BACKLIGHT_LEDEN;
+    } else {
+      val &= ~ICE40_BACKLIGHT_LEDEN;
+    }
+    ret |= ice40_write_register(ICE40_BACKLIGHT, val);
+  }
+
+  return ret;
+}
+
+static int fpga_read_revision(void) {
+      struct actel_fpga_config actel_config;
+      int r, rev = -1;
+
+      switch (version) {
+        case V4_FLY:
+        case V5_GNU:
+                if ((r = actel_fpga_read_config(&actel_config)) < 0) {
+                        printk(KERN_ERR LOG_TAG "Failed to read actel FPGA config: %i\n", r);
+                        break;
+                }
+                rev = actel_config.revision;
+                break;
+        case V6_HOG:
+                if ((r = ice40_read_register(ICE40_REVISION)) < 0) {
+                        printk(KERN_ERR LOG_TAG "Failed to read iCE40 FPGA config: %i\n", r);
+                        break;
+                }
+                rev = r;
+
+                break;
+        case V1_DOG:
+        case V3_EMU:
+                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
+                       version);
+                break;
+        }
+
+        return rev;
+}
+
+static int actel_fpga_read_config(struct actel_fpga_config *config) {
         int r;
         u8 buf[5];
         struct i2c_msg msgs[1];
 
-        if (!i2c_data || !i2c_data->fpga_client) {
-                printk(KERN_ERR LOG_TAG "No I2C data set in fpga_read_config\n");
+        if (!bus_data.actel_fpga_client) {
+                printk(KERN_ERR LOG_TAG "No I2C data set in actel_fpga_read_config()\n");
                 return -1;
         }
 
-        msgs[0].addr = i2c_data->fpga_client->addr;
+        msgs[0].addr = bus_data.actel_fpga_client->addr;
         msgs[0].flags = I2C_M_RD;
         msgs[0].len = sizeof(buf);
         msgs[0].buf = buf;
 
-        r = i2c_transfer(i2c_data->fpga_client->adapter, msgs, 1);
+        r = i2c_transfer(bus_data.actel_fpga_client->adapter, msgs, 1);
         if (r < 0) {
                 printk(KERN_ERR LOG_TAG "Failed to read FPGA config: i2c read failed\n");
                 return r;
@@ -626,13 +1189,10 @@ static int fpga_read_config(struct fpga_config *config) {
         config->blue     = (u16)buf[3] << 1;
         config->revision = buf[4];
 
-        /* Cache the revision so we can print it even if the display is off */
-        fpga_rev = config->revision;
-
         return 0;
 };
 
-static int fpga_write_config(struct fpga_config *config) {
+static int actel_fpga_write_config(struct actel_fpga_config *config) {
         int r;
         struct i2c_msg msgs[1];
         u8 buf[4] = {
@@ -641,17 +1201,17 @@ static int fpga_write_config(struct fpga_config *config) {
           (u8)(config->green >> 1),
           (u8)(config->blue >> 1)};
 
-        if (!i2c_data || !i2c_data->fpga_client) {
-                printk(KERN_ERR LOG_TAG "No I2C data set in fpga_write_config\n");
+        if (!bus_data.actel_fpga_client) {
+                printk(KERN_ERR LOG_TAG "No I2C data set in actel_fpga_write_config\n");
                 return -1;
         }
 
-        msgs[0].addr = i2c_data->fpga_client->addr;
+        msgs[0].addr = bus_data.actel_fpga_client->addr;
         msgs[0].flags = 0;
         msgs[0].len = sizeof(buf);
         msgs[0].buf = buf;
 
-        r = i2c_transfer(i2c_data->fpga_client->adapter, msgs, 1);
+        r = i2c_transfer(bus_data.actel_fpga_client->adapter, msgs, 1);
         if (r < 0) {
                 printk(KERN_ERR LOG_TAG "Failed to write FPGA config: i2c write failed\n");
                 return r;
@@ -662,7 +1222,7 @@ static int fpga_write_config(struct fpga_config *config) {
 
 /* Functions to perform actions on the panel and DSS driver */
 static int panel_notle_power_on(struct omap_dss_device *dssdev) {
-        int i, r;
+        int i, r, g, b;
         struct panel_notle_data *panel_data = get_panel_data(dssdev);
         struct notle_drv_data *drv_data = dev_get_drvdata(&dssdev->dev);
         struct panel_config *panel_config = drv_data->panel_config;
@@ -704,37 +1264,50 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
             continue;
           }
 
-          if (panel_write_register(panel_init_regs[i].reg,
-                                   panel_init_regs[i].value)) {
-            printk(KERN_ERR LOG_TAG "Failed to write panel config\n");
-            goto err2;
+          r = panel_write_register(panel_init_regs[i].reg,
+                                   panel_init_regs[i].value);
+          if (r) {
+            printk(KERN_ERR LOG_TAG "Failed to write panel config via i2c: "
+                   "%d\n", r);
+            goto err1;
           }
         }
 
         /* Enable LED backlight if we have nonzero brightness */
         if (led_config.brightness > 0) {
-          /*
-           * We need to read the fpga config first to get the revision,
-           * as it is required to do the led_config -> fpga_config
-           * conversion.
-           */
-          if (fpga_read_config(&fpga_config)) {
-            printk(KERN_ERR LOG_TAG "Failed to read FPGA revision, not "
-                                    "enabling backlight\n");
-          } else {
-            led_config_to_fpga_config(dssdev, &led_config, &fpga_config);
-            fpga_config.config |= FPGA_CONFIG_LED_EN;
-            if (fpga_write_config(&fpga_config)) {
-              printk(KERN_ERR LOG_TAG "Failed to enable FPGA LED_EN\n");
-            }
+          switch (version) {
+            case V4_FLY:
+            case V5_GNU:
+                  /*
+                   * We need to read the fpga config first to get the revision,
+                   * as it is required to do the led_config -> actel_fpga_config
+                   * conversion.
+                   */
+                  if (fpga_read_revision() < 0) {
+                    printk(KERN_ERR LOG_TAG "Failed to read FPGA revision, not "
+                                            "enabling backlight\n");
+                  } else {
+                    led_config_to_fpga_config(&led_config, &actel_fpga_config);
+                    actel_fpga_config.config |= ACTEL_FPGA_CONFIG_LED_EN;
+                    if (actel_fpga_write_config(&actel_fpga_config)) {
+                      printk(KERN_ERR LOG_TAG "Failed to enable FPGA LED_EN\n");
+                    }
+                  }
+                  break;
+            case V6_HOG:
+                  led_config_to_linecuts(dssdev, &led_config, &r, &g, &b);
+                  ice40_set_backlight(1, r, g, b);
+                  break;
+            default:
+                  printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
+                         version);
+                  break;
           }
-        } else if (fpga_read_config(&fpga_config)) {
+        } else if ((version != V6_HOG) && (fpga_read_revision() < 0)) {
             printk(KERN_ERR LOG_TAG "Failed to read FPGA revision\n");
         }
 
         drv_data->enabled = 1;
-        return 0;
-err2:
         return 0;
 err1:
         omapdss_dpi_display_disable(dssdev);
@@ -755,9 +1328,23 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
         printk(KERN_INFO LOG_TAG "Powering off\n");
 
         /* Disable LED backlight */
-        fpga_config.config &= ~FPGA_CONFIG_LED_EN;
-        if (fpga_write_config(&fpga_config)) {
-          printk(KERN_ERR LOG_TAG "Failed to disable FPGA LED_EN\n");
+        switch (version) {
+          case V4_FLY:
+          case V5_GNU:
+            actel_fpga_config.config &= ~ACTEL_FPGA_CONFIG_LED_EN;
+            if (actel_fpga_write_config(&actel_fpga_config)) {
+              printk(KERN_ERR LOG_TAG "Failed to disable actel FPGA LED_EN\n");
+            }
+            break;
+          case V6_HOG:
+            /* Don't change the color mix, just disable the backlight. */
+            if (ice40_set_backlight(0, -1, -1, -1)) {
+              printk(KERN_ERR LOG_TAG "Failed to disable iCE40 FPGA LED_EN\n");
+            }
+            break;
+          default:
+            printk(KERN_ERR LOG_TAG "Unrecognized Notle version: %d\n", version);
+            break;
         }
 
         for (i = 0; i < ARRAY_SIZE(panel_shutdown_regs); ++i) {
@@ -793,9 +1380,12 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
 static int panel_notle_probe(struct omap_dss_device *dssdev) {
         int r;
         struct panel_config *panel_config = &notle_config;
+        struct panel_notle_data *panel_data = get_panel_data(dssdev);
         struct notle_drv_data *drv_data = NULL;
 
         dev_dbg(&dssdev->dev, "probe\n");
+
+        version = panel_data->notle_version;
 
         dssdev->panel.config = panel_config->config;
         dssdev->panel.timings = panel_config->timings;
@@ -908,25 +1498,15 @@ static struct omap_dss_driver dpi_driver = {
 
 /* Functions to handle initialization of the i2c driver */
 static int __devinit i2c_probe(struct i2c_client *client,
-                               const struct i2c_device_id *id)
-{
-        if (i2c_data == NULL) {
-                i2c_data = kzalloc(sizeof(*i2c_data), GFP_KERNEL);
-                if (i2c_data == NULL) {
-                        return -ENOMEM;
-                }
-        }
-
-        i2c_set_clientdata(client, i2c_data);
-
+                               const struct i2c_device_id *id) {
         switch (id->driver_data) {
           case NOTLE_I2C_FPGA:
             /* panel-notle-fpga */
-            i2c_data->fpga_client = client;
+            bus_data.actel_fpga_client = client;
             break;
           case NOTLE_I2C_PANEL:
             /* panel-notle-panel */
-            i2c_data->panel_client = client;
+            bus_data.panel_client = client;
             break;
           default:
             printk(KERN_WARNING LOG_TAG "Unrecognized i2c device\n");
@@ -936,15 +1516,7 @@ static int __devinit i2c_probe(struct i2c_client *client,
         return 0;
 }
 
-static int __devexit i2c_remove(struct i2c_client *client)
-{
-        struct panel_notle_i2c *drv_data = i2c_get_clientdata(client);
-
-        i2c_set_clientdata(client, NULL);
-
-        i2c_data = NULL;
-        kfree(drv_data);
-
+static int __devexit i2c_remove(struct i2c_client *client) {
         return 0;
 }
 
@@ -965,6 +1537,47 @@ static struct i2c_driver i2c_driver = {
         },
 };
 
+/* SPI Interface for iCE40 FPGA based systems */
+static const struct spi_device_id spi_idtable[] = {
+        {"ice40-spi", 0},
+        {},
+};
+
+static int ice40_spi_probe(struct spi_device *spi) {
+        spi->mode = SPI_MODE_3;
+        spi->bits_per_word = 8;
+        spi_setup(spi);
+
+        bus_data.ice40_device = spi;
+        return 0;
+}
+
+static int ice40_spi_remove(struct spi_device *spi) {
+        return 0;
+}
+
+static int ice40_spi_suspend(struct spi_device *spi, pm_message_t mesg) {
+        return 0;
+}
+
+static int ice40_spi_resume(struct spi_device *spi) {
+        spi_setup(spi);
+        return 0;
+}
+
+static struct spi_driver spi_driver = {
+        .id_table             = spi_idtable,
+        .probe                = ice40_spi_probe,
+        .remove               = __devexit_p(ice40_spi_remove),
+        .suspend              = ice40_spi_suspend,
+        .resume               = ice40_spi_resume,
+        .driver               = {
+                .name             = "ice40-spi",
+                .bus              = &spi_bus_type,
+                .owner            = THIS_MODULE,
+        },
+};
+
 static int __init panel_notle_drv_init(void) {
         int r = 0;
         r = i2c_add_driver(&i2c_driver);
@@ -973,14 +1586,22 @@ static int __init panel_notle_drv_init(void) {
                 goto err0;
         }
 
+        r = spi_register_driver(&spi_driver);
+        if (r < 0) {
+                printk(KERN_WARNING LOG_TAG "SPI driver registration failed\n");
+                goto err1;
+        }
+
         r = omap_dss_register_driver(&dpi_driver);
         if (r < 0) {
                 printk(KERN_WARNING LOG_TAG "DSS driver registration failed\n");
-                goto err1;
+                goto err2;
         }
 
         return 0;
 
+err2:
+        spi_unregister_driver(&spi_driver);
 err1:
         i2c_del_driver(&i2c_driver);
 err0:
@@ -990,6 +1611,7 @@ err0:
 static void __exit panel_notle_drv_exit(void) {
         omap_dss_unregister_driver(&dpi_driver);
         i2c_del_driver(&i2c_driver);
+        spi_unregister_driver(&spi_driver);
 }
 
 module_init(panel_notle_drv_init);

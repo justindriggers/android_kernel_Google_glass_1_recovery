@@ -36,6 +36,8 @@
 #include <linux/pwm.h>
 #include <linux/pwm_backlight.h>
 #include <linux/reboot.h>
+#include <linux/spi/spi.h>
+#include <plat/mcspi.h>
 
 #include <linux/i2c/l3g4200d.h>
 #include <linux/i2c/lsm303dlhc.h>
@@ -334,6 +336,10 @@ static struct panel_notle_data panel_notle = {
         .platform_disable         = notle_disable_dpi,
         .panel_enable             = notle_enable_panel,
         .panel_disable            = notle_disable_panel,
+        .red_max_mw               = 63,
+        .green_max_mw             = 192,
+        .blue_max_mw              = 96,
+        .limit_mw                 = 80,
 };
 
 struct omap_dss_device panel_generic_dpi_device = {
@@ -394,6 +400,21 @@ static struct omap_dss_device notle_dsi_device = {
         .panel                  = {
         },
         .channel                = OMAP_DSS_CHANNEL_LCD,
+};
+
+static struct omap2_mcspi_device_config ice40_mcspi_config = {
+        .turbo_mode                = 0,
+        .single_channel            = 1,  /* 0: slave, 1: master */
+};
+
+static struct spi_board_info ice40_spi_board_info[] __initdata = {
+        [0] = {
+                .modalias                = "ice40-spi",
+                .bus_num                 = 1,
+                .chip_select             = 0,
+                .max_speed_hz            = 48000000,
+                .controller_data         = &ice40_mcspi_config,
+        },
 };
 
 static int __devinit himax_probe(struct i2c_client *client,
@@ -501,6 +522,11 @@ int __init notle_dpi_init(void)
             if (r) {
                     pr_err("Failed to get DVI powerdown GPIO\n");
                     goto err1;
+            }
+
+            if (NOTLE_VERSION == V6_HOG) {
+              spi_register_board_info(ice40_spi_board_info,
+                                      ARRAY_SIZE(ice40_spi_board_info));
             }
             break;
           default:
@@ -1782,6 +1808,35 @@ static struct i2c_board_info __initdata notle_fly_i2c_4_boardinfo[] = {
         },
 };
 
+static struct i2c_board_info __initdata notle_hog_i2c_4_boardinfo[] = {
+        {
+                I2C_BOARD_INFO("panel-notle-panel", 0x49),
+        },
+        {
+                I2C_BOARD_INFO("mpu6050", 0x68),
+                .irq = OMAP_GPIO_IRQ(GPIO_MPU9000_INT),
+                .platform_data = &mpu9150_data,
+        },
+        {
+                I2C_BOARD_INFO("ak8975", 0xC),
+                .irq = OMAP_GPIO_IRQ(GPIO_MPU9000_INT),
+                .platform_data = &ak8975_compass_data,
+        },
+#ifdef CONFIG_INPUT_LTR506ALS
+        {
+                I2C_BOARD_INFO("ltr506als", 0x3a),
+                .flags = I2C_CLIENT_WAKE,
+                .irq = OMAP_GPIO_IRQ(GPIO_PROX_INT),
+                .platform_data = &notle_ltr506als_data,
+        },
+#endif
+        {
+                I2C_BOARD_INFO("ov9726", 0x10),
+                .flags = I2C_CLIENT_WAKE,
+        },
+};
+
+
 static int __init notle_i2c_init(void)
 {
         omap_i2c_hwspinlock_init(1, 0, &notle_i2c_1_bus_pdata);
@@ -1847,8 +1902,8 @@ static int __init notle_i2c_init(void)
             omap_register_i2c_bus(2, 400, NULL, 0);
             omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
                             ARRAY_SIZE(notle_i2c_3_boardinfo));
-            omap_register_i2c_bus(4, 400, notle_fly_i2c_4_boardinfo,
-                            ARRAY_SIZE(notle_fly_i2c_4_boardinfo));
+            omap_register_i2c_bus(4, 400, notle_hog_i2c_4_boardinfo,
+                            ARRAY_SIZE(notle_hog_i2c_4_boardinfo));
             break;
           default:
             pr_err("Unrecognized Notle version: %i\n", NOTLE_VERSION);

@@ -12,10 +12,9 @@ config PANEL_GENERIC_DPI
 
 config PANEL_NOTLE_DPI
 	tristate "Notle DPI Panel"
-	depends on OMAP2_DSS_DPI
+	depends on OMAP2_DSS_DPI && SPI
 	help
 	  Notle DPI panel driver for FPGA and Panel on Notle boards.
-
 
 config PANEL_LGPHILIPS_LB035Q02
 	tristate "LG.Philips LB035Q02 LCD Panel"
