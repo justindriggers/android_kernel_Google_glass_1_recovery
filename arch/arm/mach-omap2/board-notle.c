@@ -1515,8 +1515,8 @@ static struct mpu_platform_data mpu9150_data = {
 static struct mpu_platform_data mpu9150_hog_data = {
         .int_config     = 0x10,
         .orientation    = { 0, 1, 0,
-                            1, 0, 0,
-                            0, 0, -1 },
+                            0, 0, 1,
+                            1, 0, 0 },
         .level_shifter  = 1,
         /*
         .accel          = {
