@@ -958,6 +958,21 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
                            (3 * led->blue_percent * led->brightness * panel_data->limit_mw) /
                            (panel_data->blue_max_mw * MAX_BRIGHTNESS)))) /
                          10000;
+
+        /*
+         * This will cause a slight color shift at very dim brightness values,
+         * but the altnerative is to cause a sudden color shift by dropping
+         * the lowest LED entirely.  This is a side effect of the way the fpga
+         * is implemented - there's no way to dim a color channel less than a
+         * single line.
+         */
+        if (*red_linecut > dssdev->panel.timings.y_res - 2)
+          *red_linecut = dssdev->panel.timings.y_res - 2;
+        if (*green_linecut > dssdev->panel.timings.y_res - 2)
+          *green_linecut = dssdev->panel.timings.y_res - 2;
+        if (*blue_linecut > dssdev->panel.timings.y_res - 2)
+          *blue_linecut = dssdev->panel.timings.y_res - 2;
+
         return;
 }
 
