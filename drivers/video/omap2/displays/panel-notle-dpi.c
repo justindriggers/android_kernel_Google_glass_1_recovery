@@ -717,6 +717,60 @@ static ssize_t forceb_store(struct notle_drv_data *notle_data,
 
         return size;
 }
+static ssize_t cpsel_show(struct notle_drv_data *notle_data, char *buf) {
+        int val;
+
+        if (version != V6_HOG) {
+                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
+                       version);
+                return -EINVAL;
+        }
+
+        val = ice40_read_register(ICE40_BACKLIGHT);
+        if (val < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to cpsel_store: "
+                       "spi read failed: %i\n", val);
+                return -EIO;
+        }
+        return snprintf(buf, PAGE_SIZE, "%d\n",
+                !!(val & ICE40_BACKLIGHT_CPSEL));
+}
+static ssize_t cpsel_store(struct notle_drv_data *notle_data,
+                                 const char *buf, size_t size) {
+        int r, val;
+
+        if (version != V6_HOG) {
+                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
+                       version);
+                return -EINVAL;
+        }
+
+        r = kstrtoint(buf, 0, &val);
+        if (r)
+                return r;
+
+        r = ice40_read_register(ICE40_BACKLIGHT);
+        if (r < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to cpsel_store: "
+                       "spi read failed: %i\n", r);
+                return -EIO;
+        }
+
+        if (val) {
+                r |= ICE40_BACKLIGHT_CPSEL;
+        } else {
+                r &= ~ICE40_BACKLIGHT_CPSEL;
+        }
+
+        r = ice40_write_register(ICE40_BACKLIGHT, r);
+        if (r < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to cpsel_store: "
+                       "spi write failed: %i\n", r);
+                return -EIO;
+        }
+
+        return size;
+}
 static ssize_t mono_show(struct notle_drv_data *notle_data, char *buf) {
         int val;
 
@@ -872,6 +926,8 @@ static NOTLE_ATTR(forceg, S_IRUGO|S_IWUSR,
                   forceg_show, forceg_store);
 static NOTLE_ATTR(forceb, S_IRUGO|S_IWUSR,
                   forceb_show, forceb_store);
+static NOTLE_ATTR(cpsel, S_IRUGO|S_IWUSR,
+                  cpsel_show, cpsel_store);
 static NOTLE_ATTR(mono, S_IRUGO|S_IWUSR,
                   mono_show, mono_store);
 static NOTLE_ATTR(brightness, S_IRUGO|S_IWUSR,
@@ -890,6 +946,7 @@ static struct attribute *panel_notle_sysfs_attrs[] = {
         &panel_notle_attr_forcer.attr,
         &panel_notle_attr_forceg.attr,
         &panel_notle_attr_forceb.attr,
+        &panel_notle_attr_cpsel.attr,
         &panel_notle_attr_mono.attr,
         &panel_notle_attr_brightness.attr,
         NULL,
@@ -1290,6 +1347,15 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
                    "%d\n", r);
             goto err1;
           }
+        }
+
+        /* Load defaults */
+        switch (version) {
+          case V6_HOG:
+            ice40_write_register(ICE40_BACKLIGHT, ICE40_BACKLIGHT_CPSEL);
+            break;
+          default:
+            break;
         }
 
         /* Enable LED backlight if we have nonzero brightness */
