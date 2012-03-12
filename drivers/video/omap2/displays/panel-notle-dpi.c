@@ -252,14 +252,18 @@ typedef enum {
         TESTPATTERN_COLORBARS,
         TESTPATTERN_ALIGNMENT,
         TESTPATTERN_CALIBRATION,
+        TESTPATTERN_ALL_OFF,
+        TESTPATTERN_ALL_ON,
 } testpattern;
 static const char* const testpattern_names[] = {
         "none",
         "coarse_checkerboard",
         "fine_checkerboard",
-        "colorbars",
+        "color_bars",
         "alignment",
         "calibration",
+        "all_px_off",
+        "all_px_on",
 };
 
 struct notle_drv_data {
