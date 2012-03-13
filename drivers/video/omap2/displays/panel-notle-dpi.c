@@ -317,7 +317,7 @@ static ssize_t fpga_revision(struct notle_drv_data *notle_data, char *buf) {
 
         ice40_dump_regs();
 
-        if (rev < 0) {
+        if (rev <= 0) {
           printk(KERN_ERR LOG_TAG "Failed to read FPGA revision\n");
         } else {
           /*
@@ -327,7 +327,7 @@ static ssize_t fpga_revision(struct notle_drv_data *notle_data, char *buf) {
            fpga_rev = rev;
         }
 
-        if (fpga_rev < 0) {
+        if (fpga_rev <= 0) {
           printk(KERN_ERR LOG_TAG "No cached FPGA revision\n");
           return -EIO;
         }
@@ -1388,7 +1388,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
                          version);
                   break;
           }
-        } else if ((version != V6_HOG) && (fpga_read_revision() < 0)) {
+        } else if (fpga_read_revision() <= 0) {
             printk(KERN_ERR LOG_TAG "Failed to read FPGA revision\n");
         }
 
