@@ -2243,6 +2243,9 @@ static void __init my_mux_init(void) {
 
 #define TWL6030_PHOENIX_DEV_ON_REGISTER (0x25)
 #define TWL6030_SW_RESET_BIT_MASK       (0x40)
+#define APP_DEVOFF	(1<<0)
+#define CON_DEVOFF	(1<<1)
+#define MOD_DEVOFF	(1<<2)
 
 static int notle_notifier_call(struct notifier_block *this,
                                unsigned long code, void *cmd)
@@ -2255,30 +2258,40 @@ static int notle_notifier_call(struct notifier_block *this,
         if (!sar_base)
                 return notifier_from_errno(-ENOMEM);
 
-        if ((code == SYS_RESTART) && (cmd != NULL)) {
-                /* cmd != null; case: warm boot */
-                if (!strcmp(cmd, "bootloader")) {
-                        /* Save reboot mode in scratch memory */
-                        strcpy(sar_base + 0xA0C, cmd);
-                        v |= OMAP4430_RST_GLOBAL_WARM_SW_MASK;
-                } else if (!strcmp(cmd, "recovery")) {
-                        /* Save reboot mode in scratch memory */
-                        strcpy(sar_base + 0xA0C, cmd);
-                        v |= OMAP4430_RST_GLOBAL_WARM_SW_MASK;
-                } else {
-                        v |= OMAP4430_RST_GLOBAL_COLD_SW_MASK;
-                }
+        /* power off */
+        if ((code == SYS_HALT) || (code == SYS_POWER_OFF)) {
+            twl_i2c_write_u8(TWL6030_MODULE_ID0,
+                    APP_DEVOFF | CON_DEVOFF | MOD_DEVOFF,
+                    TWL6030_PHOENIX_DEV_ON_REGISTER);
         }
 
-        if (v == OMAP4430_RST_GLOBAL_COLD_SW_MASK) {
+        else {
+            if ((code == SYS_RESTART) && (cmd != NULL)) {
+                /* cmd != null; case: warm boot */
+                if (!strcmp(cmd, "bootloader")) {
+                    /* Save reboot mode in scratch memory */
+                    strcpy(sar_base + 0xA0C, cmd);
+                    v |= OMAP4430_RST_GLOBAL_WARM_SW_MASK;
+                } else if (!strcmp(cmd, "recovery")) {
+                    /* Save reboot mode in scratch memory */
+                    strcpy(sar_base + 0xA0C, cmd);
+                    v |= OMAP4430_RST_GLOBAL_WARM_SW_MASK;
+                } else {
+                    v |= OMAP4430_RST_GLOBAL_COLD_SW_MASK;
+                }
+            }
+
+            if (v == OMAP4430_RST_GLOBAL_COLD_SW_MASK) {
 
                 /* Here we are certain we have no commands              */
                 /* that need to be passed to the bootloader.            */
                 /* Request a full power down / power up cycle from pmic */
 
+                /* TODO: TWL_MODULE_RTC seems wrong here */
                 twl_i2c_write_u8(TWL_MODULE_RTC,
-                                 TWL6030_SW_RESET_BIT_MASK,
-                                 TWL6030_PHOENIX_DEV_ON_REGISTER);
+                        TWL6030_SW_RESET_BIT_MASK,
+                        TWL6030_PHOENIX_DEV_ON_REGISTER);
+            }
         }
 
         /* if for some reason communication to pmic failed, */
