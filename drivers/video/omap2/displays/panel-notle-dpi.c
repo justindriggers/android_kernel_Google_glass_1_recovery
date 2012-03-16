@@ -1023,12 +1023,12 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
          * is implemented - there's no way to dim a color channel less than a
          * single line.
          */
-        if (*red_linecut > dssdev->panel.timings.y_res - 2)
-          *red_linecut = dssdev->panel.timings.y_res - 2;
-        if (*green_linecut > dssdev->panel.timings.y_res - 2)
-          *green_linecut = dssdev->panel.timings.y_res - 2;
-        if (*blue_linecut > dssdev->panel.timings.y_res - 2)
-          *blue_linecut = dssdev->panel.timings.y_res - 2;
+        if (*red_linecut > dssdev->panel.timings.y_res - 3)
+          *red_linecut = dssdev->panel.timings.y_res - 3;
+        if (*green_linecut > dssdev->panel.timings.y_res - 3)
+          *green_linecut = dssdev->panel.timings.y_res - 3;
+        if (*blue_linecut > dssdev->panel.timings.y_res - 3)
+          *blue_linecut = dssdev->panel.timings.y_res - 3;
 
         return;
 }
