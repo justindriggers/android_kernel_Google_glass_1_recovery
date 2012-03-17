@@ -350,6 +350,7 @@ struct omap_dss_device panel_generic_dpi_device = {
         .phy.dpi.data_lines       = 24,
         .reset_gpio               = GPIO_LCD_RESET_N,
         .channel                  = OMAP_DSS_CHANNEL_LCD2,
+        .vsync_gpio               = -1,
 };
 
 struct omap_dss_device panel_notle_device = {
@@ -401,6 +402,7 @@ static struct omap_dss_device notle_dsi_device = {
         .panel                  = {
         },
         .channel                = OMAP_DSS_CHANNEL_LCD,
+        .vsync_gpio               = -1,
 };
 
 static struct omap2_mcspi_device_config ice40_mcspi_config = {
