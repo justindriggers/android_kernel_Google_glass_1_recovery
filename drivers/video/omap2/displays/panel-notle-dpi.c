@@ -369,7 +369,7 @@ static ssize_t reg_addr_store(struct notle_drv_data *notle_data,
         int r, value;
         r = kstrtoint(buf, 0, &value);
         if (r)
-                return r;
+          return r;
 
         reg_addr = (u8)(value & 0xff);
 
@@ -384,9 +384,39 @@ static ssize_t reg_value_store(struct notle_drv_data *notle_data,
         int r, value;
         r = kstrtoint(buf, 0, &value);
         if (r)
-                return r;
+          return r;
 
         ice40_write_register(reg_addr, (u8)(value & 0xff));
+
+        return size;
+}
+static ssize_t colormix_show(struct notle_drv_data *notle_data, char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%u/%u/%u\n",
+                        led_config.red_percent,
+                        led_config.green_percent,
+                        led_config.blue_percent);
+
+}
+static ssize_t colormix_store(struct notle_drv_data *notle_data,
+                               const char *buf, size_t size) {
+        int red, green, blue, total;
+
+        if (sscanf(buf, "%u/%u/%u", &red, &green, &blue) != 3) {
+          printk(KERN_ERR LOG_TAG "Failed to colormix_store, malformed"
+                 " colormix: %s\n", buf);
+          return -EINVAL;
+        }
+
+        if (red > 10000 || green > 10000 || blue > 10000) {
+          printk(KERN_ERR LOG_TAG "Failed to colormix_store, maximum color"
+                 " value of 10000 exceeded: %s\n", buf);
+          return -EINVAL;
+        }
+
+        total = red + green + blue;
+        led_config.red_percent = (red * 10000) / total;
+        led_config.green_percent = (green * 10000) / total;
+        led_config.blue_percent = (blue * 10000) / total;
 
         return size;
 }
@@ -405,13 +435,15 @@ static ssize_t actel_fpga_config_store(struct notle_drv_data *notle_data,
         unsigned int red, green, blue;
 
         if (sscanf(buf, "0x%x/%u/%u/%u", &config, &red, &green, &blue) != 4) {
-          printk(KERN_ERR LOG_TAG "Failed to actel_fpga_config_store: malformed config: %s\n", buf);
+          printk(KERN_ERR LOG_TAG "Failed to actel_fpga_config_store:"
+                 " malformed config: %s\n", buf);
           return -EINVAL;
         }
 
         if (((config & ACTEL_FPGA_CONFIG_MASK) != config) ||
             (red > 511) || (green > 511) || (blue > 511)) {
-          printk(KERN_ERR LOG_TAG "Failed to actel_fpga_config_store: invalid config: %s\n", buf);
+          printk(KERN_ERR LOG_TAG "Failed to actel_fpga_config_store:"
+                 " invalid config: %s\n", buf);
           return -EINVAL;
         }
 
@@ -421,7 +453,8 @@ static ssize_t actel_fpga_config_store(struct notle_drv_data *notle_data,
         actel_fpga_config.blue   = (u16)blue;
 
         if (actel_fpga_write_config(&actel_fpga_config)) {
-          printk(KERN_ERR LOG_TAG "Failed to actel_fpga_config_store: i2c write failed\n");
+          printk(KERN_ERR LOG_TAG "Failed to actel_fpga_config_store:"
+                 "i2c write failed\n");
           return -EIO;
         }
 
@@ -914,6 +947,8 @@ static NOTLE_ATTR(reg_addr, S_IRUGO|S_IWUSR,
                   reg_addr_show, reg_addr_store);
 static NOTLE_ATTR(reg_value, S_IRUGO|S_IWUSR,
                   reg_value_show, reg_value_store);
+static NOTLE_ATTR(colormix, S_IRUGO|S_IWUSR,
+                  colormix_show, colormix_store);
 static NOTLE_ATTR(actel_fpga_config, S_IRUGO|S_IWUSR,
                   actel_fpga_config_show, actel_fpga_config_store);
 static NOTLE_ATTR(testpattern, S_IRUGO|S_IWUSR,
@@ -940,6 +975,7 @@ static struct attribute *panel_notle_sysfs_attrs[] = {
         &panel_notle_attr_enabled.attr,
         &panel_notle_attr_reg_addr.attr,
         &panel_notle_attr_reg_value.attr,
+        &panel_notle_attr_colormix.attr,
         &panel_notle_attr_actel_fpga_config.attr,
         &panel_notle_attr_testpattern.attr,
         &panel_notle_attr_testmono.attr,
@@ -1016,6 +1052,11 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
                            (panel_data->blue_max_mw * MAX_BRIGHTNESS)))) /
                          10000;
 
+        /* Disable any channels that are explicitly at zero percent */
+        if (!led->red_percent) *red_linecut = total_lines;
+        if (!led->green_percent) *green_linecut = total_lines;
+        if (!led->blue_percent) *blue_linecut = total_lines;
+
         /*
          * This will cause a slight color shift at very dim brightness values,
          * but the altnerative is to cause a sudden color shift by dropping
@@ -1029,6 +1070,15 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
           *green_linecut = dssdev->panel.timings.y_res - 3;
         if (*blue_linecut > dssdev->panel.timings.y_res - 3)
           *blue_linecut = dssdev->panel.timings.y_res - 3;
+
+        printk(LOG_TAG "XXX %u/%u/%u/%u -> %u/%u/%u\n",
+               led->brightness,
+               led->red_percent,
+               led->green_percent,
+               led->blue_percent,
+               *red_linecut,
+               *green_linecut,
+               *blue_linecut);
 
         return;
 }
