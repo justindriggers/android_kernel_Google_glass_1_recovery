@@ -1395,7 +1395,6 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
           if (r) {
             printk(KERN_ERR LOG_TAG "Failed to write panel config via i2c: "
                    "%d\n", r);
-            goto err1;
           }
         }
 
@@ -1408,25 +1407,19 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
             break;
         }
 
+        if (fpga_read_revision() <= 0) {
+            printk(KERN_ERR LOG_TAG "Failed to read FPGA revision\n");
+        }
+
         /* Enable LED backlight if we have nonzero brightness */
         if (led_config.brightness > 0) {
           switch (version) {
             case V4_FLY:
             case V5_GNU:
-                  /*
-                   * We need to read the fpga config first to get the revision,
-                   * as it is required to do the led_config -> actel_fpga_config
-                   * conversion.
-                   */
-                  if (fpga_read_revision() < 0) {
-                    printk(KERN_ERR LOG_TAG "Failed to read FPGA revision, not "
-                                            "enabling backlight\n");
-                  } else {
-                    led_config_to_fpga_config(&led_config, &actel_fpga_config);
-                    actel_fpga_config.config |= ACTEL_FPGA_CONFIG_LED_EN;
-                    if (actel_fpga_write_config(&actel_fpga_config)) {
-                      printk(KERN_ERR LOG_TAG "Failed to enable FPGA LED_EN\n");
-                    }
+                  led_config_to_fpga_config(&led_config, &actel_fpga_config);
+                  actel_fpga_config.config |= ACTEL_FPGA_CONFIG_LED_EN;
+                  if (actel_fpga_write_config(&actel_fpga_config)) {
+                    printk(KERN_ERR LOG_TAG "Failed to enable FPGA LED_EN\n");
                   }
                   break;
             case V6_HOG:
@@ -1438,8 +1431,6 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
                          version);
                   break;
           }
-        } else if (fpga_read_revision() <= 0) {
-            printk(KERN_ERR LOG_TAG "Failed to read FPGA revision\n");
         }
 
         drv_data->enabled = 1;
