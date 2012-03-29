@@ -315,8 +315,6 @@ static ssize_t sysfs_reset(struct notle_drv_data *notle_data,
 static ssize_t fpga_revision(struct notle_drv_data *notle_data, char *buf) {
         int rev = fpga_read_revision();
 
-        ice40_dump_regs();
-
         if (rev <= 0) {
           printk(KERN_ERR LOG_TAG "Failed to read FPGA revision\n");
         } else {
@@ -1306,6 +1304,8 @@ static int fpga_read_revision(void) {
                 rev = actel_config.revision;
                 break;
         case V6_HOG:
+                ice40_dump_regs();
+
                 if ((r = ice40_read_register(ICE40_REVISION)) < 0) {
                         printk(KERN_ERR LOG_TAG "Failed to read iCE40 FPGA config: %i\n", r);
                         break;
@@ -1320,6 +1320,8 @@ static int fpga_read_revision(void) {
                 break;
         }
 
+        printk(KERN_INFO LOG_TAG "FPGA Revision: 0x%02x, Notle Version: %i\n",
+               (u8)rev, version);
         return rev;
 }
 
