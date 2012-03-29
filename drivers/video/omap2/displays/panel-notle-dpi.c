@@ -418,9 +418,39 @@ static ssize_t colormix_store(struct notle_drv_data *notle_data,
         led_config.green_percent = (green * 10000) / total;
         led_config.blue_percent = (blue * 10000) / total;
 
+        /*
+         * If the display is enabled, write the new FPGA config immediately,
+         * otherwise it will be written when the display is enabled.
+         */
+        if (notle_data->enabled && led_config.brightness) {
+          switch (version) {
+            case V4_FLY:
+            case V5_GNU:
+              led_config_to_fpga_config(&led_config, &actel_fpga_config);
+              if (actel_fpga_write_config(&actel_fpga_config)) {
+                printk(KERN_ERR LOG_TAG "Failed to brightness_store:"
+                       " i2c write failed\n");
+              }
+              break;
+            case V6_HOG:
+              led_config_to_linecuts(notle_data->dssdev, &led_config,
+                                     &red, &green, &blue);
+              if (ice40_set_backlight(1, red, green, blue)) {
+                printk(KERN_ERR LOG_TAG "Failed to brightness_store:"
+                       " spi write failed\n");
+              }
+              break;
+            default:
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
+              break;
+          }
+        }
+
         return size;
 }
-static ssize_t actel_fpga_config_show(struct notle_drv_data *notle_data, char *buf) {
+static ssize_t actel_fpga_config_show(struct notle_drv_data *notle_data,
+                                      char *buf) {
         struct actel_fpga_config config;
         if (actel_fpga_read_config(&config)) {
           return -EIO;
@@ -1030,32 +1060,38 @@ static struct kobj_type panel_notle_ktype = {
 static void led_config_to_linecuts(struct omap_dss_device *dssdev,
                                    struct led_config *led, int *red_linecut,
                                    int *green_linecut, int *blue_linecut) {
+        int red, green, blue;
         int total_lines = dssdev->panel.timings.y_res +
             dssdev->panel.timings.vfp +
             dssdev->panel.timings.vsw +
             dssdev->panel.timings.vbp;
         struct panel_notle_data *panel_data = get_panel_data(dssdev);
 
-        *red_linecut   = (total_lines *
-                          (10000 - (
-                           (3 * led->red_percent * led->brightness * panel_data->limit_mw) /
-                           (panel_data->red_max_mw * MAX_BRIGHTNESS)))) /
-                         10000;
-        *green_linecut = (total_lines *
-                          (10000 - (
-                           (3 * led->green_percent * led->brightness * panel_data->limit_mw) /
-                           (panel_data->green_max_mw * MAX_BRIGHTNESS)))) /
-                         10000;
-        *blue_linecut  = (total_lines *
-                          (10000 - (
-                           (3 * led->blue_percent * led->brightness * panel_data->limit_mw) /
-                           (panel_data->blue_max_mw * MAX_BRIGHTNESS)))) /
-                         10000;
+        red = *red_linecut     = (int)(total_lines *
+                                  (10000 - (
+                                   (3 * led->red_percent * led->brightness * panel_data->limit_mw) /
+                                   (panel_data->red_max_mw * MAX_BRIGHTNESS)))) /
+                                 10000;
+        green = *green_linecut = (int)(total_lines *
+                                  (10000 - (
+                                   (3 * led->green_percent * led->brightness * panel_data->limit_mw) /
+                                   (panel_data->green_max_mw * MAX_BRIGHTNESS)))) /
+                                 10000;
+        blue =  *blue_linecut  = (int)(total_lines *
+                                  (10000 - (
+                                   (3 * led->blue_percent * led->brightness * panel_data->limit_mw) /
+                                   (panel_data->blue_max_mw * MAX_BRIGHTNESS)))) /
+                                 10000;
 
         /* Disable any channels that are explicitly at zero percent */
         if (!led->red_percent) *red_linecut = total_lines;
         if (!led->green_percent) *green_linecut = total_lines;
         if (!led->blue_percent) *blue_linecut = total_lines;
+
+        /* Set to full-brightness any channels that overflowed */
+        if (*red_linecut < 0) *red_linecut = 0;
+        if (*green_linecut < 0) *green_linecut = 0;
+        if (*blue_linecut < 0) *blue_linecut = 0;
 
         /*
          * This will cause a slight color shift at very dim brightness values,
@@ -1071,14 +1107,12 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
         if (*blue_linecut > dssdev->panel.timings.y_res - 3)
           *blue_linecut = dssdev->panel.timings.y_res - 3;
 
-        printk(LOG_TAG "XXX %u/%u/%u/%u -> %u/%u/%u\n",
-               led->brightness,
-               led->red_percent,
-               led->green_percent,
-               led->blue_percent,
-               *red_linecut,
-               *green_linecut,
-               *blue_linecut);
+        if (red != *red_linecut || green != *green_linecut || blue != *blue_linecut) {
+          printk(KERN_INFO LOG_TAG "Linecuts truncated: %i/%i/%i -> %i/%i/%i"
+                 ", Config: %u/%u/%u/%u\n",
+                 red, green, blue, *red_linecut, *green_linecut, *blue_linecut,
+                 led->brightness, led->red_percent, led->green_percent, led->blue_percent);
+        }
 
         return;
 }
