@@ -104,6 +104,8 @@
 #define MUX_YELLOW_LED                  MUX(FREF_CLK4_OUT)
 #define GPIO_AUDIO_HEADSET              44
 #define MUX_AUDIO_HEADSET               MUX(GPMC_A20)
+#define GPIO_45                         45
+#define MUX_GPIO_45                     MUX(GPMC_A21)
 #define GPIO_GPS_ON_OFF                 49
 #define MUX_GPS_ON_OFF                  MUX(GPMC_A25)
 #define GPIO_GPS_RESET_N                52
@@ -1988,6 +1990,21 @@ static int omap_audio_init(void) {
                 pr_err("Unable to export audio_headset gpio_%d\n", GPIO_AUDIO_HEADSET);
         }
 
+        /* GPIO 45 needs export as per Russ request */
+        r = gpio_request_one(GPIO_45, GPIOF_OUT_INIT_LOW,
+                "gpio_45");
+        if (r) {
+                pr_err("Failed to get gpio_%d\n", GPIO_45);
+                goto error;
+        }
+
+        /* TODO(petermalkin): remove this line for the product compile. */
+        /* Do not expose GPIO to /sys filesystem for security purposes. */
+        r = gpio_export(GPIO_45, false);
+        if (r) {
+                pr_err("Unable to export gpio_%d\n", GPIO_45);
+        }
+
         omap_mux_init_signal("sys_nirq2.sys_nirq2", \
                 OMAP_PIN_INPUT_PULLUP);
         return 0;
@@ -2205,6 +2222,7 @@ static void __init my_mux_init(void) {
         // Others use the core base:
         // output gpio's:
         __raw_writew(flags, CORE_BASE_ADDR + MUX_AUDIO_HEADSET);
+        __raw_writew(flags, CORE_BASE_ADDR + MUX_GPIO_45);
         __raw_writew(flags, CORE_BASE_ADDR + MUX_GPS_ON_OFF);
         __raw_writew(flags, CORE_BASE_ADDR + MUX_GPS_RESET_N);
         __raw_writew(flags, CORE_BASE_ADDR + MUX_LCD_RESET_N);
