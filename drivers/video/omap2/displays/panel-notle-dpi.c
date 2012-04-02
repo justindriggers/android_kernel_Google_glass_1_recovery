@@ -1723,7 +1723,11 @@ static int ice40_spi_suspend(struct spi_device *spi, pm_message_t mesg) {
 }
 
 static int ice40_spi_resume(struct spi_device *spi) {
+        spi->mode = SPI_MODE_3;
+        spi->bits_per_word = 8;
         spi_setup(spi);
+
+        bus_data.ice40_device = spi;
         return 0;
 }
 
