@@ -115,7 +115,7 @@ typedef struct android_wifi_priv_cmd {
  */
 void dhd_customer_gpio_wlan_ctrl(int onoff);
 uint dhd_dev_reset(struct net_device *dev, uint8 flag);
-int dhd_dev_init_ioctl(struct net_device *dev);
+void dhd_dev_init_ioctl(struct net_device *dev);
 #ifdef WL_CFG80211
 int wl_cfg80211_get_p2p_dev_addr(struct net_device *net, struct ether_addr *p2pdev_addr);
 int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, char *command);
@@ -387,10 +387,8 @@ int wl_android_wifi_on(struct net_device *dev)
 		sdioh_start(NULL, 0);
 		ret = dhd_dev_reset(dev, FALSE);
 		sdioh_start(NULL, 1);
-		if (!ret) {
-			if (dhd_dev_init_ioctl(dev) < 0)
-				ret = -EFAULT;
-		}
+		if (!ret)
+			dhd_dev_init_ioctl(dev);
 		g_wifi_on = 1;
 	}
 	dhd_net_if_unlock(dev);
@@ -621,7 +619,7 @@ int wl_android_init(void)
 {
 	int ret = 0;
 
-	dhd_msg_level |= DHD_ERROR_VAL;
+	dhd_msg_level = DHD_ERROR_VAL;
 #ifdef ENABLE_INSMOD_NO_FW_LOAD
 	dhd_download_fw_on_driverload = FALSE;
 #endif /* ENABLE_INSMOD_NO_FW_LOAD */
@@ -692,7 +690,7 @@ void wl_android_wifictrl_func_del(void)
 	}
 }
 
-void* wl_android_prealloc(int section, unsigned long size)
+void *wl_android_prealloc(int section, unsigned long size)
 {
 	void *alloc_ptr = NULL;
 	if (wifi_control_data && wifi_control_data->mem_prealloc) {
