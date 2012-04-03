@@ -1389,6 +1389,8 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
         struct notle_drv_data *drv_data = dev_get_drvdata(&dssdev->dev);
         struct panel_config *panel_config = drv_data->panel_config;
 
+	dump_stack();
+
         if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE) {
           return 0;
         }
