@@ -315,9 +315,7 @@ static ssize_t sysfs_reset(struct notle_drv_data *notle_data,
 static ssize_t fpga_revision(struct notle_drv_data *notle_data, char *buf) {
         int rev = fpga_read_revision();
 
-        if (rev <= 0) {
-          printk(KERN_ERR LOG_TAG "Failed to read FPGA revision\n");
-        } else {
+        if (rev > 0) {
           /*
            * Cache the fpga revision so we can still print this when
            * the panel is powered off.
@@ -325,7 +323,7 @@ static ssize_t fpga_revision(struct notle_drv_data *notle_data, char *buf) {
            fpga_rev = rev;
         }
 
-        if (fpga_rev <= 0) {
+        if (fpga_rev < 0) {
           printk(KERN_ERR LOG_TAG "No cached FPGA revision\n");
           return -EIO;
         }
@@ -426,7 +424,7 @@ static ssize_t colormix_store(struct notle_drv_data *notle_data,
             case V5_GNU:
               led_config_to_fpga_config(&led_config, &actel_fpga_config);
               if (actel_fpga_write_config(&actel_fpga_config)) {
-                printk(KERN_ERR LOG_TAG "Failed to brightness_store:"
+                printk(KERN_ERR LOG_TAG "Failed to colormix_store:"
                        " i2c write failed\n");
               }
               break;
@@ -434,7 +432,7 @@ static ssize_t colormix_store(struct notle_drv_data *notle_data,
               led_config_to_linecuts(notle_data->dssdev, &led_config,
                                      &red, &green, &blue);
               if (ice40_set_backlight(1, red, green, blue)) {
-                printk(KERN_ERR LOG_TAG "Failed to brightness_store:"
+                printk(KERN_ERR LOG_TAG "Failed to colormix_store:"
                        " spi write failed\n");
               }
               break;
@@ -1228,7 +1226,7 @@ static int ice40_write_register(u8 reg_addr, u8 reg_value) {
   u8 buf[] = {reg_addr | 0x80, reg_value};
 
   if (!bus_data.ice40_device) {
-    printk(KERN_ERR LOG_TAG "No iCE40 bus data set in ice40_read_register()\n");
+    printk(KERN_ERR LOG_TAG "No iCE40 bus data set in ice40_write_register()\n");
     return -1;
   }
   return spi_write(bus_data.ice40_device, buf, sizeof(buf));
@@ -1315,13 +1313,17 @@ static int fpga_read_revision(void) {
                 break;
         case V1_DOG:
         case V3_EMU:
+        default:
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 break;
         }
 
-        printk(KERN_INFO LOG_TAG "FPGA Revision: 0x%02x, Notle Version: %i\n",
-               (u8)rev, version);
+	if (rev > 0) {
+          printk(KERN_INFO LOG_TAG "FPGA Revision: 0x%02x, Notle Version: %i\n",
+                 (u8)rev, version);
+        }
+
         return rev;
 }
 
@@ -1428,12 +1430,8 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
             continue;
           }
 
-          r = panel_write_register(panel_init_regs[i].reg,
-                                   panel_init_regs[i].value);
-          if (r) {
-            printk(KERN_ERR LOG_TAG "Failed to write panel config via i2c: "
-                   "%d\n", r);
-          }
+          panel_write_register(panel_init_regs[i].reg,
+                               panel_init_regs[i].value);
         }
 
         /* Load defaults */
@@ -1445,9 +1443,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
             break;
         }
 
-        if (fpga_read_revision() <= 0) {
-            printk(KERN_ERR LOG_TAG "Failed to read FPGA revision\n");
-        }
+        fpga_read_revision();
 
         /* Enable LED backlight if we have nonzero brightness */
         if (led_config.brightness > 0) {
@@ -1517,10 +1513,8 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
             continue;
           }
 
-          if(panel_write_register(panel_shutdown_regs[i].reg,
-                                  panel_shutdown_regs[i].value)) {
-            printk(KERN_ERR LOG_TAG "Failed to shutdown panel\n");
-          }
+          panel_write_register(panel_shutdown_regs[i].reg,
+                               panel_shutdown_regs[i].value);
         }
 
         /* Disable DISP_ENB */
