@@ -320,7 +320,9 @@ static struct prod_rev_map_t prod_rev_map[] = {
 	{MPL_PROD_KEY(4,  1), MPU_SILICON_REV_B1, 131,  8192},	/* (B3/F1)   */
 	{MPL_PROD_KEY(4,  3), MPU_SILICON_REV_B1, 131,  8192},	/* (B4/F1)   */
 	/* prod_ver = 5 */
-	{MPL_PROD_KEY(6, 19), MPU_SILICON_REV_B1, 131, 16384}	/* (B5/E2)   */
+	{MPL_PROD_KEY(6, 19), MPU_SILICON_REV_B1, 131, 16384},	/* (B5/E2)   */
+    // temporary hack
+	{MPL_PROD_KEY(8, 19), MPU_SILICON_REV_B1, 131, 16384}	/* (??/E2)   */
 };
 
 /**
