@@ -1702,6 +1702,48 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 #endif
 
 
+#ifdef CONFIG_INPUT_SI114X
+static struct si114x_platform_data notle_si114x_data = {
+	/* TODO(cmanton) Interrupts are not built into the driver yet */
+	.pfd_gpio_int_no = GPIO_PROX_INT,
+
+	/* Rate of device timer waking itself up.
+	 * 0x00: Never
+	 * 0x84: Every 10ms
+	 * 0x94: Every 20ms
+	 * 0xb9: Every 100ms
+	 * 0xdf: Every 496ms
+	 * 0xff: Every 1984ms
+	 */
+	.pfd_meas_rate = SI114X_MEAS_RATE_10ms,
+
+	/* Rate of ALS taking measurement every time device wakes up.
+	 * 0x00: Never
+	 * 0x08: Every time device awakens.
+	 * 0x32: Every 10 times device awakens.
+	 * 0x69: Every 100 times device awakens.
+	 */
+	.pfd_als_rate = SI114X_ALS_RATE_1x,
+
+	/* Rate of PS taking measurement every time device wakes up.
+	 * 0x00: Never
+	 * 0x08: Every time device awakens.
+	 * 0x32: Every 10 times device awakens.
+	 * 0x69: Every 100 times device awakens.
+	 */
+        .pfd_ps_rate = SI114X_PS_RATE_1x,
+
+	/* LED intensities */
+        .pfd_ps_led1 = SI114X_LED_90,
+        .pfd_ps_led2 = SI114X_LED_90,
+        .pfd_ps_led3 = SI114X_LED_90,
+
+        /* input subsystem poll interval in ms when using polling */
+        .pfd_als_poll_interval = 1000,
+        .pfd_ps_poll_interval = 12,
+};
+#endif  /* CONFIG_INPUT_SI114X */
+
 static struct i2c_board_info __initdata notle_dog_i2c_4_boardinfo[] = {
         {
                 I2C_BOARD_INFO("l3g4200d_gyr", 0x68),
@@ -1732,14 +1774,6 @@ static struct i2c_board_info __initdata notle_dog_i2c_4_boardinfo[] = {
         {
                 I2C_BOARD_INFO("notle_himax", 0x48),
         },
-#ifdef CONFIG_INPUT_SI114X
-        {
-                I2C_BOARD_INFO("si114x", 0x5a),
-//                .flags = I2C_CLIENT_WAKE,
- //               .irq = OMAP_GPIO_IRQ(GPIO_PROX_INT),
-  //              .platform_data = &notle_ltr506als_data,
-        },
-#endif
         {
                 I2C_BOARD_INFO("ov9726", 0x10),
                 .flags = I2C_CLIENT_WAKE,
@@ -1832,6 +1866,12 @@ static struct i2c_board_info __initdata notle_fly_i2c_4_boardinfo[] = {
                 .platform_data = &notle_ltr506als_data,
         },
 #endif
+#ifdef CONFIG_INPUT_SI114X
+        {
+                I2C_BOARD_INFO("si114x", 0x5a),
+                .platform_data = &notle_si114x_data,
+        },
+#endif
         {
                 I2C_BOARD_INFO("notle_himax", 0x48),
         },
@@ -1861,6 +1901,12 @@ static struct i2c_board_info __initdata notle_hog_i2c_4_boardinfo[] = {
                 .flags = I2C_CLIENT_WAKE,
                 .irq = OMAP_GPIO_IRQ(GPIO_PROX_INT),
                 .platform_data = &notle_ltr506als_data,
+        },
+#endif
+#ifdef CONFIG_INPUT_SI114X
+        {
+                I2C_BOARD_INFO("si114x", 0x5a),
+                .platform_data = &notle_si114x_data,
         },
 #endif
 };
