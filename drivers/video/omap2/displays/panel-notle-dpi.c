@@ -1437,7 +1437,8 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
         /* Load defaults */
         switch (version) {
           case V6_HOG:
-            ice40_write_register(ICE40_BACKLIGHT, ICE40_BACKLIGHT_CPSEL);
+            ice40_write_register(ICE40_BACKLIGHT, ICE40_BACKLIGHT_CPSEL |
+                                 ICE40_BACKLIGHT_MONO);
             break;
           default:
             break;
