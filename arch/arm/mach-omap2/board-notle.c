@@ -1019,10 +1019,10 @@ static struct omap_uart_port_info omap_serial_port_info[] = {
                 .wer = (OMAP_UART_WER_TX | OMAP_UART_WER_RX | OMAP_UART_WER_CTS),
         },
         {  /* ttyO3 GPS */
-                .use_dma        = 1,
+                .use_dma        = 0,
                 .dma_rx_buf_size = DEFAULT_RXDMA_BUFSIZE,
                 /* TODO(cmanton) Use interrupts for better (?) power management */
-                .dma_rx_poll_rate = 100000,  // units in usec
+                .dma_rx_poll_rate = DEFAULT_RXDMA_POLLRATE,
                 .dma_rx_timeout = DEFAULT_RXDMA_TIMEOUT,
                 .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
                 .wer = (OMAP_UART_WER_TX | OMAP_UART_WER_RX | OMAP_UART_WER_CTS),
