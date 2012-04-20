@@ -200,6 +200,12 @@ static struct led_config led_config = {
   .brightness = 0,        /* 0 brightness by default */
 };
 
+static struct {
+  u8 backlight;
+} ice40_defaults = {
+  .backlight = ICE40_BACKLIGHT_MONO,
+};
+
 static struct actel_fpga_config actel_fpga_config;
 
 static struct panel_notle_busses {
@@ -1319,7 +1325,7 @@ static int fpga_read_revision(void) {
                 break;
         }
 
-	if (rev > 0) {
+        if (rev > 0) {
           printk(KERN_INFO LOG_TAG "FPGA Revision: 0x%02x, Notle Version: %i\n",
                  (u8)rev, version);
         }
@@ -1391,7 +1397,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
         struct notle_drv_data *drv_data = dev_get_drvdata(&dssdev->dev);
         struct panel_config *panel_config = drv_data->panel_config;
 
-	dump_stack();
+        dump_stack();
 
         if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE) {
           return 0;
@@ -1437,12 +1443,11 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
         /* Load defaults */
         switch (version) {
           case V6_HOG:
-            ice40_write_register(ICE40_BACKLIGHT, ICE40_BACKLIGHT_MONO);
+            ice40_write_register(ICE40_BACKLIGHT, ice40_defaults.backlight);
             break;
           default:
             break;
         }
-
         fpga_read_revision();
 
         /* Enable LED backlight if we have nonzero brightness */
@@ -1500,6 +1505,11 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
             /* Don't change the color mix, just disable the backlight. */
             if (ice40_set_backlight(0, -1, -1, -1)) {
               printk(KERN_ERR LOG_TAG "Failed to disable iCE40 FPGA LED_EN\n");
+            }
+            /* Save register values so we can restore them when we power on. */
+            i = ice40_read_register(ICE40_BACKLIGHT);
+            if (i > 0) {
+              ice40_defaults.backlight = i;
             }
             break;
           default:
