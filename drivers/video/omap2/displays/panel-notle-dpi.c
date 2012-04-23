@@ -203,7 +203,7 @@ static struct led_config led_config = {
 static struct {
   u8 backlight;
 } ice40_defaults = {
-  .backlight = ICE40_BACKLIGHT_MONO,
+  .backlight = ICE40_BACKLIGHT_CPSEL,
 };
 
 static struct actel_fpga_config actel_fpga_config;
