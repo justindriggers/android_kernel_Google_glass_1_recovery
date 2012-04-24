@@ -1489,26 +1489,11 @@ static struct mpu_platform_data mpu9150_data = {
                             0, 1, 0,
                             1, 0, 0 },
         .level_shifter  = 1,
-        /*
-        .accel          = {
-                .get_slave_descr = mantis_get_slave_descr,
-                .adapt_num = 4,
-                .bus = EXT_SLAVE_BUS_SECONDARY,
-                .address = 0x68,
-                .orientation = { 0, 0, -1,
-                                 0, 1, 0,
-                                 1, 0, 0 },
-        },
-        .compass        = {
-                .get_slave_descr = ak8975_get_slave_descr,
-                .adapt_num = 4,
-                .bus = EXT_SLAVE_BUS_SECONDARY,
-                .address = 0x0C,
-                .orientation = { 0, 0, 1,
-                                 1, 0, 0,
-                                 0, 1, 0 },
-        },
-        */
+        .sec_slave_type = SECONDARY_SLAVE_TYPE_COMPASS,
+        .sec_slave_id   = COMPASS_ID_AK8975,
+        .secondary_i2c_addr = 0x0C,
+        .key = {221, 22, 205, 7, 217, 186, 151, 55,
+            206, 254, 35, 144, 225, 102, 47, 50},
 };
 
 static struct mpu_platform_data mpu9150_hog_data = {
@@ -1517,26 +1502,11 @@ static struct mpu_platform_data mpu9150_hog_data = {
                             0, 0, 1,
                             1, 0, 0 },
         .level_shifter  = 1,
-        /*
-        .accel          = {
-                .get_slave_descr = mantis_get_slave_descr,
-                .adapt_num = 4,
-                .bus = EXT_SLAVE_BUS_SECONDARY,
-                .address = 0x68,
-                .orientation = { 0, 0, -1,
-                                 0, 1, 0,
-                                 1, 0, 0 },
-        },
-        .compass        = {
-                .get_slave_descr = ak8975_get_slave_descr,
-                .adapt_num = 4,
-                .bus = EXT_SLAVE_BUS_SECONDARY,
-                .address = 0x0C,
-                .orientation = { 0, 0, 1,
-                                 1, 0, 0,
-                                 0, 1, 0 },
-        },
-        */
+        .sec_slave_type = SECONDARY_SLAVE_TYPE_COMPASS,
+        .sec_slave_id   = COMPASS_ID_AK8975,
+        .secondary_i2c_addr = 0x0C,
+        .key = {221, 22, 205, 7, 217, 186, 151, 55,
+            206, 254, 35, 144, 225, 102, 47, 50},
 };
 
 /* compass */
@@ -1843,7 +1813,7 @@ static struct i2c_board_info __initdata notle_fly_i2c_4_boardinfo[] = {
                 I2C_BOARD_INFO("panel-notle-panel", 0x49),
         },
         {
-                I2C_BOARD_INFO("mpu6050", 0x68),
+                I2C_BOARD_INFO("mpu9150", 0x68),
                 .irq = OMAP_GPIO_IRQ(GPIO_MPU9000_INT),
                 .platform_data = &mpu9150_data,
         },
@@ -1880,7 +1850,7 @@ static struct i2c_board_info __initdata notle_hog_i2c_4_boardinfo[] = {
                 I2C_BOARD_INFO("panel-notle-panel", 0x49),
         },
         {
-                I2C_BOARD_INFO("mpu6050", 0x68),
+                I2C_BOARD_INFO("mpu9150", 0x68),
                 .irq = OMAP_GPIO_IRQ(GPIO_MPU9000_INT),
                 .platform_data = &mpu9150_hog_data,
         },
