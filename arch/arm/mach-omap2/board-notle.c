@@ -155,6 +155,15 @@
 #define GPIO_ID0                        34
 #define MUX_ID0                         MUX(GPMC_AD10)
 
+typedef enum {
+        UNVERSIONED = 7,
+        V1_DOG      = 7,
+        V3_EMU      = 0,
+        V4_FLY      = 4,
+        V5_GNU      = 5,
+        V6_HOG      = 6,
+} notle_version;
+
 static notle_version NOTLE_VERSION = UNVERSIONED;
 
 /* Read board version from GPIO.  Result in NOTLE_VERSION. */
@@ -2455,6 +2464,7 @@ static void __init notle_init(void)
           default:
             wifi_power_gpio = GPIO_WL_RST_N;
         }
+        notle_bluetooth_init(NOTLE_VERSION == V6_HOG);
         err = notle_wlan_init(wifi_power_gpio);
         if (err) {
                 pr_err("Wifi initialization failed: %d\n", err);

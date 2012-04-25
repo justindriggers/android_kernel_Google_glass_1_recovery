@@ -68,6 +68,7 @@ struct bcm_bt_lpm {
 
 static int bcm4330_bt_rfkill_set_power(void *data, bool blocked)
 {
+
 	// rfkill_ops callback. Turn transmitter on when blocked is false
 	if (!blocked) {
                 if (manage_bt_reg) {
@@ -98,7 +99,6 @@ static void set_wake_locked(int wake)
 
 	if (!wake)
 		wake_unlock(&bt_lpm.wake_lock);
-
 	gpio_set_value(BT_WAKE_GPIO, wake);
 }
 
@@ -301,15 +301,18 @@ static struct platform_driver bcm4330_bluetooth_platform_driver = {
 
 static int __init bcm4330_bluetooth_init(void)
 {
-        if (NOTLE_VERSION == V6_HOG) {
-                manage_bt_reg = true;
-        }
 	return platform_driver_register(&bcm4330_bluetooth_platform_driver);
 }
 
 static void __exit bcm4330_bluetooth_exit(void)
 {
 	platform_driver_unregister(&bcm4330_bluetooth_platform_driver);
+}
+
+int __init notle_bluetooth_init(bool hog_or_later)
+{
+        manage_bt_reg = hog_or_later;
+        return 0;
 }
 
 module_init(bcm4330_bluetooth_init);

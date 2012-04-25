@@ -64,17 +64,9 @@ extern struct mmc_platform_data tuna_wifi_data;
 // Elton V6 uses GPIO_WL_RST_N to control wifi power; previous versions use
 // GPIO_WL_BT_REG_ON.
 int notle_wlan_init(int wifi_power_gpio);
+// Elton V6 uses separate power regulators for BT and wifi; previous versions
+// use a single joint regulator.
+int notle_bluetooth_init(bool hog_or_later);
 void bcm_bt_lpm_exit_lpm_locked(struct uart_port *uport);
-
-typedef enum {
-        UNVERSIONED = 7,
-        V1_DOG      = 7,
-        V3_EMU      = 0,
-        V4_FLY      = 4,
-        V5_GNU      = 5,
-        V6_HOG      = 6,
-} notle_version;
-
-static notle_version NOTLE_VERSION;
 
 #endif // _MACH_OMAP2_BOARD_NOTLE_H_
