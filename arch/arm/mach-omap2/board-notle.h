@@ -66,4 +66,15 @@ extern struct mmc_platform_data tuna_wifi_data;
 int notle_wlan_init(int wifi_power_gpio);
 void bcm_bt_lpm_exit_lpm_locked(struct uart_port *uport);
 
+typedef enum {
+        UNVERSIONED = 7,
+        V1_DOG      = 7,
+        V3_EMU      = 0,
+        V4_FLY      = 4,
+        V5_GNU      = 5,
+        V6_HOG      = 6,
+} notle_version;
+
+static notle_version NOTLE_VERSION;
+
 #endif // _MACH_OMAP2_BOARD_NOTLE_H_

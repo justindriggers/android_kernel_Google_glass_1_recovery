@@ -155,15 +155,6 @@
 #define GPIO_ID0                        34
 #define MUX_ID0                         MUX(GPMC_AD10)
 
-typedef enum {
-        UNVERSIONED = 7,
-        V1_DOG      = 7,
-        V3_EMU      = 0,
-        V4_FLY      = 4,
-        V5_GNU      = 5,
-        V6_HOG      = 6,
-} notle_version;
-
 static notle_version NOTLE_VERSION = UNVERSIONED;
 
 /* Read board version from GPIO.  Result in NOTLE_VERSION. */

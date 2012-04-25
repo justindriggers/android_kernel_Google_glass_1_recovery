@@ -46,6 +46,13 @@ static void update_host_wake_locked(int);
 
 static struct rfkill *bt_rfkill;
 
+/**
+ * NOTE(abliss): on versions of notle prior to hog, bt_reg is tied to wlan_reg,
+ * so it should not be managed here.  In hog and later, bt_reg is separate and
+ * must be managed here.
+ */
+static bool manage_bt_reg = false;
+
 struct bcm_bt_lpm {
 	int wake;
 	int host_wake;
@@ -63,10 +70,9 @@ static int bcm4330_bt_rfkill_set_power(void *data, bool blocked)
 {
 	// rfkill_ops callback. Turn transmitter on when blocked is false
 	if (!blocked) {
-                /* XXX On notle bt_reg is tied to wlan_reg, so don't
-                 * shut off here.
-		gpio_set_value(BT_REG_GPIO, 1);
-                 */
+                if (manage_bt_reg) {
+ 		        gpio_set_value(BT_REG_GPIO, 1);
+                }
 		gpio_set_value(BT_RESET_GPIO, 1);
 
 	} else {
@@ -74,9 +80,9 @@ static int bcm4330_bt_rfkill_set_power(void *data, bool blocked)
                 // Chip won't toggle host_wake after reset.  Make sure
                 // we don't hold the wake_lock until chip wakes up again.
                 update_host_wake_locked(0);
-                /*
-		gpio_set_value(BT_REG_GPIO, 0);
-                 */
+                if (manage_bt_reg) {
+                        gpio_set_value(BT_REG_GPIO, 0);
+                }
 	}
 
 	return 0;
@@ -217,15 +223,15 @@ static int bcm4330_bluetooth_probe(struct platform_device *pdev)
 		return rc;
 	}
 
-        /* Regulator shared with wlan.
-	rc = gpio_request(BT_REG_GPIO, "bcm4330_nshutdown_gpio");
-	if (unlikely(rc)) {
-		gpio_free(BT_RESET_GPIO);
-		return rc;
-	}
+        if (manage_bt_reg) {
+        	rc = gpio_request(BT_REG_GPIO, "bcm4330_nshutdown_gpio");
+	        if (unlikely(rc)) {
+                        gpio_free(BT_RESET_GPIO);
+                        return rc;
+                }
+        	gpio_direction_output(BT_REG_GPIO, 1);
+        }
 
-	gpio_direction_output(BT_REG_GPIO, 1);
-        */
 	gpio_direction_output(BT_RESET_GPIO, 1);
 
 	bt_rfkill = rfkill_alloc("bcm4330 Bluetooth", &pdev->dev,
@@ -234,9 +240,9 @@ static int bcm4330_bluetooth_probe(struct platform_device *pdev)
 
 	if (unlikely(!bt_rfkill)) {
 		gpio_free(BT_RESET_GPIO);
-                /*
-		gpio_free(BT_REG_GPIO);
-                */
+                if (manage_bt_reg) {
+		        gpio_free(BT_REG_GPIO);
+                }
 		return -ENOMEM;
 	}
 
@@ -245,9 +251,9 @@ static int bcm4330_bluetooth_probe(struct platform_device *pdev)
 	if (unlikely(rc)) {
 		rfkill_destroy(bt_rfkill);
 		gpio_free(BT_RESET_GPIO);
-                /*
-		gpio_free(BT_REG_GPIO);
-                */
+                if (manage_bt_reg) {
+		        gpio_free(BT_REG_GPIO);
+                }
 		return -1;
 	}
 
@@ -260,9 +266,9 @@ static int bcm4330_bluetooth_probe(struct platform_device *pdev)
 		rfkill_destroy(bt_rfkill);
 
 		gpio_free(BT_RESET_GPIO);
-                /*
-		gpio_free(BT_REG_GPIO);
-                */
+                if (manage_bt_reg) {
+                        gpio_free(BT_REG_GPIO);
+                }
 	}
 
 	return ret;
@@ -273,9 +279,9 @@ static int bcm4330_bluetooth_remove(struct platform_device *pdev)
 	rfkill_unregister(bt_rfkill);
 	rfkill_destroy(bt_rfkill);
 
-        /*
-	gpio_free(BT_REG_GPIO);
-        */
+        if (manage_bt_reg) {
+                gpio_free(BT_REG_GPIO);
+        }
 	gpio_free(BT_RESET_GPIO);
 	gpio_free(BT_WAKE_GPIO);
 	gpio_free(BT_HOST_WAKE_GPIO);
@@ -295,6 +301,9 @@ static struct platform_driver bcm4330_bluetooth_platform_driver = {
 
 static int __init bcm4330_bluetooth_init(void)
 {
+        if (NOTLE_VERSION == V6_HOG) {
+                manage_bt_reg = true;
+        }
 	return platform_driver_register(&bcm4330_bluetooth_platform_driver);
 }
 
