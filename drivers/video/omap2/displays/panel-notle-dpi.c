@@ -290,12 +290,12 @@ static inline struct panel_notle_data
 }
 
 /* Local functions used by the sysfs interface */
+static char tmp_buf[PAGE_SIZE];
 static int fpga_rev = -1;
 static void panel_notle_power_off(struct omap_dss_device *dssdev);
 static int panel_notle_power_on(struct omap_dss_device *dssdev);
 static int actel_fpga_write_config(struct actel_fpga_config *config);
 static int actel_fpga_read_config(struct actel_fpga_config *config);
-static void ice40_dump_regs(void);
 static int ice40_read_register(u8 reg_addr);
 static int ice40_write_register(u8 reg_addr, u8 reg_value);
 static int ice40_set_backlight(int led_en, int r, int g, int b);
@@ -335,6 +335,27 @@ static ssize_t fpga_revision(struct notle_drv_data *notle_data, char *buf) {
         }
 
         return snprintf(buf, PAGE_SIZE, "0x%02x\n", fpga_rev);
+}
+static ssize_t dump_regs(struct notle_drv_data *notle_data,
+                         char *buf) {
+        int i, val;
+
+        *buf = '\0';
+        if (version == V6_HOG) {
+          for (i = 0; i < sizeof(ice40_regs); ++i) {
+            val = ice40_read_register(ice40_regs[i]);
+            if (val < 0) {
+              snprintf(tmp_buf, PAGE_SIZE, "%s0x%02x: FAILED\n",
+                       buf, ice40_regs[i]);
+            } else {
+              snprintf(tmp_buf, PAGE_SIZE, "%s0x%02x: 0x%02x\n",
+                       buf, ice40_regs[i], (u8)(val & 0xff));
+            }
+            strncpy(buf, tmp_buf, PAGE_SIZE);
+          }
+        }
+
+        return strlen(buf);
 }
 static ssize_t enabled_show(struct notle_drv_data *notle_data, char *buf) {
         return snprintf(buf, PAGE_SIZE, "%d\n",
@@ -972,6 +993,7 @@ struct panel_notle_attribute {
 
 static NOTLE_ATTR(reset, S_IWUSR, NULL, sysfs_reset);
 static NOTLE_ATTR(fpga_revision, S_IRUGO, fpga_revision, NULL);
+static NOTLE_ATTR(dump_regs, S_IRUGO, dump_regs, NULL);
 static NOTLE_ATTR(list_testpatterns, S_IRUGO, list_testpatterns, NULL);
 static NOTLE_ATTR(enabled, S_IRUGO|S_IWUSR,
                   enabled_show, enabled_store);
@@ -1003,6 +1025,7 @@ static NOTLE_ATTR(brightness, S_IRUGO|S_IWUSR,
 static struct attribute *panel_notle_sysfs_attrs[] = {
         &panel_notle_attr_reset.attr,
         &panel_notle_attr_fpga_revision.attr,
+        &panel_notle_attr_dump_regs.attr,
         &panel_notle_attr_list_testpatterns.attr,
         &panel_notle_attr_enabled.attr,
         &panel_notle_attr_reg_addr.attr,
@@ -1190,12 +1213,14 @@ static void led_config_to_fpga_config(struct led_config *led,
 }
 
 static int panel_write_register(u8 reg, u8 value) {
+        static int printed_error = 0;
         u8 buf[2];
         int r;
         struct i2c_msg msgs[1];
 
         if (!bus_data.panel_client) {
-                printk(KERN_ERR LOG_TAG "No I2C data set in panel_write_register\n");
+                printk(KERN_ERR LOG_TAG
+                       "No I2C data set in panel_write_register\n");
                 return -1;
         }
 
@@ -1209,8 +1234,12 @@ static int panel_write_register(u8 reg, u8 value) {
 
         r = i2c_transfer(bus_data.panel_client->adapter, msgs, 1);
         if (r < 0) {
-                printk(KERN_ERR LOG_TAG "Failed to write 0x%02x to panel "
-                       "register 0x%02x: %i\n", value, reg, r);
+                if (!printed_error) {
+                        printk(KERN_ERR LOG_TAG
+                               "Failed to write 0x%02x to panel "
+                               "register 0x%02x: %i\n", value, reg, r);
+                        printed_error = 1;
+                }
                 return r;
         }
 
@@ -1236,24 +1265,6 @@ static int ice40_write_register(u8 reg_addr, u8 reg_value) {
     return -1;
   }
   return spi_write(bus_data.ice40_device, buf, sizeof(buf));
-}
-
-static void ice40_dump_regs(void) {
-  int i, val;
-
-  printk(KERN_INFO LOG_TAG "*** iCE40 Register Dump ***\n");
-
-  for (i = 0; i < sizeof(ice40_regs); ++i) {
-    val = ice40_read_register(ice40_regs[i]);
-    if (val < 0) {
-      printk(KERN_INFO LOG_TAG "  0x%02x: FAILED\n", ice40_regs[i]);
-    } else {
-      printk(KERN_INFO LOG_TAG "  0x%02x: 0x%02x\n",
-             ice40_regs[i], (u8)(val & 0xff));
-    }
-  }
-
-  return;
 }
 
 /*
@@ -1308,8 +1319,6 @@ static int fpga_read_revision(void) {
                 rev = actel_config.revision;
                 break;
         case V6_HOG:
-                ice40_dump_regs();
-
                 if ((r = ice40_read_register(ICE40_REVISION)) < 0) {
                         printk(KERN_ERR LOG_TAG "Failed to read iCE40 FPGA config: %i\n", r);
                         break;
@@ -1396,8 +1405,6 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
         struct panel_notle_data *panel_data = get_panel_data(dssdev);
         struct notle_drv_data *drv_data = dev_get_drvdata(&dssdev->dev);
         struct panel_config *panel_config = drv_data->panel_config;
-
-        dump_stack();
 
         if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE) {
           return 0;
