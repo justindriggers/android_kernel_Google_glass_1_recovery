@@ -2914,6 +2914,7 @@ static void dispc_enable_lcd_out(enum omap_channel channel, bool enable)
 
 		r = omap_dispc_unregister_isr(dispc_disable_isr,
 				&frame_done_completion, irq);
+		synchronize_irq(dispc.irq);
 
 		if (r)
 			DSSERR("failed to unregister FRAMEDONE isr\n");
@@ -2975,6 +2976,8 @@ static void dispc_enable_digit_out(enum omap_display_type type, bool enable)
 			&frame_done_completion,
 			DISPC_IRQ_EVSYNC_EVEN | DISPC_IRQ_EVSYNC_ODD
 						| DISPC_IRQ_FRAMEDONETV);
+	synchronize_irq(dispc.irq);
+
 	if (r)
 		DSSERR("failed to unregister EVSYNC isr\n");
 
@@ -4339,6 +4342,8 @@ int omap_dispc_wait_for_irq_timeout(u32 irqmask, unsigned long timeout)
 
 	omap_dispc_unregister_isr(dispc_irq_wait_handler, &completion, irqmask);
 
+	synchronize_irq(dispc.irq);
+
 	if (timeout == 0)
 		return -ETIMEDOUT;
 
@@ -4373,6 +4378,8 @@ int omap_dispc_wait_for_irq_interruptible_timeout(u32 irqmask,
 			timeout);
 
 	omap_dispc_unregister_isr(dispc_irq_wait_handler, &completion, irqmask);
+
+	synchronize_irq(dispc.irq);
 
 	if (timeout == 0)
 		r = -ETIMEDOUT;
