@@ -246,8 +246,6 @@ static int reset_fifo_itg(struct inv_gyro_state_s *st)
 
 	if (st->chip_config.dmp_on) {
 		val = (BIT_FIFO_RST | BIT_DMP_RST);
-		if (st->chip_config.compass_enable)
-			val |= BIT_I2C_MST_RST;
 		result = inv_i2c_single_write(st, reg->user_ctrl, val);
 		if (result)
 			goto reset_fifo_fail;
@@ -266,8 +264,6 @@ static int reset_fifo_itg(struct inv_gyro_state_s *st)
 	} else {
 		/* reset FIFO and possibly reset I2C*/
 		val = BIT_FIFO_RST;
-		if (st->chip_config.compass_enable)
-			val |= BIT_I2C_MST_RST;
 		result = inv_i2c_single_write(st, reg->user_ctrl, val);
 		if (result)
 			goto reset_fifo_fail;
