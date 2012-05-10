@@ -23,6 +23,7 @@
 #define MUX(x) OMAP4_CTRL_MODULE_PAD_##x##_OFFSET
 
 #define CORE_BASE_ADDR 0xfc100000
+#define WKUP_BASE_ADDR 0xfc31e000
 // Choose your board revision.
 //#define NOTLE_VERSION_1
 #define NOTLE_VERSION_2
@@ -43,8 +44,10 @@
 // TODO: Figure out why the wlan_wake and wlan_host_wake gpio's
 // are swapped compared to what the hardware docs imply them
 // to be.
-#define GPIO_BCM_WLAN_HOST_WAKE         97
-#define MUX_BCM_WLAN_HOST_WAKE          MUX(USBB1_HSIC_STROBE)
+#define GPIO_BCM_WLAN_HOST_WAKE_HOG     97
+#define MUX_BCM_WLAN_HOST_WAKE_HOG      MUX(USBB1_HSIC_STROBE)
+#define GPIO_BCM_WLAN_HOST_WAKE_EVT1    0
+#define MUX_BCM_WLAN_HOST_WAKE_EVT1     MUX(SIM_IO)
 #define GPIO_BCM_BT_HOST_WAKE           154
 #define MUX_BCM_BT_HOST_WAKE            MUX(MCSPI4_CS0)
 #define GPIO_BCM_WLAN_WAKE              170
@@ -60,10 +63,20 @@
 #define GPIO_WL_BT_REG_ON               48
 #define MUX_WL_BT_REG_ON                MUX(GPMC_A24)
 
+typedef enum {
+        UNVERSIONED = 7,
+        V1_DOG      = 7,
+        V3_EMU      = 0,
+        V4_FLY      = 4,
+        V5_GNU      = 5,
+        V6_HOG      = 6,
+        V1_EVT1     = 1,
+} notle_version;
+
 extern struct mmc_platform_data tuna_wifi_data;
 // Elton V6 uses GPIO_WL_RST_N to control wifi power; previous versions use
 // GPIO_WL_BT_REG_ON.
-int notle_wlan_init(int wifi_power_gpio);
+int notle_wlan_init(notle_version NOTLE_VERSION);
 // Elton V6 uses separate power regulators for BT and wifi; previous versions
 // use a single joint regulator.
 int notle_bluetooth_init(bool hog_or_later);

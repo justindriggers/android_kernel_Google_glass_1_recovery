@@ -61,6 +61,7 @@ typedef enum {
         V4_FLY      = 4,
         V5_GNU      = 5,
         V6_HOG      = 6,
+        V1_EVT1     = 1,
 } notle_version;
 
 enum {
@@ -341,7 +342,8 @@ static ssize_t dump_regs(struct notle_drv_data *notle_data,
         int i, val;
 
         *buf = '\0';
-        if (version == V6_HOG) {
+        if (version == V6_HOG ||
+            version == V1_EVT1) {
           for (i = 0; i < sizeof(ice40_regs); ++i) {
             val = ice40_read_register(ice40_regs[i]);
             if (val < 0) {
@@ -456,6 +458,7 @@ static ssize_t colormix_store(struct notle_drv_data *notle_data,
               }
               break;
             case V6_HOG:
+            case V1_EVT1:
               led_config_to_linecuts(notle_data->dssdev, &led_config,
                                      &red, &green, &blue);
               if (ice40_set_backlight(1, red, green, blue)) {
@@ -560,6 +563,7 @@ static ssize_t testpattern_store(struct notle_drv_data *notle_data,
                 }
                 break;
           case V6_HOG:
+          case V1_EVT1:
 
                 i = ice40_read_register(ICE40_PIPELINE);
                 if (i < 0) {
@@ -610,6 +614,7 @@ static ssize_t testmono_store(struct notle_drv_data *notle_data,
                 }
                 break;
           case V6_HOG:
+          case V1_EVT1:
                 value = ice40_read_register(ICE40_BACKLIGHT);
                 if (value < 0) {
                         printk(KERN_ERR LOG_TAG "Failed to testmono_store: "
@@ -644,7 +649,8 @@ static ssize_t testmono_store(struct notle_drv_data *notle_data,
 static ssize_t forcer_show(struct notle_drv_data *notle_data, char *buf) {
         int val;
 
-        if (version != V6_HOG) {
+        if (version != V6_HOG &&
+            version != V1_EVT1) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -663,7 +669,8 @@ static ssize_t forcer_store(struct notle_drv_data *notle_data,
                                  const char *buf, size_t size) {
         int r, val;
 
-        if (version != V6_HOG) {
+        if (version != V6_HOG &&
+            version != V1_EVT1) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -698,7 +705,8 @@ static ssize_t forcer_store(struct notle_drv_data *notle_data,
 static ssize_t forceg_show(struct notle_drv_data *notle_data, char *buf) {
         int val;
 
-        if (version != V6_HOG) {
+        if (version != V6_HOG &&
+            version != V1_EVT1) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -717,7 +725,8 @@ static ssize_t forceg_store(struct notle_drv_data *notle_data,
                                  const char *buf, size_t size) {
         int r, val;
 
-        if (version != V6_HOG) {
+        if (version != V6_HOG &&
+            version != V1_EVT1) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -752,7 +761,8 @@ static ssize_t forceg_store(struct notle_drv_data *notle_data,
 static ssize_t forceb_show(struct notle_drv_data *notle_data, char *buf) {
         int val;
 
-        if (version != V6_HOG) {
+        if (version != V6_HOG &&
+            version != V1_EVT1) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -771,7 +781,8 @@ static ssize_t forceb_store(struct notle_drv_data *notle_data,
                                  const char *buf, size_t size) {
         int r, val;
 
-        if (version != V6_HOG) {
+        if (version != V6_HOG &&
+            version != V1_EVT1) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -806,7 +817,8 @@ static ssize_t forceb_store(struct notle_drv_data *notle_data,
 static ssize_t cpsel_show(struct notle_drv_data *notle_data, char *buf) {
         int val;
 
-        if (version != V6_HOG) {
+        if (version != V6_HOG &&
+            version != V1_EVT1) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -825,7 +837,8 @@ static ssize_t cpsel_store(struct notle_drv_data *notle_data,
                                  const char *buf, size_t size) {
         int r, val;
 
-        if (version != V6_HOG) {
+        if (version != V6_HOG &&
+            version != V1_EVT1) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -866,6 +879,7 @@ static ssize_t mono_show(struct notle_drv_data *notle_data, char *buf) {
               val = !!(actel_fpga_config.config & ACTEL_FPGA_CONFIG_MONO);
               break;
             case V6_HOG:
+            case V1_EVT1:
               val = ice40_read_register(ICE40_BACKLIGHT);
               if (val < 0) {
                 printk(KERN_ERR LOG_TAG "Failed to read iCE40 register: "
@@ -902,6 +916,7 @@ static ssize_t mono_store(struct notle_drv_data *notle_data,
               }
               break;
             case V6_HOG:
+            case V1_EVT1:
               r = ice40_read_register(ICE40_BACKLIGHT);
               if (r < 0) {
                 printk(KERN_ERR LOG_TAG "Failed to read iCE40 register: "
@@ -960,6 +975,7 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
               }
               break;
             case V6_HOG:
+            case V1_EVT1:
               if (led_config.brightness) {
                 led_config_to_linecuts(notle_data->dssdev, &led_config, &r, &g, &b);
                 if (ice40_set_backlight(1, r, g, b)) {
@@ -1319,6 +1335,7 @@ static int fpga_read_revision(void) {
                 rev = actel_config.revision;
                 break;
         case V6_HOG:
+        case V1_EVT1:
                 if ((r = ice40_read_register(ICE40_REVISION)) < 0) {
                         printk(KERN_ERR LOG_TAG "Failed to read iCE40 FPGA config: %i\n", r);
                         break;
@@ -1450,6 +1467,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
         /* Load defaults */
         switch (version) {
           case V6_HOG:
+          case V1_EVT1:
             ice40_write_register(ICE40_BACKLIGHT, ice40_defaults.backlight);
             break;
           default:
@@ -1469,6 +1487,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
                   }
                   break;
             case V6_HOG:
+            case V1_EVT1:
                   led_config_to_linecuts(dssdev, &led_config, &r, &g, &b);
                   ice40_set_backlight(1, r, g, b);
                   break;
@@ -1509,6 +1528,7 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
             }
             break;
           case V6_HOG:
+          case V1_EVT1:
             /* Don't change the color mix, just disable the backlight. */
             if (ice40_set_backlight(0, -1, -1, -1)) {
               printk(KERN_ERR LOG_TAG "Failed to disable iCE40 FPGA LED_EN\n");

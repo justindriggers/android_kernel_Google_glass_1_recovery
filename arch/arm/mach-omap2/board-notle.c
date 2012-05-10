@@ -155,15 +155,6 @@
 #define GPIO_ID0                        34
 #define MUX_ID0                         MUX(GPMC_AD10)
 
-typedef enum {
-        UNVERSIONED = 7,
-        V1_DOG      = 7,
-        V3_EMU      = 0,
-        V4_FLY      = 4,
-        V5_GNU      = 5,
-        V6_HOG      = 6,
-} notle_version;
-
 static notle_version NOTLE_VERSION = UNVERSIONED;
 
 /* Read board version from GPIO.  Result in NOTLE_VERSION. */
@@ -213,6 +204,8 @@ static char * notle_version_str(notle_version board_ver)
                 return "V5 GNU";
         case V6_HOG:
                 return "V6 HOG";
+        case V1_EVT1:
+                return "V1 EVT1";
         }
         return "UNVERSIONED";
 }
@@ -516,6 +509,7 @@ int __init notle_dpi_init(void)
           case V4_FLY:
           case V5_GNU:
           case V6_HOG:
+          case V1_EVT1:
             r = gpio_request_one(GPIO_EN_10V, GPIOF_OUT_INIT_LOW, "enable_10V");
             if (r) {
                     pr_err("Failed to get enable_10V gpio\n");
@@ -529,7 +523,8 @@ int __init notle_dpi_init(void)
                     goto err1;
             }
 
-            if (NOTLE_VERSION == V6_HOG) {
+            if (NOTLE_VERSION == V6_HOG ||
+                NOTLE_VERSION == V1_EVT1) {
               spi_register_board_info(ice40_spi_board_info,
                                       ARRAY_SIZE(ice40_spi_board_info));
             }
@@ -1932,6 +1927,7 @@ static int __init notle_i2c_init(void)
                             ARRAY_SIZE(notle_fly_i2c_4_boardinfo));
             break;
           case V6_HOG:
+          case V1_EVT1:
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
             synaptics_f11_data.flip_X = false;
             synaptics_f11_data.flip_Y = true;
@@ -2217,7 +2213,7 @@ late_initcall(notle_backlight_hack);
 #endif
 
 static void __init my_mux_init(void) {
-        int flags;
+        u32 flags;
         // Move this code to board_mux constants when we're convinced it works:
 
         // Example code for writing mux values, bypassing omap4_mux_init code:
@@ -2249,11 +2245,9 @@ static void __init my_mux_init(void) {
         }
         __raw_writew(flags, CORE_BASE_ADDR + MUX_BACKLIGHT);
 
-
         flags = OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN;
 
         // input gpio's:
-        __raw_writew(flags, CORE_BASE_ADDR + MUX_BCM_WLAN_HOST_WAKE);
         if (NOTLE_VERSION == V1_DOG) {
           __raw_writew(flags, CORE_BASE_ADDR + MUX_CAMERA_DOG);
         } else {
@@ -2374,7 +2368,6 @@ static void __init notle_init(void)
 {
         int package = OMAP_PACKAGE_CBS;
         int err;
-        int wifi_power_gpio;
 
         omap_emif_setup_device_details(&emif_devices, &emif_devices);
 
@@ -2423,19 +2416,9 @@ static void __init notle_init(void)
                 pr_err("GPS initialization failed: %d\n", err);
         }
 
-        switch (NOTLE_VERSION) {
-          case V1_DOG:
-          case V3_EMU:
-          case V4_FLY:
-          case V5_GNU:
-            wifi_power_gpio = GPIO_WL_BT_REG_ON;
-            break;
-          case V6_HOG:
-          default:
-            wifi_power_gpio = GPIO_WL_RST_N;
-        }
-        notle_bluetooth_init(NOTLE_VERSION == V6_HOG);
-        err = notle_wlan_init(wifi_power_gpio);
+        notle_bluetooth_init(NOTLE_VERSION == V6_HOG ||
+                             NOTLE_VERSION == V1_EVT1);
+        err = notle_wlan_init(NOTLE_VERSION);
         if (err) {
                 pr_err("Wifi initialization failed: %d\n", err);
         }
@@ -2443,7 +2426,8 @@ static void __init notle_init(void)
         // Do this after the wlan_init, which inits the regulator shared
         // with the bluetooth device and muxes the bt signals.
         platform_add_devices(notle_devices, ARRAY_SIZE(notle_devices));
-        if (NOTLE_VERSION == V6_HOG) {
+        if (NOTLE_VERSION == V6_HOG ||
+            NOTLE_VERSION == V1_EVT1) {
                 err = platform_device_register(&notle_pcb_temp_sensor);
                 if (err) {
                         pr_err("notle_pcb_temp_sensor registration failed: %d\n", err);
@@ -2475,6 +2459,7 @@ static void __init notle_init(void)
           case V4_FLY:
           case V5_GNU:
           case V6_HOG:
+          case V1_EVT1:
             err = notle_dpi_init();
             if (!err) {
                     panel_notle.notle_version = NOTLE_VERSION;
