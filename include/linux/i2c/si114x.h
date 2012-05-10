@@ -214,6 +214,17 @@ struct si114x_data_user {
 #define PARAM_MASK          0x1f
 #define PARAM_MAX           0x20
 
+/* Parameter CHLIST @ 0x01 */
+#define CHLIST_EN_PS1       0x01
+#define CHLIST_EN_PS2       0x02
+#define CHLIST_EN_PS3       0x04
+#define CHLIST_RSVD00       0x08
+#define CHLIST_EN_ALS_VIS   0x10
+#define CHLIST_EN_ALS_IR    0x20
+#define CHLIST_EN_AUX       0x40
+#define CHLIST_RSVD07       0x80
+
+
 /*
  * Platform initial defaults
  */

@@ -16,7 +16,6 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
-#define DEBUG 1
 #define SI114X_USE_INPUT_POLL 1
 // #define SI114X_DISABLE_INPUT_QUEUE 1
 
@@ -39,11 +38,13 @@
 
 #include <linux/i2c/si114x.h>
 
-#define DRIVER_VERSION "0.1"
+#define DRIVER_VERSION "0.2"
 #define DEVICE_NAME "si114x"
 
+/* The names of the various input sensors this driver supports */
 #define INPUT_DEVICE_NAME_PS "si114x_ps"
-#define INPUT_DEVICE_NAME_ALS "si114x_als"
+#define INPUT_DEVICE_NAME_ALS_IR "si114x_als_ir"
+#define INPUT_DEVICE_NAME_ALS_VIS "si114x_als_vis"
 
 #define SI114X_MAX_LED 3
 
@@ -68,7 +69,8 @@ struct si114x_data {
 	struct i2c_client *client;
 	struct early_suspend early_suspend;
 
-	struct si114x_input_dev input_dev_als;
+	struct si114x_input_dev input_dev_als_ir;
+	struct si114x_input_dev input_dev_als_vis;
 	struct si114x_input_dev input_dev_ps;
 
 	struct si114x_led led[SI114X_MAX_LED];
@@ -266,7 +268,6 @@ static void si114x_input_report_ps_values(struct input_dev *input, uint16_t *val
 	/* Read the 32KHz timer */
 	read_persistent_clock(&ts);
 
-// #ifdef SI114X_DISABLE_INPUT_QUEUE
 	input_report_abs(input, ABS_DISTANCE, value[0]);
 	input_report_abs(input, ABS_DISTANCE, value[1]);
 	input_report_abs(input, ABS_DISTANCE, value[2]);
@@ -274,7 +275,6 @@ static void si114x_input_report_ps_values(struct input_dev *input, uint16_t *val
 	 * maximum precision */
 	input_report_abs(input, ABS_DISTANCE, (ts.tv_nsec >> 14) | (ts.tv_sec << 16));
 	input_sync(input);
-// #endif  /* SI114X_DISABLE_INPUT_QUEUE */
 
 	/* Now stick the values into the queue */
 	si114x_user_wr_ptr->led_a = value[0];
@@ -312,8 +312,12 @@ static int set_led_drive_strength(struct si114x_data *si114x)
 	return rc;
 }
 
+/* Enable the channels for this device. */
 static int enable_channels(struct si114x_data *si114x) {
-	return _parm_write(si114x, CMD_PARAM_SET, PARAM_I2C_CHLIST, 0x27);
+	return _parm_write(si114x, CMD_PARAM_SET, PARAM_I2C_CHLIST,
+	                   (CHLIST_EN_PS1 | CHLIST_EN_PS2 | CHLIST_EN_PS3
+	                    | CHLIST_RSVD00 | CHLIST_EN_ALS_VIS
+	                    | CHLIST_EN_ALS_IR));
 }
 
 static int turn_on_leds(struct si114x_data *si114x) {
@@ -331,9 +335,9 @@ static int start_measurements(struct si114x_data *si114x) {
 #ifdef SI114X_USE_INPUT_POLL
 /*
  * This callback is called by the input subsystem at the approrpriate polling
- * interval.
+ * interval for retrieve the ALS infrared light sensor reading.
  */
-static void si114x_input_poll_als_cb(struct input_polled_dev *dev)
+static void si114x_input_poll_als_ir_cb(struct input_polled_dev *dev)
 {
 	uint8_t buffer[2];
 	struct si114x_data *si114x = dev->private;
@@ -341,9 +345,33 @@ static void si114x_input_poll_als_cb(struct input_polled_dev *dev)
 	struct input_dev *input;
 	uint16_t *data16 = (uint16_t *)buffer;
 
-	input = si114x->input_dev_als.input_poll->input;
+	input = si114x->input_dev_als_ir.input_poll->input;
 
+	/* Read sensor data from the IR light registers. */
 	buffer[0] = SI114X_ALS_IR_DATA0;
+	if (_i2c_read_mult(si114x, buffer, sizeof(buffer))) {
+		dev_err(&client->dev, "%s: Unable to read als data\n", __func__);
+		return;
+	}
+	si114x_input_report_als_values(input, data16);
+}
+
+/*
+ * This callback is called by the input subsystem at the approrpriate polling
+ * interval for retrieve the ALS visual light sensor reading.
+ */
+static void si114x_input_poll_als_vis_cb(struct input_polled_dev *dev)
+{
+	uint8_t buffer[2];
+	struct si114x_data *si114x = dev->private;
+	struct i2c_client *client = si114x->client;
+	struct input_dev *input;
+	uint16_t *data16 = (uint16_t *)buffer;
+
+	input = si114x->input_dev_als_vis.input_poll->input;
+
+	/* Read sensor data from the visible light registers. */
+	buffer[0] = SI114X_ALS_VIS_DATA0;
 	if (_i2c_read_mult(si114x, buffer, sizeof(buffer))) {
 		dev_err(&client->dev, "%s: Unable to read als data\n", __func__);
 		return;
@@ -374,7 +402,7 @@ static void si114x_input_poll_ps_cb(struct input_polled_dev *dev)
 }
 
 /* Call from the input subsystem to start polling the device */
-static int si114x_input_als_open(struct input_dev *input)
+static int si114x_input_als_ir_open(struct input_dev *input)
 {
 	struct si114x_data *si114x = input_get_drvdata(input);
 	struct i2c_client *client = si114x->client;
@@ -383,7 +411,7 @@ static int si114x_input_als_open(struct input_dev *input)
 }
 
 /* Call from the input subsystem to stop polling the device */
-static void si114x_input_als_close(struct input_dev *input)
+static void si114x_input_als_ir_close(struct input_dev *input)
 {
 	struct si114x_data *si114x = input_get_drvdata(input);
 	struct i2c_client *client = si114x->client;
@@ -391,8 +419,26 @@ static void si114x_input_als_close(struct input_dev *input)
 	return;
 }
 
-/* Create and register polled input mechanism */
-static int setup_als_polled_input(struct si114x_data *si114x)
+/* Call from the input subsystem to start polling the device */
+static int si114x_input_als_vis_open(struct input_dev *input)
+{
+	struct si114x_data *si114x = input_get_drvdata(input);
+	struct i2c_client *client = si114x->client;
+	dev_info(&client->dev, "%s\n", __func__);
+	return 0;
+}
+
+/* Call from the input subsystem to stop polling the device */
+static void si114x_input_als_vis_close(struct input_dev *input)
+{
+	struct si114x_data *si114x = input_get_drvdata(input);
+	struct i2c_client *client = si114x->client;
+	dev_info(&client->dev, "%s\n", __func__);
+	return;
+}
+
+/* Create and register als infrared light polled input mechanism */
+static int setup_als_ir_polled_input(struct si114x_data *si114x)
 {
 	int rc;
 	struct i2c_client *client = si114x->client;
@@ -406,16 +452,15 @@ static int setup_als_polled_input(struct si114x_data *si114x)
 	}
 
 	input_poll->private = si114x;
-	input_poll->poll = si114x_input_poll_als_cb;
+	input_poll->poll = si114x_input_poll_als_ir_cb;
 	input_poll->poll_interval = si114x->pdata->pfd_als_poll_interval;
 
 	input = input_poll->input;
 
+	input->name = INPUT_DEVICE_NAME_ALS_IR;
 
-	input->name = INPUT_DEVICE_NAME_ALS;
-
-	input->open = si114x_input_als_open;
-	input->close = si114x_input_als_close;
+	input->open = si114x_input_als_ir_open;
+	input->close = si114x_input_als_ir_close;
 	set_bit(EV_ABS, input->evbit);
 
 	input->id.bustype = BUS_I2C;
@@ -433,8 +478,8 @@ static int setup_als_polled_input(struct si114x_data *si114x)
 		goto err_als_register_input_device;
 	}
 
-	si114x->input_dev_als.input = input;
-	si114x->input_dev_als.input_poll = input_poll;
+	si114x->input_dev_als_ir.input = input;
+	si114x->input_dev_als_ir.input_poll = input_poll;
 
 	return rc;
 
@@ -443,40 +488,59 @@ static int setup_als_polled_input(struct si114x_data *si114x)
 
 	return rc;
 }
-#else
-/* Create and register interrupt driven input mechanism */
-static int setup_als_input(struct si114x_data *si114x)
+
+/* Create and register als visible light polled input mechanism */
+static int setup_als_vis_polled_input(struct si114x_data *si114x)
 {
 	int rc;
 	struct i2c_client *client = si114x->client;
-	struct input_dev *input_dev;
+	struct input_polled_dev *input_poll;
+	struct input_dev *input;
 
-	input_dev = input_allocate_device();
-	if (!input_dev) {
+	input_poll = input_allocate_polled_device();
+	if (!input_poll) {
 		dev_err(&client->dev, "%s: Unable to allocate input device\n", __func__);
 		return -ENOMEM;
 	}
 
-	input_dev->name = INPUT_DEVICE_NAME_ALS;
-	set_bit(EV_ABS, input_dev->evbit);
-	input_set_abs_params(input_dev, ABS_MISC, ALS_MIN_MEASURE_VAL, ALS_MAX_MEASURE_VAL+1, 0, 0);
+	input_poll->private = si114x;
+	input_poll->poll = si114x_input_poll_als_vis_cb;
+	input_poll->poll_interval = si114x->pdata->pfd_als_poll_interval;
 
-	rc = input_register_device(input_dev);
-	if (rc < 0) {
-		dev_err(&client->dev, "%s: Unable to register input device\n", __func__);
+	input = input_poll->input;
+
+	input->name = INPUT_DEVICE_NAME_ALS_VIS;
+
+	input->open = si114x_input_als_vis_open;
+	input->close = si114x_input_als_vis_close;
+	set_bit(EV_ABS, input->evbit);
+
+	input->id.bustype = BUS_I2C;
+	input->dev.parent = &si114x->client->dev;
+
+	input_set_abs_params(input, ABS_MISC, ALS_MIN_MEASURE_VAL, ALS_MAX_MEASURE_VAL+1, 0, 0);
+
+	input_set_drvdata(input, input_poll);
+
+	rc = input_register_polled_device(input_poll);
+	if (rc) {
+		dev_err(&si114x->client->dev,
+		        "Unable to register input polled device %s\n",
+		        input->name);
 		goto err_als_register_input_device;
 	}
 
-	si114x->input_dev_als.input = input_dev;
+	si114x->input_dev_als_vis.input = input;
+	si114x->input_dev_als_vis.input_poll = input_poll;
+
 	return rc;
 
  err_als_register_input_device:
-	input_free_device(input_dev);
+	input_free_polled_device(input_poll);
+
 	return rc;
 }
-#endif  /* SI114X_USE_INPUT_POLL */
 
-#ifdef SI114X_USE_INPUT_POLL
 /* Call from the input subsystem to start polling the device */
 static int si114x_input_ps_open(struct input_dev *input)
 {
@@ -523,11 +587,6 @@ static int setup_ps_polled_input(struct si114x_data *si114x)
 	input->open = si114x_input_ps_open;
 	input->close = si114x_input_ps_close;
 
-#if 0
-	input_set_abs_params(input, ABS_X, PS_MIN_MEASURE_VAL, PS_MAX_MEASURE_VAL, 0, 0);
-	input_set_abs_params(input, ABS_Y, PS_MIN_MEASURE_VAL, PS_MAX_MEASURE_VAL, 0, 0);
-	input_set_abs_params(input, ABS_Z, PS_MIN_MEASURE_VAL, PS_MAX_MEASURE_VAL, 0, 0);
-#endif
 	input_set_abs_params(input, ABS_DISTANCE, PS_MIN_MEASURE_VAL, PS_MAX_MEASURE_VAL, 0, 0);
 	input_set_abs_params(input, ABS_DISTANCE, PS_MIN_MEASURE_VAL, PS_MAX_MEASURE_VAL, 0, 0);
 	input_set_abs_params(input, ABS_DISTANCE, PS_MIN_MEASURE_VAL, PS_MAX_MEASURE_VAL, 0, 0);
@@ -556,6 +615,67 @@ err_ps_register_input_device:
 	return rc;
 }
 #else
+/* Create and register interrupt driven input mechanism */
+static int setup_als_ir_input(struct si114x_data *si114x)
+{
+	int rc;
+	struct i2c_client *client = si114x->client;
+	struct input_dev *input_dev;
+
+	input_dev = input_allocate_device();
+	if (!input_dev) {
+		dev_err(&client->dev, "%s: Unable to allocate input device\n", __func__);
+		return -ENOMEM;
+	}
+
+	input_dev->name = INPUT_DEVICE_NAME_ALS_IR;
+	set_bit(EV_ABS, input_dev->evbit);
+	input_set_abs_params(input_dev, ABS_MISC, ALS_MIN_MEASURE_VAL, ALS_MAX_MEASURE_VAL+1, 0, 0);
+
+	rc = input_register_device(input_dev);
+	if (rc < 0) {
+		dev_err(&client->dev, "%s: Unable to register input device\n", __func__);
+		goto err_als_register_input_device;
+	}
+
+	si114x->input_dev_als_ir.input = input_dev;
+	return rc;
+
+ err_als_register_input_device:
+	input_free_device(input_dev);
+	return rc;
+}
+
+/* Create and register interrupt driven input mechanism */
+static int setup_als_vis_input(struct si114x_data *si114x)
+{
+	int rc;
+	struct i2c_client *client = si114x->client;
+	struct input_dev *input_dev;
+
+	input_dev = input_allocate_device();
+	if (!input_dev) {
+		dev_err(&client->dev, "%s: Unable to allocate input device\n", __func__);
+		return -ENOMEM;
+	}
+
+	input_dev->name = INPUT_DEVICE_NAME_ALS_VIS;
+	set_bit(EV_ABS, input_dev->evbit);
+	input_set_abs_params(input_dev, ABS_MISC, ALS_MIN_MEASURE_VAL, ALS_MAX_MEASURE_VAL+1, 0, 0);
+
+	rc = input_register_device(input_dev);
+	if (rc < 0) {
+		dev_err(&client->dev, "%s: Unable to register input device\n", __func__);
+		goto err_als_register_input_device;
+	}
+
+	si114x->input_dev_als_vis.input = input_dev;
+	return rc;
+
+ err_als_register_input_device:
+	input_free_device(input_dev);
+	return rc;
+}
 static int setup_ps_input(struct si114x_data *si114x)
 {
 	int rc;
@@ -612,7 +732,7 @@ static void si114x_late_resume(struct early_suspend *h)
 static ssize_t psals_data_show(struct device *dev,
                                struct device_attribute *attr, char *buf)
 {
-	uint8_t buffer[8];
+	uint8_t buffer[sizeof(uint16_t)*5];
 	struct si114x_data *si114x;
 	uint16_t *data16 = (uint16_t *)buffer;
 
@@ -621,18 +741,35 @@ static ssize_t psals_data_show(struct device *dev,
 		return -ENODEV;
 	}
 
-	buffer[0] = SI114X_ALS_IR_DATA0;
+	buffer[0] = SI114X_ALS_VIS_DATA0;
 	if (_i2c_read_mult(si114x, buffer, sizeof(buffer))) {
 		return -EIO;
 	}
-        return sprintf(buf, "%u %u %u %u\n", data16[0], data16[1], data16[2], data16[3]);
+	return sprintf(buf, "%u %u %u %u %u\n", data16[0], data16[1],
+	               data16[2], data16[3], data16[4]);
 }
 static DEVICE_ATTR(psals_data, 0444, psals_data_show, NULL);
 
-static ssize_t als_data_show(struct device *dev,
-                             struct device_attribute *attr, char *buf)
+static ssize_t psals_data_show_hdr(struct device *dev,
+                                   struct device_attribute *attr, char *buf)
 {
-	uint8_t buffer[2];
+	struct si114x_data *si114x;
+
+	si114x = dev_get_drvdata(dev);
+	if (!si114x) {
+		return -ENODEV;
+	}
+
+	return sprintf(buf, "als_vis als_ir ps1 ps2 ps3\n");
+}
+
+static DEVICE_ATTR(psals_data_hdr, 0444, psals_data_show_hdr, NULL);
+
+
+static ssize_t als_ir_data_show(struct device *dev,
+                                struct device_attribute *attr, char *buf)
+{
+	uint8_t buffer[sizeof(uint16_t)*1];
 	struct si114x_data *si114x;
 	struct input_polled_dev *input_poll;
 	uint16_t *data16 = (uint16_t *)buffer;
@@ -653,12 +790,99 @@ static ssize_t als_data_show(struct device *dev,
 	}
         return sprintf(buf, "%u\n", data16[0]);
 }
-static DEVICE_ATTR(als_data, 0444, als_data_show, NULL);
+static DEVICE_ATTR(als_ir_data, 0444, als_ir_data_show, NULL);
+
+static ssize_t als_vis_data_show(struct device *dev,
+                                struct device_attribute *attr, char *buf)
+{
+	uint8_t buffer[sizeof(uint16_t)*1];
+	struct si114x_data *si114x;
+	struct input_polled_dev *input_poll;
+	uint16_t *data16 = (uint16_t *)buffer;
+
+	input_poll = dev_get_drvdata(dev);
+	if (!input_poll) {
+		return -ENODEV;
+	}
+
+	si114x = (struct si114x_data *)input_poll->private;
+	if (!si114x) {
+		return -ENODEV;
+	}
+
+	buffer[0] = SI114X_ALS_VIS_DATA0;
+	if (_i2c_read_mult(si114x, buffer, sizeof(buffer))) {
+		return -EIO;
+	}
+        return sprintf(buf, "%u\n", data16[0]);
+}
+static DEVICE_ATTR(als_vis_data, 0444, als_vis_data_show, NULL);
+
+static ssize_t als_vis_gain_show(struct device *dev,
+                                 struct device_attribute *attr, char *buf)
+{
+	struct si114x_data *si114x;
+	struct input_polled_dev *input_poll;
+	int data = 0;
+
+	input_poll = dev_get_drvdata(dev);
+	if (!input_poll) {
+		return -ENODEV;
+	}
+
+	si114x = (struct si114x_data *)input_poll->private;
+	if (!si114x) {
+		return -ENODEV;
+	}
+
+	if (_cmd_write(si114x,  CMD_PARAM_QUERY
+	               | ( PARAM_ALS_VIS_ADC_GAIN & PARAM_MASK))) {
+		return -EIO;
+	}
+
+	/* Wait for the data to present. */
+	msleep(1);
+	_i2c_read_one(si114x, SI114X_PARAM_RD, &data);
+	return sprintf(buf, "%d", data);
+}
+
+static ssize_t als_vis_gain_store(struct device *dev,
+                                  struct device_attribute *attr, const char *buf,
+                                  size_t count)
+{
+	struct si114x_data *si114x;
+	struct input_polled_dev *input_poll;
+	int data;
+
+	input_poll = dev_get_drvdata(dev);
+	if (!input_poll) {
+		return -ENODEV;
+	}
+
+	si114x = (struct si114x_data *)input_poll->private;
+	if (!si114x) {
+		return -ENODEV;
+	}
+
+	sscanf(buf, "%d", &data);
+
+	/* Validate parameters */
+	if (data < 0 || data > 15) {
+		return -EINVAL;
+	}
+
+	/* Set the irLED pulse width and integration time. */
+	if (_parm_write(si114x, CMD_PARAM_SET, PARAM_ALS_VIS_ADC_GAIN, data)) {
+		return -EIO;
+	}
+	return count;
+}
+static DEVICE_ATTR(als_vis_gain, 0666, als_vis_gain_show, als_vis_gain_store);
 
 static ssize_t ps_data_show(struct device *dev,
                             struct device_attribute *attr, char *buf)
 {
-	uint8_t buffer[6];
+	uint8_t buffer[sizeof(uint16_t)*3];
 	struct si114x_data *si114x;
 	struct input_polled_dev *input_poll;
 	uint16_t *data16 = (uint16_t *)buffer;
@@ -686,7 +910,7 @@ static ssize_t ps_data_show(struct device *dev,
 	}
         return sprintf(buf, "%u %u %u %lu\n", data16[0], data16[1], data16[2], ts.tv_nsec);
 }
-static DEVICE_ATTR(ps_data, 0444, ps_data_show, NULL);
+static DEVICE_ATTR(ps_input_data, 0444, ps_data_show, NULL);
 
 static ssize_t led_drive_show(struct device *dev,
                               struct device_attribute *attr, char *buf)
@@ -734,8 +958,8 @@ static ssize_t led_drive_store(struct device *dev, struct device_attribute *attr
 
 static DEVICE_ATTR(led_drive, 0666, led_drive_show, led_drive_store);
 
-static ssize_t led_drive_show2(struct device *dev,
-                              struct device_attribute *attr, char *buf)
+static ssize_t led_input_drive_show(struct device *dev,
+                                    struct device_attribute *attr, char *buf)
 {
 	struct si114x_data *si114x;
 	struct input_polled_dev *input_poll;
@@ -755,8 +979,9 @@ static ssize_t led_drive_show2(struct device *dev,
 	               si114x->led[2].drive_strength);
 }
 
-static ssize_t led_drive_store2(struct device *dev, struct device_attribute *attr,
-                               const char *buf, size_t count)
+static ssize_t led_input_drive_store(struct device *dev,
+                                     struct device_attribute *attr,
+                                     const char *buf, size_t count)
 {
 	int i;
 	struct si114x_data *si114x;
@@ -793,7 +1018,7 @@ static ssize_t led_drive_store2(struct device *dev, struct device_attribute *att
 	return count;
 }
 
-static DEVICE_ATTR(led_drive2, 0666, led_drive_show2, led_drive_store2);
+static DEVICE_ATTR(led_input_drive, 0666, led_input_drive_show, led_input_drive_store);
 
 /*
  * Dump the parameter ram contents.
@@ -840,6 +1065,7 @@ static void sysfs_register_bus_entry(struct si114x_data *si114x, struct i2c_clie
 	dev_set_drvdata(&client->dev, si114x);
 
 	rc += device_create_file(&client->dev, &dev_attr_psals_data);
+	rc += device_create_file(&client->dev, &dev_attr_psals_data_hdr);
 	rc += device_create_file(&client->dev, &dev_attr_led_drive);
 	rc += device_create_file(&client->dev, &dev_attr_param_data);
 	if (rc) {
@@ -857,8 +1083,8 @@ static void sysfs_register_class_input_entry_ps(struct si114x_data *si114x, stru
 	int rc = 0;
 	struct i2c_client *client = si114x->client;
 
-	rc += device_create_file(dev, &dev_attr_ps_data);
-	rc += device_create_file(dev, &dev_attr_led_drive2);
+	rc += device_create_file(dev, &dev_attr_ps_input_data);
+	rc += device_create_file(dev, &dev_attr_led_input_drive);
 	if (rc) {
 		dev_err(&client->dev, "%s Unable to create sysfs class files\n", __func__);
 	} else {
@@ -866,12 +1092,26 @@ static void sysfs_register_class_input_entry_ps(struct si114x_data *si114x, stru
 	}
 }
 
-static void sysfs_register_class_input_entry_als(struct si114x_data *si114x, struct device *dev) {
+static void sysfs_register_class_input_entry_als_ir(struct si114x_data *si114x, struct device *dev) {
 	int rc = 0;
 	struct i2c_client *client = si114x->client;
 
-	rc += device_create_file(dev, &dev_attr_als_data);
-	rc += device_create_file(dev, &dev_attr_led_drive2);
+	rc += device_create_file(dev, &dev_attr_als_ir_data);
+	rc += device_create_file(dev, &dev_attr_led_input_drive);
+	if (rc) {
+		dev_err(&client->dev, "%s Unable to create sysfs class files\n", __func__);
+	} else {
+		dev_dbg(&client->dev, "%s Created sysfs class files\n", __func__);
+	}
+}
+
+static void sysfs_register_class_input_entry_als_vis(struct si114x_data *si114x, struct device *dev) {
+	int rc = 0;
+	struct i2c_client *client = si114x->client;
+
+	rc += device_create_file(dev, &dev_attr_als_vis_data);
+	rc += device_create_file(dev, &dev_attr_als_vis_gain);
+	rc += device_create_file(dev, &dev_attr_led_input_drive);
 	if (rc) {
 		dev_err(&client->dev, "%s Unable to create sysfs class files\n", __func__);
 	} else {
@@ -1011,7 +1251,6 @@ static ssize_t si114x_read(struct file *file, char __user *buf, size_t count, lo
 	}
 
 	mutex_unlock(&si114x_user_lock);
-	// dev_dbg(&client->dev, "%s: Read from device\n", __func__);
 	return rc;
 }
 
@@ -1045,9 +1284,11 @@ static int si114x_setup(struct si114x_data *si114x) {
 
 	start_measurements(si114x);
 
-	/* Set the gain. */
+	/* Set the PS sensitivity and measurement mode. */
 	_parm_write(si114x, CMD_PARAM_SET, PARAM_ADC_MISC, 0x24);
 
+	/* Set the irLED pulse width and integration time. */
+	_parm_write(si114x, CMD_PARAM_SET, PARAM_ALS_VIS_ADC_GAIN, 0x05);
 	return rc;
 }
 
@@ -1094,15 +1335,25 @@ static int  __devinit si114x_probe(struct i2c_client *client, const struct i2c_d
 	sysfs_register_bus_entry(si114x, client);
 
 #ifdef SI114X_USE_INPUT_POLL
-	/* Setup the input subsystem for the ALS */
-	if (setup_als_polled_input(si114x)) {
-		dev_err(&client->dev,"%s: Unable to allocate als polled input resource\n", __func__);
+	/* Setup the input subsystem for the ALS infrared light sensor */
+	if (setup_als_ir_polled_input(si114x)) {
+		dev_err(&client->dev,"%s: Unable to allocate als IR polled input resource\n", __func__);
 		goto err_out;
 	}
 	/* Register the sysfs class input entries */
-	sysfs_register_class_input_entry_als(si114x, &si114x->input_dev_als.input->dev);
+	sysfs_register_class_input_entry_als_ir(si114x, &si114x->input_dev_als_ir.input->dev);
 	/* Store the driver data into our private structure */
-	si114x->input_dev_als.input_poll->private = si114x;
+	si114x->input_dev_als_ir.input_poll->private = si114x;
+
+	/* Setup the input subsystem for the ALS visible light sensor */
+	if (setup_als_vis_polled_input(si114x)) {
+		dev_err(&client->dev,"%s: Unable to allocate als visible polled input resource\n", __func__);
+		goto err_out;
+	}
+	/* Register the sysfs class input entries */
+	sysfs_register_class_input_entry_als_vis(si114x, &si114x->input_dev_als_vis.input->dev);
+	/* Store the driver data into our private structure */
+	si114x->input_dev_als_vis.input_poll->private = si114x;
 
 	/* Setup the input subsystem for the PS */
 	if (setup_ps_polled_input(si114x)) {
@@ -1114,21 +1365,28 @@ static int  __devinit si114x_probe(struct i2c_client *client, const struct i2c_d
 	/* Store the driver data into our private structure */
 	si114x->input_dev_ps.input_poll->private = si114x;
 #else
-	/* Setup the input subsystem for the ALS */
-	if (setup_als_input(si114x)) {
-		dev_err(&client->dev,"%s: Unable to allocate als input resource\n", __func__);
+	/* Setup the input subsystem for the ALS infrared light. */
+	if (setup_als_ir_input(si114x)) {
+		dev_err(&client->dev,"%s: Unable to allocate als IR input resource\n", __func__);
 		goto err_out;
 	}
 	/* Register the sysfs class input entries */
-	sysfs_register_class_input_entry_als(si114x, &si114x->input_dev_als.input->dev);
-	dev_set_drvdata(&si114x->input_dev_als.input->dev, si114x);
+	sysfs_register_class_input_entry_als_ir(si114x, &si114x->input_dev_als_ir.input->dev);
+	dev_set_drvdata(&si114x->input_dev_als_ir.input->dev, si114x);
 
+	/* Setup the input subsystem for the ALS visible light. */
+	if (setup_als_vis_input(si114x)) {
+		dev_err(&client->dev,"%s: Unable to allocate als visibile input resource\n", __func__);
+		goto err_out;
+	}
+	/* Register the sysfs class input entries */
+	sysfs_register_class_input_entry_als_vis(si114x, &si114x->input_dev_als_ir.input->dev);
+	dev_set_drvdata(&si114x->input_dev_als_ir.input->dev, si114x);
 	/* Setup the input subsystem for the PS */
 	if (setup_ps_input(si114x)) {
 		dev_err(&client->dev, "%s: Unable to allocate ps input resource\n", __func__);
 		goto err_out;
 	}
-//	sysfs_register_class_input_entry_ps(si114x, &si114x->input_dev_ps.input->dev);
 
 	dev_set_drvdata(&si114x->input_dev_ps.input->dev, si114x);
 #endif  /* SI114X_USE_INPUT_POLL */
