@@ -1019,6 +1019,11 @@ static ssize_t led_input_drive_store(struct device *dev,
 }
 
 static DEVICE_ATTR(led_input_drive, 0666, led_input_drive_show, led_input_drive_store);
+/* TODO(cmanton) This is a temporary alias for the above 'led_input_drive' for the upper layer
+   to use.  Once the upper layer has transitioned to 'led_input_drive', then 'led_drive2'
+   should be removed.
+   */
+static DEVICE_ATTR(led_drive2, 0666, led_input_drive_show, led_input_drive_store);
 
 /*
  * Dump the parameter ram contents.
@@ -1085,6 +1090,7 @@ static void sysfs_register_class_input_entry_ps(struct si114x_data *si114x, stru
 
 	rc += device_create_file(dev, &dev_attr_ps_input_data);
 	rc += device_create_file(dev, &dev_attr_led_input_drive);
+	rc += device_create_file(dev, &dev_attr_led_drive2);
 	if (rc) {
 		dev_err(&client->dev, "%s Unable to create sysfs class files\n", __func__);
 	} else {
@@ -1098,6 +1104,7 @@ static void sysfs_register_class_input_entry_als_ir(struct si114x_data *si114x, 
 
 	rc += device_create_file(dev, &dev_attr_als_ir_data);
 	rc += device_create_file(dev, &dev_attr_led_input_drive);
+	rc += device_create_file(dev, &dev_attr_led_drive2);
 	if (rc) {
 		dev_err(&client->dev, "%s Unable to create sysfs class files\n", __func__);
 	} else {
@@ -1112,6 +1119,7 @@ static void sysfs_register_class_input_entry_als_vis(struct si114x_data *si114x,
 	rc += device_create_file(dev, &dev_attr_als_vis_data);
 	rc += device_create_file(dev, &dev_attr_als_vis_gain);
 	rc += device_create_file(dev, &dev_attr_led_input_drive);
+	rc += device_create_file(dev, &dev_attr_led_drive2);
 	if (rc) {
 		dev_err(&client->dev, "%s Unable to create sysfs class files\n", __func__);
 	} else {
