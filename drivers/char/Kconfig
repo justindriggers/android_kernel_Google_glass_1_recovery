@@ -633,5 +633,12 @@ config MSM_SMD_PKT
 	  Enables userspace clients to read and write to some packet SMD
 	  ports via device interface for MSM chipset.
 
+config GPS_ELTON
+	tristate "Enable the GPS SiRF 4e driver chip."
+	default n
+	depends on HAS_EARLYSUSPEND
+	help
+	  Enables the GPS SiRF4e driver chip.
+
 endmenu
 
