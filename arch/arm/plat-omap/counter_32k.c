@@ -214,29 +214,27 @@ static DEFINE_SPINLOCK(read_robust_clock_lock);
 
 u64 read_robust_clock(void)
 {
-    u64 nsecs;
-    cycles_t cycles;
-    unsigned long flags;
+	u64 nsecs;
+	cycles_t cycles;
+	unsigned long flags;
 
 	spin_lock_irqsave(&read_robust_clock_lock, flags);
 
-    cycles = omap_readl(OMAP4430_32KSYNCT_BASE + 0x10);
+	cycles = omap_readl(OMAP4430_32KSYNCT_BASE + 0x10);
 
-    if (cycles < last_clk_cycles)  {
-        accumulated_cycles += cycles + (0xFFFFFFFFu - last_clk_cycles);
-    } else {
-        accumulated_cycles += (cycles - last_clk_cycles);
-    }
-    nsecs = ((u64) accumulated_cycles * NSEC_PER_SEC) >> 15;
+	if (cycles < last_clk_cycles)  {
+		accumulated_cycles += cycles + (0xFFFFFFFFu - last_clk_cycles);
+	} else {
+		accumulated_cycles += (cycles - last_clk_cycles);
+	}
+	nsecs = ((u64) accumulated_cycles * NSEC_PER_SEC) >> 15;
 
-    last_clk_cycles = cycles;
-
+	last_clk_cycles = cycles;
 
 	spin_unlock_irqrestore(&read_robust_clock_lock, flags);
 
-    return nsecs;
+	return nsecs;
 }
-
 
 int __init omap_init_clocksource_32k(void)
 {
