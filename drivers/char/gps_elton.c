@@ -162,7 +162,8 @@ static int __init gps_elton_init(void)
 	gps_elton->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
 	gps_elton->early_suspend.suspend = gps_elton_early_suspend;
 	gps_elton->early_suspend.resume = gps_elton_late_resume;
-	register_early_suspend(&gps_elton->early_suspend);
+	// TODO(cmanton) Don't suspend/resume for Russ's testing.
+	// register_early_suspend(&gps_elton->early_suspend);
 
 	/* This flag must be synchronized with the power pin toggles on the device.
 	   Assume this init routine is being called on cold start and that the
