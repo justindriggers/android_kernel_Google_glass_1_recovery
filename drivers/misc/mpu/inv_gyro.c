@@ -75,9 +75,7 @@ static const struct inv_hw_s hw_info[INV_NUM_PARTS] = {
 
 s64 get_time_ns(void)
 {
-	struct timespec ts;
-	ktime_get_ts(&ts);
-	return timespec_to_ns(&ts);
+	return read_robust_clock();
 }
 
 /**
