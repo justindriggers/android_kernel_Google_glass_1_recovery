@@ -33,7 +33,11 @@ struct gps_elton_data {
 	struct device *dev;
 	struct class *class;
 	struct early_suspend early_suspend;
-	/* System flag synchronized with device indication chip low power mode. */
+	/* Tristate suspend flag indicating state driver believes device is in.
+	 * -1: Driver Device is in unknown mode.
+	 *  0: Device is in active mode.
+	 *  1: Device is in hibernate mode.
+	 */
 	int is_suspended;
 };
 static struct gps_elton_data *gps_elton = NULL;
@@ -45,10 +49,25 @@ static ssize_t gps_omap_suspend_store(struct device *dev,
                                       struct device_attribute *attr,
                                       const char *buf, size_t count);
 
+static ssize_t gps_omap_set_suspend_store(struct device *dev,
+                                          struct device_attribute *attr,
+                                          const char *buf, size_t count);
+
+static ssize_t gps_omap_toggle_power_store(struct device *dev,
+                                           struct device_attribute *attr,
+                                           const char *buf, size_t count);
+
+
 static struct device_attribute attrs[] = {
+	__ATTR(toggle_power, 0666,
+	       NULL,
+	       gps_omap_toggle_power_store),
 	__ATTR(suspend, 0666,
 	       gps_omap_suspend_show,
 	       gps_omap_suspend_store),
+	__ATTR(set_suspend, 0666,
+	       NULL,
+	       gps_omap_set_suspend_store),
 };
 
 static void _toggle_power(struct gps_elton_data * gps_elton)
@@ -57,6 +76,25 @@ static void _toggle_power(struct gps_elton_data * gps_elton)
 	msleep(wait_between_power_toggle_in_ms);
 	gpio_set_value(GPIO_GPS_ON_OFF, 0);
 }
+
+/* User manually specifying suspend or resume mode of GPS chip. */
+static ssize_t gps_omap_toggle_power_store(struct device *dev,
+                                           struct device_attribute *attr,
+                                           const char *buf, size_t count)
+{
+	int data;
+	struct gps_elton_data *gps_elton = dev_get_drvdata(dev);
+	sscanf(buf, "%d", &data);
+
+	/* Validate parameters. */
+	if (data != 1) {
+		return -EINVAL;
+	}
+
+	_toggle_power(gps_elton);
+	return count;
+}
+
 
 static ssize_t gps_omap_suspend_show(struct device *dev,
                                      struct device_attribute *attr, char *buf)
@@ -79,9 +117,14 @@ static ssize_t gps_omap_suspend_store(struct device *dev,
 		return -EINVAL;
 	}
 
+	// We don't know the state of the device at this point.
+	if (gps_elton->is_suspended == -1) {
+		return -EAGAIN;
+	}
+
 	if (data == 1) {
 		/* We want to suspend. */
-		if (gps_elton->is_suspended) {
+		if (gps_elton->is_suspended == 1) {
 			/* But we are already suspended */
 			dev_info(gps_elton->dev, "%s already suspended\n", __func__);
 			return -EAGAIN;
@@ -92,22 +135,49 @@ static ssize_t gps_omap_suspend_store(struct device *dev,
 		}
 	} else {
 		/* We want to resume. */
-		if (gps_elton->is_suspended) {
-			_toggle_power(gps_elton);
-			gps_elton->is_suspended = 0;
-			dev_info(gps_elton->dev, "%s user resumed GPS chip\n", __func__);
-		} else {
+		if (gps_elton->is_suspended == 0) {
 			/* But we are already resumed. */
 			dev_info(gps_elton->dev, "%s already resumed\n", __func__);
 			return -EAGAIN;
+		} else {
+			_toggle_power(gps_elton);
+			gps_elton->is_suspended = 0;
+			dev_info(gps_elton->dev, "%s user resumed GPS chip\n", __func__);
 		}
 	}
+	return count;
+}
+
+/* User telling driver the state of the GPS chip. */
+static ssize_t gps_omap_set_suspend_store(struct device *dev,
+                                          struct device_attribute *attr,
+                                          const char *buf, size_t count)
+{
+	int data;
+	struct gps_elton_data *gps_elton = dev_get_drvdata(dev);
+	sscanf(buf, "%d", &data);
+
+	/* Validate parameters. */
+	if (data != 0 && data != 1) {
+		return -EINVAL;
+	}
+
+	// This is only valid when we don't know the state of the device.
+	if (gps_elton->is_suspended != -1) {
+		return -EAGAIN;
+	}
+
+	gps_elton->is_suspended = data;
 	return count;
 }
 
 /* Kernel power manager specifying suspend or resume mode of GPS chip. */
 static void gps_elton_early_suspend(struct early_suspend *h)
 {
+	// The suspend tristate indicating an unknown state.
+	if (gps_elton->is_suspended == -1) {
+		return;
+	}
 	if (gps_elton->is_suspended == 1) {
 		dev_warn(gps_elton->dev, "%s already suspended\n", __func__);
 		return;
@@ -119,6 +189,10 @@ static void gps_elton_early_suspend(struct early_suspend *h)
 
 static void gps_elton_late_resume(struct early_suspend *h)
 {
+	// The suspend tristate indicating an unknown state.
+	if (gps_elton->is_suspended == -1) {
+		return;
+	}
 	if (gps_elton->is_suspended == 0) {
 		dev_warn(gps_elton->dev, "%s already resumed\n", __func__);
 		return;
@@ -166,9 +240,8 @@ static int __init gps_elton_init(void)
 	// register_early_suspend(&gps_elton->early_suspend);
 
 	/* This flag must be synchronized with the power pin toggles on the device.
-	   Assume this init routine is being called on cold start and that the
-	   device is currently suspended. */
-	gps_elton->is_suspended = 1;
+	   Set flag indicating we don't know the state of the device. */
+	gps_elton->is_suspended = -1;
 
         /* Set up sysfs device attributes. */
 	for (attr_count = 0; attr_count < ARRAY_SIZE(attrs); attr_count++) {
