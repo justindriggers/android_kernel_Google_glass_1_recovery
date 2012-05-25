@@ -692,6 +692,7 @@ static enum power_supply_property twl6030_bci_battery_props[] = {
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_CURRENT_NOW,
 	POWER_SUPPLY_PROP_CURRENT_AVG,
+	POWER_SUPPLY_PROP_CHARGE_COUNTER,
 	POWER_SUPPLY_PROP_CAPACITY,
 	POWER_SUPPLY_PROP_TEMP,
 };
@@ -887,11 +888,19 @@ static void twl6030_read_fuelgauge(struct twl6030_bci_device_info *di)
 
 	di->capacity_uAh = cap;
 
-	if (di->trust_capacity) {
-		newcap = cap;
-		newcap = newcap / (di->capacity_max_uAh / 100);
-	} else {
-		newcap = twl6030_estimate_capacity(di);
+	/* scale to percentage */
+	newcap = cap;
+	newcap = newcap / (di->capacity_max_uAh / 100);
+
+	if (!di->trust_capacity) {
+		/* if we haven't hit a known full charge state, we may
+		 * have more capacity than measured by the CC, so use the
+		 * CC measured capacity as the floor, but allow higher
+		 * estimated capacities based on voltage
+		 */
+		ret = twl6030_estimate_capacity(di);
+		if (ret > newcap)
+			newcap = ret;
 	}
 
 	printk("battery: %lld uA  %lld uAh  %d mV  %d s  (%d%%) %s%s%s\n",
@@ -1093,6 +1102,9 @@ static int twl6030_bci_battery_get_property(struct power_supply *psy,
 		twl6030battery_current(di);
 		val->intval = di->current_uA;
 		break;
+	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
+		val->intval = di->capacity_uAh;
+		break;
 	case POWER_SUPPLY_PROP_TEMP:
 		val->intval = di->temp_C;
 		break;
@@ -1293,6 +1305,13 @@ static ssize_t show_min_vbus(struct device *dev, struct device_attribute *attr,
 	return sprintf(buf, "%u\n", val);
 }
 
+static ssize_t show_model(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct twl6030_bci_device_info *di = dev_get_drvdata(dev);
+	return sprintf(buf, "%d\n", di->trust_capacity ? 1 : 0);
+}
+
+static DEVICE_ATTR(model, S_IRUGO, show_model, NULL);
 static DEVICE_ATTR(vbus_voltage, S_IRUGO, show_vbus_voltage, NULL);
 static DEVICE_ATTR(id_level, S_IRUGO, show_id_level, NULL);
 static DEVICE_ATTR(regulation_voltage, S_IWUSR | S_IRUGO,
@@ -1306,6 +1325,7 @@ static DEVICE_ATTR(charge_current, S_IWUSR | S_IRUGO, show_charge_current,
 static DEVICE_ATTR(min_vbus, S_IWUSR | S_IRUGO, show_min_vbus, set_min_vbus);
 
 static struct attribute *twl6030_bci_attributes[] = {
+	&dev_attr_model.attr,
 	&dev_attr_vbus_voltage.attr,
 	&dev_attr_id_level.attr,
 	&dev_attr_regulation_voltage.attr,
