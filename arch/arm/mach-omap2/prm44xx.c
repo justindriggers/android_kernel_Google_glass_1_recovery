@@ -145,25 +145,12 @@ int omap4_prm_assert_hardreset(void __iomem *rstctrl_reg, u8 shift)
 	return 0;
 }
 
-/**
- * omap4_prm_deassert_hardreset - deassert a submodule hardreset line and wait
- * @rstctrl_reg: RM_RSTCTRL register address for this module
- * @shift: register bit shift corresponding to the reset line to deassert
- *
- * Some IPs like dsp, ipu or iva contain processors that require an HW
- * reset line to be asserted / deasserted in order to fully enable the
- * IP.  These modules may have multiple hard-reset lines that reset
- * different 'submodules' inside the IP block.  This function will
- * take the submodule out of reset and wait until the PRCM indicates
- * that the reset has completed before returning.  Returns 0 upon success or
- * -EINVAL upon an argument error, -EEXIST if the submodule was already out
- * of reset, or -EBUSY if the submodule did not exit reset promptly.
- */
-int omap4_prm_deassert_hardreset(void __iomem *rstctrl_reg, u8 shift)
+static inline int _omap4_prm_deassert_hardreset(void __iomem *rstctrl_reg,
+						u8 shift, bool wait)
 {
 	u32 mask;
 	void __iomem *rstst_reg;
-	int c;
+	int c = 0;
 
 	if (!cpu_is_omap44xx() || !rstctrl_reg)
 		return -EINVAL;
@@ -180,8 +167,9 @@ int omap4_prm_deassert_hardreset(void __iomem *rstctrl_reg, u8 shift)
 	omap4_prm_rmw_reg_bits(0xffffffff, mask, rstst_reg);
 	/* de-assert the reset control line */
 	omap4_prm_rmw_reg_bits(mask, 0, rstctrl_reg);
-	/* wait the status to be set */
-	omap_test_timeout(omap4_prm_read_bits_shift(rstst_reg, mask),
+	if (wait)
+		/* wait the status to be set */
+		omap_test_timeout(omap4_prm_read_bits_shift(rstst_reg, mask),
 			  MAX_MODULE_HARDRESET_WAIT, c);
 
 	return (c == MAX_MODULE_HARDRESET_WAIT) ? -EBUSY : 0;
@@ -190,6 +178,44 @@ int omap4_prm_deassert_hardreset(void __iomem *rstctrl_reg, u8 shift)
 #ifdef CONFIG_OMAP4_DPLL_CASCADING
 static struct device fake_reset_dev;
 #endif
+
+/**
+ * omap4_prm_deassert_hardreset - deassert a submodule hardreset line and wait
+ * @rstctrl_reg: RM_RSTCTRL register address for this module
+ * @shift: register bit shift corresponding to the reset line to deassert
+ *
+ * Some IPs like dsp, ipu or iva contain processors that require an HW
+ * reset line to be asserted / deasserted in order to fully enable the
+ * IP.  These modules may have multiple hard-reset lines that reset
+ * different 'submodules' inside the IP block.  This function will
+ * take the submodule out of reset and wait until the PRCM indicates
+ * that the reset has completed before returning.  Returns 0 upon success or
+ * -EINVAL upon an argument error, -EEXIST if the submodule was already out
+ * of reset, or -EBUSY if the submodule did not exit reset promptly.
+ */
+int omap4_prm_deassert_hardreset(void __iomem *rstctrl_reg, u8 shift)
+{
+	return _omap4_prm_deassert_hardreset(rstctrl_reg, shift, true);
+}
+
+/**
+ * omap4_prm_deassert_hardreset_nowait - deassert a submodule hardreset line
+ * without waiting for completion status.
+ * @rstctrl_reg: RM_RSTCTRL register address for this module
+ * @shift: register bit shift corresponding to the reset line to deassert
+ *
+ * Some IPs like iommu for dsp and ipu only have one reset line that needs to
+ * be deasserted before the clocks are enabled, otherwise its clock will be
+ * seen in transition while enabling it. In this case, since the clock is not
+ * enabled yet when deasserting the reset line, the wait could be skipped.
+ * Returns 0 upon success or -EINVAL upon an argument error, -EEXIST if the
+ * submodule was already out of reset.
+ */
+int omap4_prm_deassert_hardreset_nowait(void __iomem *rstctrl_reg, u8 shift)
+{
+	return _omap4_prm_deassert_hardreset(rstctrl_reg, shift, false);
+
+}
 
 void omap4_prm_global_warm_sw_reset(void)
 {

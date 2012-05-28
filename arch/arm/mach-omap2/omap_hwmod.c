@@ -1105,8 +1105,14 @@ static int _deassert_hardreset(struct omap_hwmod *oh, const char *name)
 		if (ohri.st_shift)
 			pr_err("omap_hwmod: %s: %s: hwmod data error: OMAP4 does not support st_shift\n",
 			       oh->name, name);
-		ret = omap4_prm_deassert_hardreset(oh->prcm.omap4.rstctrl_reg,
-						   ohri.rst_shift);
+		if (oh->flags & HWMOD_NO_WAIT_RESET)
+			ret = omap4_prm_deassert_hardreset_nowait(
+						oh->prcm.omap4.rstctrl_reg,
+						ohri.rst_shift);
+		else
+			ret = omap4_prm_deassert_hardreset(
+						oh->prcm.omap4.rstctrl_reg,
+						ohri.rst_shift);
 	} else {
 		return -EINVAL;
 	}
