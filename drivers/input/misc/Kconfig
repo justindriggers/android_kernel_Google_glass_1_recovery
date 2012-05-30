@@ -582,4 +582,12 @@ config INPUT_SI114X
 	help
 	  Say Y here if you want to use the Si1141, Si1142 or Si1143
 	  ALS/Proximity Sensor Driver through the I2C interface.
+
+config INPUT_GLASSHUB
+	bool "Glass Low Power Sensor Hub Driver"
+	depends on I2C && SYSFS
+	help
+	  Say Y here if you want to use the Glass low-power sensor
+	  hub driver through the I2C interface.
 endif
+

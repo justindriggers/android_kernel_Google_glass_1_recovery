@@ -50,6 +50,11 @@
 #endif
 #include <linux/mpu.h>
 
+#ifdef CONFIG_INPUT_GLASSHUB
+#include <linux/i2c/glasshub.h>
+#endif
+
+#include <linux/mpu.h>
 #include <linux/regulator/fixed.h>
 #include <linux/regulator/machine.h>
 
@@ -1900,6 +1905,12 @@ static struct si114x_platform_data notle_si114x_data = {
 };
 #endif  /* CONFIG_INPUT_SI114X */
 
+#ifdef CONFIG_INPUT_GLASSHUB
+static struct glasshub_platform_data notle_glasshub_data = {
+	.gpio_int_no = GPIO_PROX_INT,
+};
+#endif  /* CONFIG_INPUT_GLASSHUB */
+
 static struct i2c_board_info __initdata notle_dog_i2c_4_boardinfo[] = {
         {
                 I2C_BOARD_INFO("l3g4200d_gyr", 0x68),
@@ -2063,6 +2074,18 @@ static struct i2c_board_info __initdata notle_hog_i2c_4_boardinfo[] = {
         {
                 I2C_BOARD_INFO("si114x", 0x5a),
                 .platform_data = &notle_si114x_data,
+        },
+#endif
+
+/* dls: slave address of 0x35 is chosen not to conflict and
+ * easy to see on i2c bus. Can be changed by modifying the
+ * code in the Glass hub MCU.
+ */
+#ifdef CONFIG_INPUT_GLASSHUB
+        {
+                I2C_BOARD_INFO("glasshub", 0x35),
+                .platform_data = &notle_glasshub_data,
+                .irq = OMAP_GPIO_IRQ(GPIO_PROX_INT),
         },
 #endif
 };
@@ -2312,6 +2335,23 @@ static int __init notle_imu_init(void) {
         return r;
 }
 
+#ifdef CONFIG_INPUT_GLASSHUB
+static int __init notle_glasshub_init(void) {
+        int r;
+
+        pr_info("%s()+\n", __func__);
+
+		notle_glasshub_data.irq = gpio_to_irq(GPIO_PROX_INT);
+
+        /* Configuration of requested GPIO line */
+        r = gpio_request_one(GPIO_PROX_INT, GPIOF_IN, "glasshub_int");
+        if (r) {
+                pr_err("Failed to get glasshub gpio\n");
+        }
+
+        return r;
+}
+#endif
 
 #ifndef BACKLIGHT_HACK
 static void notle_dmtimer_pwm_enable(void) {
@@ -2611,6 +2651,13 @@ static void __init notle_init(void)
         if (err) {
                 pr_err("Touchpad initialization failed: %d\n", err);
         }
+
+#ifdef CONFIG_INPUT_GLASSHUB
+        err = notle_glasshub_init();
+        if (err) {
+                pr_err("Glass hub initialization failed: %d\n", err);
+        }
+#endif
 
         switch (NOTLE_VERSION) {
           case V1_DOG:
