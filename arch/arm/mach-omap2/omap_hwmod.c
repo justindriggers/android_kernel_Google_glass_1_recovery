@@ -1118,7 +1118,7 @@ static int _deassert_hardreset(struct omap_hwmod *oh, const char *name)
 	}
 
 	if (ret == -EBUSY)
-		pr_warning("omap_hwmod: %s: failed to hardreset\n", oh->name);
+		pr_debug("omap_hwmod: %s: failed to hardreset\n", oh->name);
 
 	return ret;
 }
