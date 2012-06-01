@@ -1488,6 +1488,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
                   break;
             case V6_HOG:
             case V1_EVT1:
+                  msleep(1);
                   led_config_to_linecuts(dssdev, &led_config, &r, &g, &b);
                   ice40_set_backlight(1, r, g, b);
                   break;
