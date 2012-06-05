@@ -976,11 +976,17 @@ static struct regulator_init_data notle_vusb = {
 	.consumer_supplies      = notle_vusb_supply,
 };
 
+static struct regulator_consumer_supply notle_clk32kg_supply[] = {
+	REGULATOR_SUPPLY("clk32kg", NULL),
+};
+
 static struct regulator_init_data omap4_notle_clk32kg = {
-        .constraints = {
-               .valid_ops_mask         = REGULATOR_CHANGE_STATUS,
-               .always_on              = true,
-        },
+	.constraints = {
+		.valid_ops_mask         = REGULATOR_CHANGE_STATUS,
+		.always_on              = true,
+	},
+	.num_consumer_supplies	= ARRAY_SIZE(notle_clk32kg_supply),
+	.consumer_supplies	= notle_clk32kg_supply,
 };
 
 static struct omap_uart_port_info omap_serial_port_info[] = {
@@ -1165,7 +1171,7 @@ static struct twl4030_platform_data dog_twldata = {
 	.vaux1		= &notle_vaux1,
 	.vaux2		= &notle_vaux2,
 	.vaux3		= &dog_vaux3,
-        .clk32kg        = &omap4_notle_clk32kg,
+	.clk32kg	= &omap4_notle_clk32kg,
 	.usb		= &omap4_usbphy_data,
 
 	/* children */
@@ -1189,7 +1195,7 @@ static struct twl4030_platform_data emu_twldata = {
 	.vaux1		= &notle_vaux1,
 	.vaux2		= &notle_vaux2,
 	.vaux3		= &emu_vaux3,
-        .clk32kg        = &omap4_notle_clk32kg,
+	.clk32kg	= &omap4_notle_clk32kg,
 	.usb		= &omap4_usbphy_data,
 
 	/* children */
@@ -1213,7 +1219,7 @@ static struct twl4030_platform_data fly_twldata = {
 	.vaux1		= &notle_vaux1,
 	.vaux2		= &notle_vaux2,
 	.vaux3		= &fly_vaux3,
-        .clk32kg        = &omap4_notle_clk32kg,
+	.clk32kg	= &omap4_notle_clk32kg,
 	.usb		= &omap4_usbphy_data,
 
 	/* children */
@@ -1237,7 +1243,7 @@ static struct twl4030_platform_data hog_twldata = {
 	.vaux1		= &notle_vaux1,
 	.vaux2		= &notle_vaux2,
 	.vaux3		= &hog_vaux3,
-        .clk32kg        = &omap4_notle_clk32kg,
+	.clk32kg	= &omap4_notle_clk32kg,
 	.usb		= &omap4_usbphy_data,
 
 	/* children */
@@ -2405,6 +2411,14 @@ static void __init notle_init(void)
         }
 
         omap_serial_board_init(omap_serial_port_info);
+
+        notle_bluetooth_init(NOTLE_VERSION == V6_HOG ||
+                             NOTLE_VERSION == V1_EVT1);
+        err = notle_wlan_init(NOTLE_VERSION);
+        if (err) {
+                pr_err("Wifi initialization failed: %d\n", err);
+        }
+
         omap4_twl6030_hsmmc_init(mmc);
         usb_musb_init(&musb_board_data);
         omap_dmm_init();
@@ -2415,13 +2429,6 @@ static void __init notle_init(void)
         err = notle_gps_init();
         if (err) {
                 pr_err("GPS initialization failed: %d\n", err);
-        }
-
-        notle_bluetooth_init(NOTLE_VERSION == V6_HOG ||
-                             NOTLE_VERSION == V1_EVT1);
-        err = notle_wlan_init(NOTLE_VERSION);
-        if (err) {
-                pr_err("Wifi initialization failed: %d\n", err);
         }
 
         // Do this after the wlan_init, which inits the regulator shared
