@@ -366,8 +366,14 @@ static int __init notle_wlan_gpio(notle_version NOTLE_VERSION) {
             gpio_wlan_host_wake = GPIO_BCM_WLAN_HOST_WAKE_HOG;
             break;
           case V1_EVT1:
-            __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN,
-                         WKUP_BASE_ADDR + MUX_BCM_WLAN_HOST_WAKE_EVT1);
+            // Mux H4 to be gpio_wk0 (so GPIO 0 is set to be gpio_wk0)
+            omap_mux_init_signal("sim_io.gpio_wk0",OMAP_PIN_INPUT | OMAP_WAKEUP_EN);
+
+            // The GPIOWK_IO_PWRDNZ bit needs to be set after muxing
+            //and before you set it to input
+            omap4_ctrl_wk_pad_writel(OMAP4_USIM_PWRDNZ_MASK,
+                    OMAP4_CTRL_MODULE_PAD_WKUP_CONTROL_USIMIO);
+
             gpio_wlan_host_wake = GPIO_BCM_WLAN_HOST_WAKE_EVT1;
             break;
           default:
