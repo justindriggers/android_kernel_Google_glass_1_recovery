@@ -195,9 +195,9 @@ struct actel_fpga_config {
 
 /* Some reasonable defaults */
 static struct led_config led_config = {
-  .red_percent = 2353,    /* 23.53% Red by default */
-  .green_percent = 4706,  /* 47.06% Green by default */
-  .blue_percent = 2941,   /* 29.41% Blue by default */
+  .red_percent = 1667,    /* 16.67% Red by default */
+  .green_percent = 5416,  /* 54.16% Green by default */
+  .blue_percent = 2917,   /* 29.17% Blue by default */
   .brightness = 0,        /* 0 brightness by default */
 };
 
