@@ -405,7 +405,7 @@ static int __init notle_wlan_gpio(notle_version NOTLE_VERSION) {
         /* Mux the bt signals here, but handle the gpio requests in the
          * bluetooth board file.
          */
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP,
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT,
                 CORE_BASE_ADDR + MUX_BCM_BT_HOST_WAKE);
         __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_BCM_BT_WAKE);
 
