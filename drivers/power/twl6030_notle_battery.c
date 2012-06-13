@@ -532,6 +532,8 @@ static void twl6030_start_usb_charger(struct twl6030_bci_device_info *di, int mA
 
 	if (mA >= 50) {
 		twl6030_set_watchdog(di, di->watchdog_duration);
+		/* disable current termination, suspend mode, boost mode, etc */
+		twl_i2c_write_u8(TWL6030_MODULE_CHARGER, 0, CHARGERUSB_CTRL1);
 		ret = twl_i2c_write_u8(TWL6030_MODULE_CHARGER, CONTROLLER_CTRL1_EN_CHARGER, CONTROLLER_CTRL1);
 		if (ret)
 			goto err;
@@ -554,6 +556,7 @@ static irqreturn_t twl6030charger_ctrl_interrupt(int irq, void *_di)
 {
 	struct twl6030_bci_device_info *di = _di;
 	queue_work(di->wq, &di->charge_control_work);
+	printk("battery: CHARGE CTRL IRQ\n");
 	return IRQ_HANDLED;
 }
 
@@ -933,7 +936,6 @@ static void twl6030_determine_charge_state(struct twl6030_bci_device_info *di)
 
 	/* TODO: i2c error -> fault? */
 	twl_i2c_read_u8(TWL6030_MODULE_CHARGER, &stat1, CONTROLLER_STAT1);
-	twl_i2c_read_u8(TWL6030_MODULE_CHARGER, &int1, CHARGERUSB_STATUS_INT1);
 
 	/* TODO: why is STAT1.0 (BAT_TEMP_OVRANGE) always set? */
 	/* printk("battery: determine_charge_state() stat1=%02x int1=%02x\n", stat1, int1); */
@@ -958,11 +960,6 @@ static void twl6030_determine_charge_state(struct twl6030_bci_device_info *di)
 			/* give USB and userspace some time to react before suspending */
 			wake_lock_timeout(&usb_wake_lock, HZ / 2);
 		}
-	}
-
-	if (int1) {
-		printk("battery: CHARGE FAULT 0x%02x\n", int1);
-		newstate = STATE_FAULT;
 	}
 
 	if (di->state == newstate)
@@ -1012,9 +1009,8 @@ static void twl6030_charge_fault_work(struct work_struct *work)
 		container_of(work, struct twl6030_bci_device_info, charge_fault_work);
 
 	if (is_charging(di))
-		twl6030_stop_usb_charger(di);
-	di->state = STATE_FAULT;
-	msleep(100);
+		twl6030_start_usb_charger(di, 500);
+	msleep(10);
 
 	twl6030_determine_charge_state(di);
 }
