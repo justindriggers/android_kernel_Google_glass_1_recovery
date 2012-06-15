@@ -274,6 +274,7 @@ static int bcm4330_bluetooth_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
+	rfkill_init_sw_state(bt_rfkill, 1);
 	rc = rfkill_register(bt_rfkill);
 
 	if (unlikely(rc)) {
@@ -285,6 +286,7 @@ static int bcm4330_bluetooth_probe(struct platform_device *pdev)
 		return -1;
 	}
 
+	// TODO Check if these can be removed
 	rfkill_set_states(bt_rfkill, true, false);
 	bcm4330_bt_rfkill_set_power(NULL, true);
 
