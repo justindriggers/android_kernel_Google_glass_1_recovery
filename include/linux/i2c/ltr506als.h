@@ -57,7 +57,7 @@
 #define ADC_RESOLUTION_SHIFT    5
 #define ADC_RESOLUTION          (ADC_RESOLUTION_BITS << ADC_RESOLUTION_SHIFT)
 #define ALS_GAIN_BITS           0x3
-#define ALS_GAIN_SHIFT          2
+#define ALS_GAIN_SHIFT          3
 #define ALS_GAIN                (ALS_GAIN_BITS << ALS_GAIN_SHIFT)
 #define ALS_SW_RESET		(1 << 2)
 #define ALS_MODE		(1 << 1)
