@@ -202,9 +202,11 @@ static struct led_config led_config = {
 };
 
 static struct {
+  u8 pipeline;
   u8 backlight;
 } ice40_defaults = {
-  .backlight = 0,
+  .pipeline =   0x0,
+  .backlight =  0x0,
 };
 
 static struct actel_fpga_config actel_fpga_config;
@@ -1468,6 +1470,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
         switch (version) {
           case V6_HOG:
           case V1_EVT1:
+            ice40_write_register(ICE40_PIPELINE, ice40_defaults.pipeline);
             ice40_write_register(ICE40_BACKLIGHT, ice40_defaults.backlight);
             break;
           default:
