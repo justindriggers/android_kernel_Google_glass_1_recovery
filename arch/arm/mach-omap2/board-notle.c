@@ -57,6 +57,8 @@
 
 #include <mach/hardware.h>
 #include <mach/omap4-common.h>
+#include <mach/emif.h>
+#include <mach/lpddr2-elpida.h>
 #include <mach/dmm.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -1451,7 +1453,6 @@ static struct omap_board_mux empty_board_mux[] __initdata = {
 
 static int omap_audio_init(void) {
         int r;
-        u32 omap4430_cm_clksel_dpll_abe_register;
         int audio_power_on_gpio = GPIO_AUDIO_POWERON_EMU;
 
         /* Set the correct audio power on GPIO based on board revision */
@@ -1480,11 +1481,6 @@ static int omap_audio_init(void) {
         if (r) {
                 pr_err("Unable to export audio_headset gpio_%d\n", GPIO_AUDIO_HEADSET);
         }
-
-        /* Set ABE DPLL to a correct value so that Notle clock */
-        /* does not mess up Phoenix audio */
-        omap4430_cm_clksel_dpll_abe_register = OMAP4430_CM1_BASE + OMAP4430_CM1_CKGEN_INST + OMAP4_CM_CLKSEL_DPLL_ABE_OFFSET;
-        omap_writel(0x82ee00, omap4430_cm_clksel_dpll_abe_register);
 
         omap_mux_init_signal("sys_nirq2.sys_nirq2", \
                 OMAP_PIN_INPUT_PULLUP);
@@ -1788,10 +1784,30 @@ static struct notifier_block notle_reboot_notifier = {
         .notifier_call = notle_notifier_call,
 };
 
+/*
+ * LPDDR2 Configeration Data:
+ * The memory organisation is as below :
+ *     EMIF1 - CS0 -   2 Gb
+ *             CS1 -   2 Gb
+ *     EMIF2 - CS0 -   2 Gb
+ *             CS1 -   2 Gb
+ *     --------------------
+ *     TOTAL -         8 Gb
+ *
+ * Same devices installed on EMIF1 and EMIF2
+ */
+static __initdata struct emif_device_details emif_devices = {
+        .cs0_device = &lpddr2_elpida_2G_S4_dev,
+        .cs1_device = &lpddr2_elpida_2G_S4_dev
+};
+
+
 static void __init notle_init(void)
 {
         int package = OMAP_PACKAGE_CBS;
         int err;
+
+        omap_emif_setup_device_details(&emif_devices, &emif_devices);
 
         if (omap_rev() == OMAP4430_REV_ES1_0)
                 package = OMAP_PACKAGE_CBL;
