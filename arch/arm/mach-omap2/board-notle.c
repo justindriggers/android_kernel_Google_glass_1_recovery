@@ -1079,7 +1079,89 @@ static struct regulator_init_data omap4_notle_clk32kg = {
 	.consumer_supplies	= notle_clk32kg_supply,
 };
 
-static struct omap_uart_port_info omap_serial_port_info[] = {
+// TODO(eieio): revisit these when we optimize sleep current
+
+/* ttyO0 unused */
+static struct omap_device_pad notle_uart1_pads[] __initdata = {
+	{
+		.name	= "uart1_cts.uart1_cts",
+		.enable	= OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
+	},
+	{
+		.name	= "uart1_rts.uart1_rts",
+		.enable	= OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
+	},
+	{
+		.name	= "uart1_tx.uart1_tx",
+		.enable	= OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
+	},
+	{
+		.name	= "uart1_rx.uart1_rx",
+		.flags	= OMAP_DEVICE_PAD_REMUX,
+		.enable	= OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
+		.idle	= OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
+	},
+};
+
+/* ttyO1 bluetooth */
+static struct omap_device_pad notle_uart2_pads[] __initdata = {
+	{
+		.name	= "uart2_cts.uart2_cts",
+		.enable	= OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
+	},
+	{
+		.name	= "uart2_rts.uart2_rts",
+		.enable	= OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
+	},
+	{
+		.name	= "uart2_tx.uart2_tx",
+		.enable	= OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
+	},
+	{
+		.name	= "uart2_rx.uart2_rx",
+		.flags	= OMAP_DEVICE_PAD_REMUX,
+		.enable	= OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
+		.idle	= OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
+	},
+};
+
+/* ttyO2 console port */
+static struct omap_device_pad notle_uart3_pads[] __initdata = {
+	{
+		.name	= "uart3_cts_rctx.uart3_cts_rctx",
+		.enable	= OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
+	},
+	{
+		.name	= "uart3_rts_sd.uart3_rts_sd",
+		.enable	= OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
+	},
+	{
+		.name	= "uart3_tx_irtx.uart3_tx_irtx",
+		.enable	= OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
+	},
+	{
+		.name	= "uart3_rx_irrx.uart3_rx_irrx",
+		.flags	= OMAP_DEVICE_PAD_REMUX | OMAP_DEVICE_PAD_WAKEUP,
+		.enable	= OMAP_PIN_INPUT | OMAP_MUX_MODE0,
+		.idle	= OMAP_PIN_INPUT | OMAP_MUX_MODE0,
+	},
+};
+
+/* ttyO3 GPS */
+static struct omap_device_pad notle_uart4_pads[] __initdata = {
+	{
+		.name	= "uart4_tx.uart4_tx",
+		.enable	= OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
+	},
+	{
+		.name	= "uart4_rx.uart4_rx",
+		.flags	= OMAP_DEVICE_PAD_REMUX,
+		.enable	= OMAP_PIN_INPUT | OMAP_MUX_MODE0,
+		.idle	= OMAP_PIN_INPUT | OMAP_MUX_MODE0,
+	},
+};
+
+static struct omap_uart_port_info omap_serial_port_info[] __initdata = {
         { /* ttyO0 unused */
                 .use_dma        = 0,
                 .dma_rx_buf_size = DEFAULT_RXDMA_BUFSIZE,
@@ -1096,7 +1178,7 @@ static struct omap_uart_port_info omap_serial_port_info[] = {
                 .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
                 .wake_peer = bcm_bt_lpm_exit_lpm_locked,
                 .rts_mux_driver_control = 1,
-                .wer = (OMAP_UART_WER_TX | OMAP_UART_WER_RX | OMAP_UART_WER_CTS),
+                .wer = 0,
         },
         { /* ttyO2 console port */
                 .use_dma        = 0,
@@ -1113,9 +1195,21 @@ static struct omap_uart_port_info omap_serial_port_info[] = {
                 .dma_rx_poll_rate = DEFAULT_RXDMA_POLLRATE,
                 .dma_rx_timeout = DEFAULT_RXDMA_TIMEOUT,
                 .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
-                .wer = (OMAP_UART_WER_TX | OMAP_UART_WER_RX | OMAP_UART_WER_CTS),
+                .wer = 0,
         },
 };
+
+void __init notle_serial_init(void)
+{
+	omap_serial_init_port_pads(0, notle_uart1_pads,
+		ARRAY_SIZE(notle_uart1_pads), &omap_serial_port_info[0]);
+	omap_serial_init_port_pads(1, notle_uart2_pads,
+		ARRAY_SIZE(notle_uart2_pads), &omap_serial_port_info[1]);
+	omap_serial_init_port_pads(2, notle_uart3_pads,
+		ARRAY_SIZE(notle_uart3_pads), &omap_serial_port_info[2]);
+	omap_serial_init_port_pads(3, notle_uart4_pads,
+		ARRAY_SIZE(notle_uart4_pads), &omap_serial_port_info[3]);
+}
 
 /*
  * Driver data struct for the pwm-backlight driver.  Fields:
@@ -2500,7 +2594,7 @@ static void __init notle_init(void)
           notle_button_table[0].gpio = GPIO_CAMERA_DOG;
         }
 
-        omap_serial_board_init(omap_serial_port_info);
+        notle_serial_init();
 
         notle_bluetooth_init(NOTLE_VERSION == V6_HOG ||
                              NOTLE_VERSION == V1_EVT1);
