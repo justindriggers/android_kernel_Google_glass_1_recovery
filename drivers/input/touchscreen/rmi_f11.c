@@ -178,6 +178,7 @@ struct f11_instance_data {
 	 * at least one finger was here. TODO: Eventually we'll need to
 	 * track this info on a per finger basis. */
 	bool wasdown;
+	int last_finger_down_count;
 	unsigned int old_X;
 	unsigned int old_Y;
 	/* Transformations to be applied to coordinates before reporting. */
@@ -682,7 +683,17 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 			instance_data->wasdown = true;
 		}
 	}
+	if ((finger_down_count == 0) && (instance_data->last_finger_down_count == 0)) {
+		/* NOTE(cmanton) An interrupt got us here yet there is no longer
+		 * finger data to check.  We could be in a suspend state but we
+		 * want to ensure that this touchpad button is sent to the upper layer
+		 * to allow a wakeup.  Replicate the behavior by creating an artificial
+		 * button down.
+		 */
+		input_report_key(function_device->input, BTN_TOUCH, 1);
+	}
 	input_report_key(function_device->input, BTN_TOUCH, finger_down_count);
+	instance_data->last_finger_down_count = finger_down_count;
 
 	for (finger = 0;
 	     finger < (instance_data->sensor_info->number_of_fingers - 1);
@@ -968,6 +979,16 @@ static void f11_set_abs_params(struct rmi_function_device *function_device)
 #endif
 }
 
+/* NOTE(CMM) Supply event info for the button events to occur during resume cycle */
+static void f11_set_key_params(struct rmi_function_device *function_device)
+{
+	/* Touchpad */
+	input_set_capability(function_device->input, EV_KEY, BTN_TOUCH);
+	input_set_capability(function_device->input, EV_KEY, BTN_2);
+	input_set_capability(function_device->input, EV_KEY, BTN_3);
+}
+
+
 /* Initialize any function $11 specific params and settings - input
  * settings, device settings, etc.
  */
@@ -1042,7 +1063,7 @@ int FN_11_init(struct rmi_function_device *function_device)
 	set_bit(EV_KEY, function_device->input->evbit);
 
 	f11_set_abs_params(function_device);
-
+	f11_set_key_params(function_device);
 
 	if (instance_data->sensor_info->has_relative) {
 		/*create input device for mouse events  */
