@@ -47,7 +47,9 @@
 #include "omap-dmic.h"
 #include "../codecs/twl6040.h"
 
+#ifndef CONFIG_MACH_NOTLE
 static struct regulator *av_switch_reg;
+#endif
 static int twl6040_power_mode;
 static int mcbsp_cfg;
 static struct snd_soc_codec *twl6040_codec;
@@ -368,6 +370,7 @@ static struct snd_soc_jack_pin hs_jack_pins[] = {
 	},
 };
 
+#ifndef CONFIG_MACH_NOTLE
 static int sdp4430_av_switch_event(struct snd_soc_dapm_widget *w,
 				   struct snd_kcontrol *kcontrol, int event)
 {
@@ -380,6 +383,7 @@ static int sdp4430_av_switch_event(struct snd_soc_dapm_widget *w,
 
 	return ret;
 }
+#endif
 
 static int sdp4430_get_power_mode(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
@@ -419,9 +423,11 @@ static const struct snd_soc_dapm_widget sdp4430_twl6040_dapm_widgets[] = {
 	SND_SOC_DAPM_HP("Headset Stereophone", NULL),
 	SND_SOC_DAPM_SPK("Earphone Spk", NULL),
 	SND_SOC_DAPM_INPUT("Aux/FM Stereo In"),
+#ifndef CONFIG_MACH_NOTLE
 	SND_SOC_DAPM_SUPPLY("AV Switch Supply",
 			    SND_SOC_NOPM, 0, 0, sdp4430_av_switch_event,
 			    SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
+#endif
 	SND_SOC_DAPM_MIC("Digital Mic 0", NULL),
 	SND_SOC_DAPM_MIC("Digital Mic 1", NULL),
 	SND_SOC_DAPM_MIC("Digital Mic 2", NULL),
@@ -440,7 +446,9 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	/* Headset Mic: HSMIC with bias */
 	{"HSMIC", NULL, "Headset Mic Bias"},
 	{"Headset Mic Bias", NULL, "Headset Mic"},
+#ifndef CONFIG_MACH_NOTLE
 	{"Headset Mic", NULL, "AV Switch Supply"},
+#endif
 
 	/* Headset Stereophone (Headphone): HSOL, HSOR */
 	{"Headset Stereophone", NULL, "HSOL"},
@@ -545,7 +553,7 @@ static int sdp4430_twl6040_init(struct snd_soc_pcm_runtime *rtd)
 				hs_jack_pins);
 
 	if (machine_is_omap_4430sdp() || machine_is_omap_tabletblaze()
-		|| machine_is_omap4_panda() || machine_is_notle())
+                || machine_is_notle() || machine_is_omap4_panda())
 		twl6040_hs_jack_detect(codec, &hs_jack, SND_JACK_HEADSET);
 	else
 		snd_soc_jack_report(&hs_jack, SND_JACK_HEADSET, SND_JACK_HEADSET);
@@ -1104,10 +1112,9 @@ static int __init sdp4430_soc_init(void)
 {
 	int ret;
 
-	if (!machine_is_omap_4430sdp() && !machine_is_omap4_panda() &&
-		!machine_is_omap_tabletblaze() &&
-                !machine_is_notle()) {
-		pr_debug("Not SDP4430, BlazeTablet or PandaBoard or Notle!\n");
+	if (!machine_is_omap_4430sdp() && !machine_is_omap4_panda()
+                && !machine_is_notle() && !machine_is_omap_tabletblaze()) {
+		pr_debug("Not SDP4430 or PandaBoard or Notle or BlazeTablet!\n");
 		return -ENODEV;
 	}
 	printk(KERN_INFO "SDP4430 SoC init\n");
@@ -1115,10 +1122,10 @@ static int __init sdp4430_soc_init(void)
 		snd_soc_sdp4430.name = "SDP4430";
 	else if (machine_is_omap4_panda())
 		snd_soc_sdp4430.name = "Panda";
-	else if (machine_is_omap_tabletblaze())
-		snd_soc_sdp4430.name = "Tablet44xx";
 	else if (machine_is_notle())
 		snd_soc_sdp4430.name = "Notle";
+	else if (machine_is_omap_tabletblaze())
+		snd_soc_sdp4430.name = "Tablet44xx";
 
 	sdp4430_snd_device = platform_device_alloc("soc-audio", -1);
 	if (!sdp4430_snd_device) {
@@ -1143,6 +1150,7 @@ static int __init sdp4430_soc_init(void)
 		goto err_dev;
 	}
 
+#ifndef CONFIG_MACH_NOTLE
 	av_switch_reg = regulator_get(&sdp4430_snd_device->dev, "av-switch");
 	if (IS_ERR(av_switch_reg)) {
 		ret = PTR_ERR(av_switch_reg);
@@ -1150,6 +1158,7 @@ static int __init sdp4430_soc_init(void)
 			ret);
 		goto err_dev;
 	}
+#endif
 
 	/* Default mode is low-power, MCLK not required */
 	twl6040_power_mode = 0;
@@ -1173,7 +1182,9 @@ module_init(sdp4430_soc_init);
 
 static void __exit sdp4430_soc_exit(void)
 {
+#ifndef CONFIG_MACH_NOTLE
 	regulator_put(av_switch_reg);
+#endif
 	cdc_tcxo_set_req_int(CDC_TCXO_CLK2, 0);
 	cdc_tcxo_set_req_prio(CDC_TCXO_CLK2, CDC_TCXO_PRIO_REQINT);
 	platform_device_unregister(sdp4430_snd_device);
