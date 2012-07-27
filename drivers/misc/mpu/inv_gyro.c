@@ -35,6 +35,7 @@
 #include <linux/interrupt.h>
 #include <linux/kfifo.h>
 #include <linux/byteorder/generic.h>
+#undef CONFIG_HAS_EARLYSUSPEND
 #ifdef CONFIG_HAS_EARLYSUSPEND
 #include <linux/earlysuspend.h>
 #endif
