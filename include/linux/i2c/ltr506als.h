@@ -102,15 +102,15 @@
 #define LED_PEAK_CURR           (LED_PEAK_CURR_BITS << LED_PEAK_CURR_SHIFT)
 
 /* Power On response time in ms */
-#define PON_DELAY	600
-#define WAKEUP_DELAY	10
+#define LTR506_PON_DELAY	600
+#define LTR506_WAKEUP_DELAY	10
 
-#define ALS_MIN_MEASURE_VAL	0
-#define ALS_MAX_MEASURE_VAL	65535
-#define ALS_VALID_MEASURE_MASK	ALS_MAX_MEASURE_VAL
-#define PS_MIN_MEASURE_VAL	0x0
-#define PS_MAX_MEASURE_VAL	4095
-#define PS_VALID_MEASURE_MASK   PS_MAX_MEASURE_VAL
+#define LTR506_ALS_MIN_MEASURE_VAL	0
+#define LTR506_ALS_MAX_MEASURE_VAL	65535
+#define LTR506_ALS_VALID_MEASURE_MASK	LTR506_ALS_MAX_MEASURE_VAL
+#define LTR506_PS_MIN_MEASURE_VAL	0x0
+#define LTR506_PS_MAX_MEASURE_VAL	4095
+#define LTR506_PS_VALID_MEASURE_MASK   LTR506_PS_MAX_MEASURE_VAL
 
 
 /*
@@ -129,6 +129,7 @@
 struct ltr506_platform_data {
 	/* Interrupt */
 	int pfd_gpio_int_no;
+	int pfd_gpio_int_wake_dev;
 
 	/* ALS */
 	int pfd_disable_als_on_suspend;

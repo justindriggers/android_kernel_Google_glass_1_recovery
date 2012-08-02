@@ -35,7 +35,7 @@
 #include <asm/setup.h>
 #include <linux/i2c/ltr506als.h>
 
-#define DRIVER_VERSION "1.0"
+#define DRIVER_VERSION "1.1"
 #define PARTID 0x90
 #define MANUID 0x05
 
@@ -61,7 +61,6 @@ struct ltr506_data {
 	/* ALS */
 	int als_enable_flag;
 	int als_suspend_enable_flag;
-	int als_irq_flag;
 	int als_opened;
 	int als_gain;
 	uint16_t als_lowthresh;
@@ -75,7 +74,6 @@ struct ltr506_data {
 	/* PS */
 	int ps_enable_flag;
 	int ps_suspend_enable_flag;
-	int ps_irq_flag;
 	int ps_opened;
 	int ps_gain;
 	uint16_t ps_lowthresh;
@@ -94,6 +92,7 @@ struct ltr506_data {
 	/* Interrupt */
 	int irq;
 	int gpio_int_no;
+	int gpio_int_wake_dev;
 	int is_suspend;
 };
 
@@ -160,7 +159,10 @@ static int I2C_Write(char *txData, int length)
 	return 0;
 }
 
-/* Set register bit */
+/* Set register bit
+ * Returns: 0    OK
+ *          -EIO ERROR
+ */
 static int _ltr506_set_bit(struct i2c_client *client, u8 set, u8 cmd, u8 data)
 {
 	char buffer[2];
@@ -255,22 +257,22 @@ static uint16_t read_adc_value(struct ltr506_data *ltr506)
 			/* NOTE: Currently data structure is 16 bits so this
 			 * check is here for completeness.
 			 */
-			if (value > ALS_MAX_MEASURE_VAL) {
+			if (value > LTR506_ALS_MAX_MEASURE_VAL) {
 				dev_err(&ltr506->i2c_client->dev,
 				        "%s: PS Value Error: 0x%X\n", __func__,
 				        value);
 			}
-			value &= ALS_VALID_MEASURE_MASK;
+			value &= LTR506_ALS_VALID_MEASURE_MASK;
 			break;
 
 		case 1 :
 			/* PS */
-			if (value > PS_MAX_MEASURE_VAL) {
+			if (value > LTR506_PS_MAX_MEASURE_VAL) {
 				dev_err(&ltr506->i2c_client->dev,
 				        "%s: PS Value Error: 0x%X\n", __func__,
 				        value);
 			}
-			value &= PS_VALID_MEASURE_MASK;
+			value &= LTR506_PS_VALID_MEASURE_MASK;
 			break;
 	}
 	return value;
@@ -370,10 +372,10 @@ static void report_ps_input_event(struct ltr506_data *ltr506)
 	thresh_delta = (adc_value >> 10)+2;
 	thresh_lo = adc_value - thresh_delta;
 	thresh_hi = adc_value + thresh_delta;
-	if (thresh_lo < PS_MIN_MEASURE_VAL)
-		thresh_lo = PS_MIN_MEASURE_VAL;
-	if (thresh_hi > PS_MAX_MEASURE_VAL)
-		thresh_hi = PS_MAX_MEASURE_VAL;
+	if (thresh_lo < LTR506_PS_MIN_MEASURE_VAL)
+		thresh_lo = LTR506_PS_MIN_MEASURE_VAL;
+	if (thresh_hi > LTR506_PS_MAX_MEASURE_VAL)
+		thresh_hi = LTR506_PS_MAX_MEASURE_VAL;
 	rc = set_ps_range(ltr506, (uint16_t)thresh_lo, (uint16_t)thresh_hi);
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s : PS Thresholds Write Fail...\n", __func__);
@@ -401,10 +403,10 @@ static void report_als_input_event(struct ltr506_data *ltr506)
 	thresh_delta = (adc_value >> 12)+2;
 	thresh_lo = adc_value - thresh_delta;
 	thresh_hi = adc_value + thresh_delta;
-	if (thresh_lo < ALS_MIN_MEASURE_VAL)
-		thresh_lo = ALS_MIN_MEASURE_VAL;
-	if (thresh_hi > ALS_MAX_MEASURE_VAL)
-		thresh_hi = ALS_MAX_MEASURE_VAL;
+	if (thresh_lo < LTR506_ALS_MIN_MEASURE_VAL)
+		thresh_lo = LTR506_ALS_MIN_MEASURE_VAL;
+	if (thresh_hi > LTR506_ALS_MAX_MEASURE_VAL)
+		thresh_hi = LTR506_ALS_MAX_MEASURE_VAL;
 	rc = set_als_range(ltr506, (uint16_t)thresh_lo, (uint16_t)thresh_hi);
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s : ALS Thresholds Write Fail...\n", __func__);
@@ -444,12 +446,16 @@ static void ltr506_schedwork(struct work_struct *work)
 				 " val:0x%02x\n", __func__, 0x80+i, buf[i]);
 		}
 	} else {
-		if ((interrupt_stat & 0x02) && (newdata & 0x01)) {
-			ltr506->ps_irq_flag = 1;
+		// TODO(cmanton) Ignore newdata flag since it seems to only
+		// be set occasionally and we miss data.
+		// newdata & 0x01
+		if (interrupt_stat & 0x02) {
 			report_ps_input_event(ltr506);
 		}
-		if ((interrupt_stat & 0x08) && (newdata & 0x04)) {
-			ltr506->als_irq_flag = 1;
+		// TODO(cmanton) Ignore newdata flag since it seems to only
+		// be set occasionally and we miss data.
+		// newdata & 0x04
+		if (interrupt_stat & 0x08) {
 			report_als_input_event(ltr506);
 		}
 	}
@@ -567,18 +573,21 @@ static int ps_enable(struct ltr506_data *ltr506)
 	}
 
 	/* Set thresholds so that interrupts will not be suppressed */
-	rc = set_ps_range(ltr506, PS_MIN_MEASURE_VAL, PS_MIN_MEASURE_VAL);
+	rc = set_ps_range(ltr506, LTR506_PS_MIN_MEASURE_VAL, LTR506_PS_MIN_MEASURE_VAL);
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s : PS Thresholds Write Fail...\n", __func__);
 		return rc;
 	}
 
-	/* Allows this interrupt to wake the system */
-	rc = irq_set_irq_wake(ltr506->irq, 1);
-	if (rc < 0) {
-		dev_err(&ltr506->i2c_client->dev, "%s: IRQ-%d WakeUp Enable Fail...\n", __func__, ltr506->irq);
-		return rc;
+	if (ltr506->gpio_int_wake_dev) {
+		/* Allows this interrupt to wake the system */
+		rc = irq_set_irq_wake(ltr506->irq, 1);
+		if (rc < 0) {
+			dev_err(&ltr506->i2c_client->dev, "%s: IRQ-%d WakeUp Enable Fail...\n", __func__, ltr506->irq);
+			return rc;
+		}
 	}
+
 	rc = _ltr506_set_bit(ltr506->i2c_client, SET_BIT, LTR506_PS_CONTR, PS_MODE);
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s: PS Enable Fail...\n", __func__);
@@ -689,8 +698,12 @@ static int als_enable(struct ltr506_data *ltr506)
 		return rc;
 	}
 
-	/* Set thresholds so that interrupts will not be suppressed */
-	rc = set_als_range(ltr506, ALS_MIN_MEASURE_VAL, ALS_MIN_MEASURE_VAL);
+	/* NOTE(CMM) This part requires a workaround to enable the PS in order for the
+	 * ALS to operate properly. */
+	ps_enable(ltr506);
+
+	/* Clear thresholds so that interrupts will not be suppressed */
+	rc = set_als_range(ltr506, LTR506_ALS_MIN_MEASURE_VAL, LTR506_ALS_MIN_MEASURE_VAL);
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s : ALS Thresholds Write Fail...\n", __func__);
 		return rc;
@@ -747,40 +760,10 @@ static int als_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static long als_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
-{
-	int rc, val;
-	struct ltr506_data *ltr506 = sensor_info;
-
-	pr_debug("%s cmd %d\n", __func__, _IOC_NR(cmd));
-
-	switch (cmd) {
-		case LTR506_IOCTL_ALS_ENABLE:
-			if (get_user(val, (unsigned long __user *)arg)) {
-				rc = -EFAULT;
-				break;
-			}
-			/*pr_info("%s value = %d\n", __func__, val);*/
-			rc = val ? als_enable(ltr506) : als_disable(ltr506);
-			break;
-		case LTR506_IOCTL_ALS_GET_ENABLED:
-			val = ltr506->als_enable_flag;
-			/*pr_info("%s enabled %d\n", __func__, val);*/
-			rc = put_user(val, (unsigned long __user *)arg);
-			break;
-		default:
-			pr_err("%s: INVALID COMMAND %d\n", __func__, _IOC_NR(cmd));
-			rc = -EINVAL;
-	}
-
-	return rc;
-}
-
 static const struct file_operations als_fops = {
 	.owner = THIS_MODULE,
 	.open = als_open,
 	.release = als_release,
-	.unlocked_ioctl = als_ioctl
 };
 
 static struct miscdevice als_misc = {
@@ -898,17 +881,17 @@ static ssize_t als_enable_store(struct device *dev,
                                 const char *buf, size_t count)
 {
 	int rc = 0;
-	int als_en;
+	int als_enable_flag;
 	struct ltr506_data *ltr506 = sensor_info;
 
-	sscanf(buf, "%d", &als_en);
-	if ((als_en != 0) && (als_en != 1)) {
+	sscanf(buf, "%d", &als_enable_flag);
+	if ((als_enable_flag != 0) && (als_enable_flag != 1)) {
 		return -EINVAL;
 	}
 
-	if (als_en && (ltr506->als_enable_flag == 0)) {
+	if (als_enable_flag && (ltr506->als_enable_flag == 0)) {
 		rc = als_enable(ltr506);
-	} else if (!als_en && (ltr506->als_enable_flag == 1)) {
+	} else if (!als_enable_flag && (ltr506->als_enable_flag == 1)) {
 		rc = als_disable(ltr506);
 	}
 	return (rc == 0) ? count : rc;
@@ -944,14 +927,25 @@ static ssize_t als_gain_store(struct device *dev,
 	int rc = 0;
 	int als_gain;
 	struct ltr506_data *ltr506 = sensor_info;
+	int als_enable_flag = ltr506->als_enable_flag;
 
 	sscanf(buf, "%d", &als_gain);
 	if (als_gain & ~(ALS_GAIN_BITS)) {
 		return -EINVAL;
 	}
 
+	/* Disable the device if enabled */
+	if (als_enable_flag && als_disable(ltr506)) {
+		return -EIO;
+	}
+
 	rc = _ltr506_set_field(ltr506->i2c_client, ALS_GAIN, LTR506_ALS_CONTR,
 	                       als_gain << ALS_GAIN_SHIFT);
+
+	/* Reenable the device if previously enabled */
+	if (als_enable_flag && als_enable(ltr506)) {
+	    return -EIO;
+	}
 
 	return (rc == 0) ? count : rc;
 }
@@ -1353,7 +1347,8 @@ static ssize_t als_filter_interrupts_store(struct device *dev,
 		return -EINVAL;
 	}
 
-	rc = set_als_range(ltr506, ALS_MIN_MEASURE_VAL, ALS_MIN_MEASURE_VAL);
+	/* Clear thresholds so that interrupts will not be suppressed */
+	rc = set_als_range(ltr506, LTR506_ALS_MIN_MEASURE_VAL, LTR506_ALS_MIN_MEASURE_VAL);
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s : ALS Thresholds Write Fail...\n", __func__);
 		return -EIO;
@@ -1387,7 +1382,7 @@ static ssize_t ps_filter_interrupts_store(struct device *dev,
 		return -EINVAL;
 	}
 
-	rc = set_ps_range(ltr506, PS_MIN_MEASURE_VAL, PS_MIN_MEASURE_VAL);
+	rc = set_ps_range(ltr506, LTR506_PS_MIN_MEASURE_VAL, LTR506_PS_MIN_MEASURE_VAL);
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s : PS Thresholds Write Fail...\n", __func__);
 		return -EIO;
@@ -1465,7 +1460,7 @@ static void sysfs_register_ps_device(struct i2c_client *client, struct device *d
 }
 
 
-static int als_setup(struct ltr506_data *ltr506)
+static int als_setup_input_device(struct ltr506_data *ltr506)
 {
 	int ret;
 
@@ -1476,7 +1471,7 @@ static int als_setup(struct ltr506_data *ltr506)
 	}
 	ltr506->als_input_dev->name = "ltr506_als";
 	set_bit(EV_ABS, ltr506->als_input_dev->evbit);
-	input_set_abs_params(ltr506->als_input_dev, ABS_MISC, ALS_MIN_MEASURE_VAL, ALS_MAX_MEASURE_VAL, 0, 0);
+	input_set_abs_params(ltr506->als_input_dev, ABS_MISC, LTR506_ALS_MIN_MEASURE_VAL, LTR506_ALS_MAX_MEASURE_VAL, 0, 0);
 
 	ret = input_register_device(ltr506->als_input_dev);
 	if (ret < 0) {
@@ -1500,7 +1495,7 @@ err_als_register_input_device:
 	return ret;
 }
 
-static int ps_setup(struct ltr506_data *ltr506)
+static int ps_setup_input_device(struct ltr506_data *ltr506)
 {
 	int ret;
 
@@ -1511,7 +1506,7 @@ static int ps_setup(struct ltr506_data *ltr506)
 	}
 	ltr506->ps_input_dev->name = "ltr506_ps";
 	set_bit(EV_ABS, ltr506->ps_input_dev->evbit);
-	input_set_abs_params(ltr506->ps_input_dev, ABS_DISTANCE, PS_MIN_MEASURE_VAL, PS_MAX_MEASURE_VAL, 0, 0);
+	input_set_abs_params(ltr506->ps_input_dev, ABS_DISTANCE, LTR506_PS_MIN_MEASURE_VAL, LTR506_PS_MAX_MEASURE_VAL, 0, 0);
 
 	ret = input_register_device(ltr506->ps_input_dev);
 	if (ret < 0) {
@@ -1572,7 +1567,7 @@ static int ltr506_setup(struct ltr506_data *ltr506)
 		goto err_out1;
 	}
 
-	msleep(PON_DELAY);
+	msleep(LTR506_PON_DELAY);
 	dev_dbg(&ltr506->i2c_client->dev, "%s: Reset ltr506 device\n", __func__);
 
 	/* Do another part read to ensure we have exited reset */
@@ -1760,6 +1755,7 @@ static int  __devinit ltr506_probe(struct i2c_client *client, const struct i2c_d
 	ltr506->led_pulse_count = platdata->pfd_led_pulse_count;
 
 	ltr506->gpio_int_no = platdata->pfd_gpio_int_no;
+	ltr506->gpio_int_wake_dev = platdata->pfd_gpio_int_wake_dev;
 
 	/* Configuration to set or disable devices upon suspend */
 	ltr506->disable_als_on_suspend = platdata->pfd_disable_als_on_suspend;
@@ -1771,14 +1767,14 @@ static int  __devinit ltr506_probe(struct i2c_client *client, const struct i2c_d
 	}
 
 	/* Setup the input subsystem for the ALS */
-	ret = als_setup(ltr506);
+	ret = als_setup_input_device(ltr506);
 	if (ret < 0) {
 		dev_err(&ltr506->i2c_client->dev,"%s: ALS Setup Fail...\n", __func__);
 		goto err_out;
 	}
 
 	/* Setup the input subsystem for the PS */
-	ret = ps_setup(ltr506);
+	ret = ps_setup_input_device(ltr506);
 	if (ret < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s: PS Setup Fail...\n", __func__);
 		goto err_out;

@@ -1760,8 +1760,11 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 	/* Interrupt */
 	.pfd_gpio_int_no = GPIO_PROX_INT,
 
+	/* Boolean to allow interrupt to wake device or not */
+	.pfd_gpio_int_wake_dev = 0,
+
 	/* Disable als on suspend flag */
-	.pfd_disable_als_on_suspend = 1,
+	.pfd_disable_als_on_suspend = 0,
 
 	/* ALS enable filtering interrupts
 	 * by suppressing interrupts when measured value
@@ -1771,7 +1774,7 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 	 * e.g.
 	 *  echo "1000 1020" > /sys/class/input/input7/als_threshold
 	 */
-	.pfd_als_filter_interrupts = 1,
+	.pfd_als_filter_interrupts = 0,
 
 	/* ALS measurement repeat rate
 	 * '000:  100ms
@@ -1786,7 +1789,7 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 	 * '01: 0.5 lux/count (0.5-32k lux)
 	 * '10: 0.01 lux/count (0.02-640 lux)
 	 * '11: 0.005 lux/count (0.01-32.0 lux) */
-	.pfd_als_gain = 0,
+	.pfd_als_gain = 2,
 
 	/* Disable ps on suspend flag */
 	.pfd_disable_ps_on_suspend = 0,
@@ -1799,7 +1802,7 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 	 * e.g.
 	 *  echo "1000 1020" > /sys/class/input/input7/als_threshold
 	 */
-	.pfd_ps_filter_interrupts = 1,
+	.pfd_ps_filter_interrupts = 0,
 
 	/* PS measurement repeate rate
 	 * '000:   12.5ms (ALS auto-disabled)
@@ -1810,14 +1813,14 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 	 * '101:  500ms
 	 * '110: 1000ms
 	 * '111: 2000ms */
-	.pfd_ps_meas_rate = 4,
+	.pfd_ps_meas_rate = 1,
 
-	/* PS gain.
+	/* PS gain. NOTE(CMM) This is must write to '3'
 	 * '00:  x8 gain
 	 * '01: x16 gain
 	 * '10: x32 gain
-	 * '11: x64 gain */
-	.pfd_ps_gain = 1,
+	 * '11: x64 gain ## */
+	.pfd_ps_gain = 3,
 
 	/* LED pulse frequency.
 	 * '000: 30kHz
@@ -1828,11 +1831,11 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 	 * '101: 80kHz
 	 * '110: 90kHz
 	 * '111: 100kHz */
-	.pfd_led_pulse_freq = 7,
+	.pfd_led_pulse_freq = 3,
 
-	/* LED Duty cycle.
+	/* LED Duty cycle. NOTE(CMM) This is must write to '1'
 	 * '00:  25%
-	 * '01:  50%
+	 * '01:  50% ##
 	 * '10:  75%
 	 * '11: 100% */
 	.pfd_led_duty_cyc = 1,
