@@ -1703,6 +1703,7 @@ static struct mpu_platform_data mpu9150_hog_data = {
             206, 254, 35, 144, 225, 102, 47, 50},
 };
 
+#if 0
 /* compass */
 static struct ext_slave_platform_data ak8975_compass_data = {
 	.bus         = EXT_SLAVE_BUS_SECONDARY,
@@ -1710,7 +1711,7 @@ static struct ext_slave_platform_data ak8975_compass_data = {
 			 1, 0, 0,
 			 0, 1, 0 },
 };
-
+#endif
 
 static struct l3g4200d_gyr_platform_data notle_l3g4200d_data = {
         .min_interval = 1,                // Minimum poll interval in ms.
@@ -1956,11 +1957,13 @@ static struct i2c_board_info __initdata notle_emu_i2c_4_boardinfo[] = {
                 .irq = OMAP_GPIO_IRQ(GPIO_MPU9000_INT),
                 .platform_data = &mpu9150_data,
         },
+#if 0
         {
                 I2C_BOARD_INFO("ak8975", 0xC),
                 .irq = OMAP_GPIO_IRQ(GPIO_MPU9000_INT),
                 .platform_data = &ak8975_compass_data,
         },
+#endif
 #ifdef CONFIG_INPUT_LTR506ALS
         {
                 I2C_BOARD_INFO("ltr506als", 0x3a),
@@ -2020,11 +2023,13 @@ static struct i2c_board_info __initdata notle_fly_i2c_4_boardinfo[] = {
                 .irq = OMAP_GPIO_IRQ(GPIO_MPU9000_INT),
                 .platform_data = &mpu9150_data,
         },
+#if 0
         {
                 I2C_BOARD_INFO("ak8975", 0xC),
                 .irq = OMAP_GPIO_IRQ(GPIO_MPU9000_INT),
                 .platform_data = &ak8975_compass_data,
         },
+#endif
 #ifdef CONFIG_INPUT_LTR506ALS
         {
                 I2C_BOARD_INFO("ltr506als", 0x3a),
@@ -2057,11 +2062,13 @@ static struct i2c_board_info __initdata notle_hog_i2c_4_boardinfo[] = {
                 .irq = OMAP_GPIO_IRQ(GPIO_MPU9000_INT),
                 .platform_data = &mpu9150_hog_data,
         },
+#if 0
         {
                 I2C_BOARD_INFO("ak8975", 0xC),
                 .irq = OMAP_GPIO_IRQ(GPIO_MPU9000_INT),
                 .platform_data = &ak8975_compass_data,
         },
+#endif
 #ifdef CONFIG_INPUT_LTR506ALS
         {
                 I2C_BOARD_INFO("ltr506als", 0x3a),
