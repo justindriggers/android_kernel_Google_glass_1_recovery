@@ -208,9 +208,11 @@ static int tuna_wifi_reset(int on)
 	return 0;
 }
 
-static unsigned char tuna_mac_addr[IFHWADDRLEN] = { 0,0x90,0x4c,0,0,0 };
+static bool notle_mac_addr_valid = 0;
+static unsigned char notle_mac_addr[IFHWADDRLEN];
 
-static int __init tuna_mac_addr_setup(char *str)
+// Early initialization; return 0 on failure, 1 on success
+static int __init notle_mac_addr_setup(char *str)
 {
 	char macstr[IFHWADDRLEN*3];
 	char *macptr = macstr;
@@ -219,7 +221,6 @@ static int __init tuna_mac_addr_setup(char *str)
 
 	if (!str)
 		return 0;
-	pr_err("wlan MAC = %s\n", str);
 	if (strlen(str) >= sizeof(macstr))
 		return 0;
 	strcpy(macstr, str);
@@ -233,29 +234,27 @@ static int __init tuna_mac_addr_setup(char *str)
 		res = strict_strtoul(token, 0x10, &val);
 		if (res < 0)
 			return 0;
-		tuna_mac_addr[i++] = (u8)val;
+		notle_mac_addr[i++] = (u8)val;
 	}
 
+	notle_mac_addr_valid = 1;
 	return 1;
 }
 
-__setup("androidboot.macaddr=", tuna_mac_addr_setup);
+__setup("androidboot.macaddr=", notle_mac_addr_setup);
 
-static int tuna_wifi_get_mac_addr(unsigned char *buf)
+// return of non-zero will cause bcmdhd to use addr out of OTP
+static int notle_wifi_get_mac_addr(unsigned char *buf)
 {
-	uint rand_mac;
 	if (!buf)
 		return -EFAULT;
 
-	if ((tuna_mac_addr[4] == 0) && (tuna_mac_addr[5] == 0)) {
-		srandom32((uint)jiffies);
-		rand_mac = random32();
-		tuna_mac_addr[3] = (unsigned char)rand_mac;
-		tuna_mac_addr[4] = (unsigned char)(rand_mac >> 8);
-		tuna_mac_addr[5] = (unsigned char)(rand_mac >> 16);
+	if (notle_mac_addr_valid) {
+		memcpy(buf, notle_mac_addr, IFHWADDRLEN);
+		return 0;
+	} else {
+		return -ENXIO;
 	}
-	memcpy(buf, tuna_mac_addr, IFHWADDRLEN);
-	return 0;
 }
 
 /* Customized Locale table : OPTIONAL feature */
@@ -331,7 +330,7 @@ static struct wifi_platform_data tuna_wifi_control = {
 	.set_reset      = tuna_wifi_reset,
 	.set_carddetect = tuna_wifi_set_carddetect,
 	.mem_prealloc	= tuna_wifi_mem_prealloc,
-	.get_mac_addr	= tuna_wifi_get_mac_addr,
+	.get_mac_addr	= notle_wifi_get_mac_addr,
 	.get_country_code = tuna_wifi_get_country_code,
 };
 
