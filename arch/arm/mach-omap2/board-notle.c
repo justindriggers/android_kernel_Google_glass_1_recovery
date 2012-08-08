@@ -2431,7 +2431,6 @@ static void __init notle_init(void)
         usb_musb_init(&musb_board_data);
         omap_dmm_init();
 
-        omap_vram_set_sdram_vram(NOTLE_FB_RAM_SIZE, 0);
         omapfb_set_platform_data(&notle_fb_pdata);
 
         err = notle_gps_init();
