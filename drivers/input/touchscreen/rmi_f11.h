@@ -113,5 +113,8 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 int FN_11_config(struct rmi_function_info *rmifninfo);
 int FN_11_init(struct rmi_function_device *function_device);
 int FN_11_detect(struct rmi_function_info *rmifninfo);
+int FN_11_suspend(struct rmi_function_info *rmifninfo);
+void FN_11_resume(struct rmi_function_info *rmifninfo);
+
 /* No attention function for Fn $11 */
 #endif

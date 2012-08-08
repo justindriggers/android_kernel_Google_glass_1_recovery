@@ -542,7 +542,30 @@ void *rmi_sensor_get_functiondata(struct rmi_sensor_driver *driver,
 #ifdef CONFIG_SYNA_WAKE_ON_TOUCH
 static int rmi_sensor_suspend(struct device *dev, pm_message_t state)
 {
-        return 0;
+	struct rmi_sensor_device *sensor_device = container_of(dev, struct rmi_sensor_device, dev);
+	struct rmi_sensor_driver *sensor_drvr = sensor_device->driver;
+	struct rmi_function_info *function_info;
+	int retval = 0;
+
+	mutex_lock(&sensor_drvr->sensor_device->setup_suspend_flag);
+
+	/* invoke the suspend handler of each functions of this sensor */
+	/* ex. we will call suspend of F01 in the loop*/
+	list_for_each_entry(function_info, &sensor_drvr->functions, link) {
+		if (function_info->function_device && function_info->function_device->rmi_funcs) {
+			if (function_info->function_device->rmi_funcs->suspendable && function_info->function_device->rmi_funcs->suspendable(function_info)) {
+				retval = function_info->function_device->rmi_funcs->suspend(function_info);
+				if (retval) {
+					dev_err(dev, "%s: failed to suspend F0x%02x.", __func__, function_info->function_number);
+					retval = -1;
+					goto exit;
+				}
+			}
+		}
+	}
+exit:
+	mutex_unlock(&sensor_drvr->sensor_device->setup_suspend_flag);
+	return retval;
 }
 #else
 static int rmi_sensor_suspend(struct device *dev, pm_message_t state)
@@ -662,7 +685,24 @@ exit:
 #ifdef CONFIG_SYNA_WAKE_ON_TOUCH
 static int rmi_sensor_resume(struct device *dev)
 {
-        return 0;
+	struct rmi_sensor_device *sensor_device = container_of(dev, struct rmi_sensor_device, dev);
+	struct rmi_sensor_driver *sensor_drvr = sensor_device->driver;
+	struct rmi_function_info *function_info;
+	int retval = 0;
+
+	mutex_lock(&sensor_drvr->sensor_device->setup_suspend_flag);
+
+	/* invoke the suspend handler of each functions of this sensor */
+	/* ex. we will call suspend of F01 in the loop*/
+	list_for_each_entry(function_info, &sensor_drvr->functions, link) {
+		if (function_info->function_device && function_info->function_device->rmi_funcs) {
+			if (function_info->function_device->rmi_funcs->suspendable && function_info->function_device->rmi_funcs->suspendable(function_info)) {
+				function_info->function_device->rmi_funcs->resume(function_info);
+			}
+		}
+	}
+	mutex_unlock(&sensor_drvr->sensor_device->setup_suspend_flag);
+	return retval;
 }
 #else
 static int rmi_sensor_resume(struct device *dev)

@@ -90,8 +90,8 @@ static struct rmi_function_ops supported_functions[] = {
 		 .init = FN_11_init,
 		 .detect = FN_11_detect,
 		 .attention = NULL,
-		 .suspend = NULL,
-		 .resume = NULL,
+		 .suspend = FN_11_suspend,
+		 .resume = FN_11_resume,
 		 .suspendable = rmi_function_suspendable},
 	/* Fn $19 - buttons */
 	{
@@ -148,7 +148,13 @@ EXPORT_SYMBOL(rmi_find_function);
 
 static int rmi_function_suspendable(struct rmi_function_info *rmifninfo)
 {
-	return 1;
+	/* NOTE(CMM) Only enable the F11 to suspend so it can handle long
+	 * latency suspend/resume operations to wake the device.  F01 is the
+	 * only other suspendable device, but that disables interrupts. */
+	if (rmifninfo->function_number == RMI_F11_INDEX) {
+		return 1;
+	}
+	return 0;
 }
 
 static void rmi_function_config(struct rmi_function_device *function)

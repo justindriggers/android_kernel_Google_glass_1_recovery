@@ -174,11 +174,9 @@ struct f11_instance_data {
 	unsigned char rel_data_offset;
 	unsigned char gesture_data_offset;
 	unsigned char *finger_data_buffer;
-	/* Last X & Y seen, needed at finger lift.  Was down indicates
-	 * at least one finger was here. TODO: Eventually we'll need to
-	 * track this info on a per finger basis. */
-	bool wasdown;
 	int last_finger_down_count;
+	int suspended;
+
 	unsigned int old_X;
 	unsigned int old_Y;
 	/* Transformations to be applied to coordinates before reporting. */
@@ -680,26 +678,27 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 		if (finger_status == F11_PRESENT
 		    || finger_status == F11_INACCURATE) {
 			finger_down_count++;
-			instance_data->wasdown = true;
 		}
 	}
-	if ((finger_down_count == 0) && (instance_data->last_finger_down_count == 0)) {
-		/* NOTE(cmanton) An interrupt got us here yet there is no longer
-		 * finger data to check.  We could be in a suspend state but we
-		 * want to ensure that this touchpad button is sent to the upper layer
-		 * to allow a wakeup.  Replicate the behavior by creating an artificial
-		 * button down.
+
+	if (finger_down_count == 0 && instance_data->last_finger_down_count == 0 && instance_data->suspended) {
+		/* We were interrupted while in a suspend state and there
+		 * were no fingers detected by the time we polled the sensor.
+		 * Craft an event sequence to force an ACTION_DOWN
+		 * and ACTION_UP to be propogated through the Android InputEvent
+		 * stack to allow the device to wakeup.
 		 */
 		input_report_key(function_device->input, BTN_TOUCH, 1);
+#if defined(ABS_MT_PRESSURE)
+		/* We have to apply a non-zero pressure or the Android InputEvent 
+		 * layer will consider this a hover event. */
+		input_report_abs(function_device->input, ABS_MT_PRESSURE, 1);
+#endif
+		input_sync(function_device->input); /* sync after groups of events */
 	}
+	/* This key info is used to enter and exit hover mode in the Android stack. */
 	input_report_key(function_device->input, BTN_TOUCH, finger_down_count);
 	instance_data->last_finger_down_count = finger_down_count;
-
-	for (finger = 0;
-	     finger < (instance_data->sensor_info->number_of_fingers - 1);
-	     finger++)
-		input_report_key(function_device->input, BTN_2 + finger,
-				 finger_down_count >= (finger + 2));
 
 	if (instance_data->sensor_info->has_absolute)
 		handle_absolute_reports(rmifninfo);
@@ -789,6 +788,7 @@ static void handle_absolute_reports(struct rmi_function_info *rmifninfo)
 				 finger, X, Y, Z, Wx, Wy);
 #endif
 
+#if !defined(CONFIG_SYNA_MULTI_TOUCH)
 			/* if this is the first finger report normal
 			* ABS_X, ABS_Y, PRESSURE, TOOL_WIDTH events for
 			* non-MT apps. Apps that support Multi-touch
@@ -811,6 +811,7 @@ static void handle_absolute_reports(struct rmi_function_info *rmifninfo)
 				/* TODO generate non MT events for
 					* multifinger situation. */
 			}
+#endif
 #if defined(CONFIG_SYNA_MULTI_TOUCH)
 			/* Report Multi-Touch events for each finger */
 #if defined(ABS_MT_PRESSURE)
@@ -841,39 +842,12 @@ static void handle_absolute_reports(struct rmi_function_info *rmifninfo)
 				*/
 			input_report_abs(function_device->input,
 					ABS_MT_TRACKING_ID,
-					finger + 1);
+					finger);
 
 			/* MT sync between fingers */
 			input_mt_sync(function_device->input);
 #endif
 		}
-	}
-
-	/* if we had a finger down before and now we don't have
-	* any send a button up. */
-	if ((finger_down_count == 0) && instance_data->wasdown) {
-		instance_data->wasdown = false;
-
-#if defined(CONFIG_SYNA_MULTI_TOUCH)
-#if defined(ABS_MT_PRESSURE)
-		input_report_abs(function_device->input, ABS_MT_PRESSURE, 0);
-#endif
-		input_report_abs(function_device->input, ABS_MT_TOUCH_MAJOR, 0);
-		input_report_abs(function_device->input, ABS_MT_TOUCH_MINOR, 0);
-		input_report_abs(function_device->input, ABS_MT_POSITION_X,
-				instance_data->old_X);
-		input_report_abs(function_device->input, ABS_MT_POSITION_Y,
-				instance_data->old_Y);
-		input_report_abs(function_device->input, ABS_MT_TRACKING_ID, 1);
-		input_mt_sync(function_device->input);
-#endif
-
-		input_report_abs(function_device->input, ABS_X,
-				instance_data->old_X);
-		input_report_abs(function_device->input, ABS_Y,
-				instance_data->old_Y);
-		instance_data->old_X = instance_data->old_Y = 0;
-		pr_debug("%s: Finger up.", __func__);
 	}
 }
 
@@ -970,7 +944,7 @@ static void f11_set_abs_params(struct rmi_function_device *function_device)
 			     0, 0);
 	input_set_abs_params(function_device->input, ABS_MT_ORIENTATION, 0, 1,
 			     0, 0);
-	input_set_abs_params(function_device->input, ABS_MT_TRACKING_ID, 1, 10,
+	input_set_abs_params(function_device->input, ABS_MT_TRACKING_ID, 0, 10,
 			     0, 0);
 	input_set_abs_params(function_device->input, ABS_MT_POSITION_X, xMin,
 			     xMax, 0, 0);
@@ -978,16 +952,6 @@ static void f11_set_abs_params(struct rmi_function_device *function_device)
 			     yMax, 0, 0);
 #endif
 }
-
-/* NOTE(CMM) Supply event info for the button events to occur during resume cycle */
-static void f11_set_key_params(struct rmi_function_device *function_device)
-{
-	/* Touchpad */
-	input_set_capability(function_device->input, EV_KEY, BTN_TOUCH);
-	input_set_capability(function_device->input, EV_KEY, BTN_2);
-	input_set_capability(function_device->input, EV_KEY, BTN_3);
-}
-
 
 /* Initialize any function $11 specific params and settings - input
  * settings, device settings, etc.
@@ -1060,10 +1024,9 @@ int FN_11_init(struct rmi_function_device *function_device)
 	/* need to init the input abs params for the 2D */
 	set_bit(EV_ABS, function_device->input->evbit);
 	set_bit(EV_SYN, function_device->input->evbit);
-	set_bit(EV_KEY, function_device->input->evbit);
+	input_set_capability(function_device->input, EV_KEY, BTN_TOUCH);
 
 	f11_set_abs_params(function_device);
-	f11_set_key_params(function_device);
 
 	if (instance_data->sensor_info->has_relative) {
 		/*create input device for mouse events  */
@@ -1203,6 +1166,27 @@ error_exit:
 	return retval;
 }
 EXPORT_SYMBOL(FN_11_detect);
+
+int FN_11_suspend(struct rmi_function_info *rmifninfo)
+{
+        struct f11_instance_data *instance = rmifninfo->fndata;
+        instance->suspended = 1;
+        dev_info(&rmifninfo->function_device->dev, "%s Suspended touchpad\n", __FUNCTION__);
+        return 0;
+}
+EXPORT_SYMBOL(FN_11_suspend);
+
+/*
+ *  resume handler for F01, this will be invoked in
+ *  resume routine from sensor
+ */
+void FN_11_resume(struct rmi_function_info *rmifninfo)
+{
+        struct f11_instance_data *instance = rmifninfo->fndata;
+        instance->suspended = 0;
+        dev_info(&rmifninfo->function_device->dev, "%s Resumed touchpad\n", __FUNCTION__);
+}
+EXPORT_SYMBOL(FN_11_resume);
 
 static ssize_t rmi_fn_11_reportmode_show(struct device *dev,
 				struct device_attribute *attr,
