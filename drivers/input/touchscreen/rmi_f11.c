@@ -164,6 +164,8 @@
 
 #define REL_BYTES_PER_FINGER 2
 
+#define NUM_SYNTH_KEYS_PER_SUSPEND 1
+
 struct f11_instance_data {
 	struct rmi_F11_device_query *device_info;
 	struct rmi_F11_sensor_query *sensor_info;
@@ -176,6 +178,7 @@ struct f11_instance_data {
 	unsigned char *finger_data_buffer;
 	int last_finger_down_count;
 	int suspended;
+	int synth_keys_sent;
 
 	unsigned int old_X;
 	unsigned int old_Y;
@@ -681,7 +684,8 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 		}
 	}
 
-	if (finger_down_count == 0 && instance_data->last_finger_down_count == 0 && instance_data->suspended) {
+	if (finger_down_count == 0 && instance_data->last_finger_down_count == 0 && instance_data->suspended
+	    && instance_data->synth_keys_sent < NUM_SYNTH_KEYS_PER_SUSPEND) {
 		/* We were interrupted while in a suspend state and there
 		 * were no fingers detected by the time we polled the sensor.
 		 * Craft an event sequence to force an ACTION_DOWN
@@ -695,6 +699,9 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 		input_report_abs(function_device->input, ABS_MT_PRESSURE, 1);
 #endif
 		input_sync(function_device->input); /* sync after groups of events */
+
+		/* Keep track of count of synthesized keys per suspend cycle. */
+		instance_data->synth_keys_sent++;
 	}
 	/* This key info is used to enter and exit hover mode in the Android stack. */
 	input_report_key(function_device->input, BTN_TOUCH, finger_down_count);
@@ -1171,6 +1178,7 @@ int FN_11_suspend(struct rmi_function_info *rmifninfo)
 {
         struct f11_instance_data *instance = rmifninfo->fndata;
         instance->suspended = 1;
+        instance->synth_keys_sent = 0;
         dev_info(&rmifninfo->function_device->dev, "%s Suspended touchpad\n", __FUNCTION__);
         return 0;
 }
