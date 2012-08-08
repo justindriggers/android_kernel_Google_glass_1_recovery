@@ -68,6 +68,8 @@
 #include <mach/emif.h>
 #include <mach/lpddr2-elpida.h>
 #include <mach/dmm.h>
+#include <mach/omap4_ion.h>
+
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
@@ -89,7 +91,6 @@
 #include <video/omap-panel-notle.h>
 
 #include "timer-gp.h"
-#include "omap4_ion.h"
 #include "omap_ram_console.h"
 #include "hsmmc.h"
 #include "control.h"
@@ -2494,20 +2495,24 @@ static void __init notle_map_io(void)
 
 static void __init notle_reserve(void)
 {
-        omap_ram_console_init(OMAP_RAM_CONSOLE_START_DEFAULT,
-                              OMAP_RAM_CONSOLE_SIZE_DEFAULT);
-
-        /* do the static reservations first */
-        memblock_remove(PHYS_ADDR_SMC_MEM, PHYS_ADDR_SMC_SIZE);
-        memblock_remove(PHYS_ADDR_DUCATI_MEM, PHYS_ADDR_DUCATI_SIZE);
-        /* ipu needs to recognize secure input buffer area as well */
-        omap_ipu_set_static_mempool(PHYS_ADDR_DUCATI_MEM, PHYS_ADDR_DUCATI_SIZE +
-                                    OMAP4_ION_HEAP_SECURE_INPUT_SIZE);
+	omap_init_ram_size();
 
 #ifdef CONFIG_ION_OMAP
-        omap_ion_init();
+	omap_ion_init();
 #endif
-        omap_reserve();
+
+	omap_ram_console_init(OMAP_RAM_CONSOLE_START_DEFAULT,
+			OMAP_RAM_CONSOLE_SIZE_DEFAULT);
+
+	/* do the static reservations first */
+	memblock_remove(PHYS_ADDR_SMC_MEM, PHYS_ADDR_SMC_SIZE);
+	memblock_remove(PHYS_ADDR_DUCATI_MEM, PHYS_ADDR_DUCATI_SIZE);
+	/* ipu needs to recognize secure input buffer area as well */
+	omap_ipu_set_static_mempool(PHYS_ADDR_DUCATI_MEM, PHYS_ADDR_DUCATI_SIZE +
+					OMAP4_ION_HEAP_SECURE_INPUT_SIZE +
+					OMAP4_ION_HEAP_SECURE_OUTPUT_WFDHDCP_SIZE);
+
+	omap_reserve();
 }
 
 MACHINE_START(NOTLE, "OMAP4430")
