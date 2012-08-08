@@ -74,6 +74,7 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 
+#include <plat/android-display.h>
 #include <plat/board.h>
 #include <plat/dmtimer.h>
 #include <plat/common.h>
@@ -359,6 +360,12 @@ struct omap_dss_device panel_notle_device = {
         .reset_gpio               = GPIO_LCD_RESET_N,
         .channel                  = OMAP_DSS_CHANNEL_LCD2,
         .vsync_gpio               = -1,
+        .panel = {
+                .timings = {
+                        .x_res = 640,
+                        .y_res = 360,
+                },
+        },
 };
 
 static struct tc358762_board_data dsi_panel = {
@@ -2498,7 +2505,18 @@ static void __init notle_reserve(void)
 	omap_init_ram_size();
 
 #ifdef CONFIG_ION_OMAP
-	omap_ion_init();
+        omap_android_display_setup(&panel_notle_dss_data,
+                                   NULL,
+                                   NULL,
+                                   &notle_fb_pdata,
+                                   get_omap_ion_platform_data());
+        omap_ion_init();
+#else
+        omap_android_display_setup(&panel_notle_dss_data,
+                                   NULL,
+                                   NULL,
+                                   &notle_fb_pdata,
+                                   NULL);
 #endif
 
 	omap_ram_console_init(OMAP_RAM_CONSOLE_START_DEFAULT,
