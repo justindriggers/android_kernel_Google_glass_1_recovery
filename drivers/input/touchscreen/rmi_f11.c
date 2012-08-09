@@ -570,7 +570,9 @@ static void compute_finger_data_size(struct rmi_function_info *rmifninfo,
 	}
 
 	instance_data->finger_data_buffer_size = data_buffer_size;
+#if POS_DEBUG
 	pr_info("%s: Computed finger data buffer size of %d.\n", __func__, data_buffer_size);
+#endif
 }
 
 /* Reading and parsing the F11 query registers is a big hairy wad.  There's a
@@ -694,7 +696,7 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 		 */
 		input_report_key(function_device->input, BTN_TOUCH, 1);
 #if defined(ABS_MT_PRESSURE)
-		/* We have to apply a non-zero pressure or the Android InputEvent 
+		/* We have to apply a non-zero pressure or the Android InputEvent
 		 * layer will consider this a hover event. */
 		input_report_abs(function_device->input, ABS_MT_PRESSURE, 1);
 #endif
@@ -702,6 +704,9 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 
 		/* Keep track of count of synthesized keys per suspend cycle. */
 		instance_data->synth_keys_sent++;
+
+		dev_dbg(&function_device->dev, "Created synthesized movement event cnt:%d\n",
+		        instance_data->synth_keys_sent);
 	}
 	/* This key info is used to enter and exit hover mode in the Android stack. */
 	input_report_key(function_device->input, BTN_TOUCH, finger_down_count);

@@ -45,6 +45,24 @@ static const char busname[] = "rmi";
 #define PDT_START_SCAN_LOCATION 0x00E9
 #define PDT_END_SCAN_LOCATION 0x0005
 #define PDT_ENTRY_SIZE 0x0006
+#define RMI4_END_OF_PDT(id) ((id) == 0x00 || (id) == 0xff)
+
+#define RMI4_MAX_PAGE 0xff
+#define RMI4_PAGE_SIZE 0x100
+#define RMI_DEVICE_RESET_CMD    0x01
+#define INITIAL_RESET_WAIT_MS 20
+
+struct pdt_entry {
+	u8 query_base_addr:8;
+	u8 command_base_addr:8;
+	u8 control_base_addr:8;
+	u8 data_base_addr:8;
+	u8 interrupt_source_count:3;
+	u8 bits3and4:2;
+	u8 function_version:2;
+	u8 bit7:1;
+	u8 function_number:8;
+};
 
 /* definitions for rmi bus */
 struct device rmi_bus_device;
@@ -83,6 +101,56 @@ static int rmi_bus_resume(struct device *dev)
 {
 	dev_dbg(dev, "%s: RMI bus resuming.", __func__);
 	return 0;
+}
+
+/* NOTE(CMM) Routine taken from a newer driver and modified for this driver. */
+static int do_initial_reset(struct rmi_phys_driver *rpd)
+{
+	struct pdt_entry pdt_entry;
+	int page;
+	bool done = false;
+	int i;
+	int retval;
+
+	for (page = 0; (page <= RMI4_MAX_PAGE) && !done; page++) {
+		u16 page_start = RMI4_PAGE_SIZE * page;
+		u16 pdt_start = page_start + PDT_START_SCAN_LOCATION;
+		u16 pdt_end = page_start + PDT_END_SCAN_LOCATION;
+
+		done = true;
+		for (i = pdt_start; i >= pdt_end; i -= sizeof(pdt_entry)) {
+			retval = rpd->read_multiple(rpd, i, (char *)&pdt_entry, sizeof(pdt_entry));
+			if (retval) {
+				pr_err("%s: Read PDT entry at 0x%04x failed, code = %d.\n",
+				       __func__, i, retval);
+				return -EIO;
+			}
+
+			if (RMI4_END_OF_PDT(pdt_entry.function_number))
+				break;
+			done = false;
+
+			if (pdt_entry.function_number == 0x01) {
+				u16 cmd_addr = page_start + pdt_entry.command_base_addr;
+				u8 cmd_buf = RMI_DEVICE_RESET_CMD;
+				retval = rpd->write(rpd, cmd_addr, cmd_buf);
+				/* Returns 1 indicating success */
+				if (retval != 1) {
+					pr_err("%s: Initial reset failed. Code = %d.\n",
+					       __func__, retval);
+					return -EIO;
+				}
+				pr_info("%s: Reset touchpad addr:0x%02x data:0x%02x",
+				        __func__, cmd_addr, cmd_buf);
+				/* Some devices take longer to come out of reset. */
+				mdelay(2*INITIAL_RESET_WAIT_MS);
+				return 0;
+			}
+		}
+	}
+
+	pr_warn("%s: WARNING: Failed to find F01 for initial reset.\n", __func__);
+	return -ENODEV;
 }
 
 /*
@@ -141,13 +209,11 @@ int rmi_register_sensor(struct rmi_phys_driver *rpd,
 	/* Get some information from the device */
 	pr_debug("%s: Identifying sensors by presence of F01...", __func__);
 
-	/* CMM HACK Reset the device before reading */
-	rpd->write(rpd, 0x5c, 0x01);
+	if (do_initial_reset(rpd)) {
+		pr_err("%s: Unable to find or reset touchpad device\n", __func__);
+		return -ENODEV;
+	}
 
-	/* CMM HACK Wait some time for device to come back */
-	msleep(100);
-
-	pr_err("%s CMM HACK force reset to prevent warm restart failure from device", __FUNCTION__);
 	/* Scan the page descriptor table until we find F01.  If we find that,
 	 * we assume that we can reliably talk to this sensor.
 	 */

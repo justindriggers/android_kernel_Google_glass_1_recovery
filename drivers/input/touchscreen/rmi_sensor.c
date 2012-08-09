@@ -804,6 +804,7 @@ static int rmi_sensor_register_functions(struct rmi_sensor_driver *sensor)
 	int j;
 	int page;
 	bool done; // Indicates that the last page we checked for PDT's had none
+	int dup = 0;
 	int interrupt_offset;
 	unsigned char interrupt_count = 0;
 	struct rmi_function_descriptor rmi_fd;
@@ -861,6 +862,23 @@ static int rmi_sensor_register_functions(struct rmi_sensor_driver *sensor)
 				rmi_fd.command_base_addr,
 				rmi_fd.control_base_addr, rmi_fd.data_base_addr,
 				rmi_fd.interrupt_source_count);
+
+			/* NOTE(CMM) If the device is screwed up and reporting multiple
+			 * functions then we should detect duplicates and bail.  Otherwise
+			 * we will crash as we start registering multiple functions */
+			dup = 0;
+			list_for_each_entry(function_info, &sensor->functions, link) {
+				if (function_info->function_number == rmi_fd.function_number) {
+					dev_err(dev, "%s: Found duplicate function entries:0x%02x skipping\n",
+					        __func__, rmi_fd.function_number);
+					dup = 1;
+					break;
+				}
+			}
+
+			if (dup) {
+				break;
+			}
 
 			/* determine if the function is supported and if so
 			 * then bind this function device to the sensor */
