@@ -294,17 +294,22 @@ static void omap_i2c_hwspinlock_unlock(struct omap_i2c_dev *dev)
 		pdata->hwspin_unlock(pdata->handle);
 }
 
-static void omap_i2c_unidle(struct omap_i2c_dev *dev)
+static int omap_i2c_unidle(struct omap_i2c_dev *dev)
 {
 	struct platform_device *pdev;
 	struct omap_i2c_bus_platform_data *pdata;
+        int ret = 0;
 
 	WARN_ON(!dev->idle);
 
 	pdev = to_platform_device(dev->dev);
 	pdata = pdev->dev.platform_data;
 
-	pm_runtime_get_sync(&pdev->dev);
+	ret = pm_runtime_get_sync(&pdev->dev);
+	if (IS_ERR_VALUE(ret)) {
+		dev_err(&pdev->dev,"%s: failed to get sync\n", __func__);
+		return ret;
+	}
 
 	if (cpu_is_omap34xx() || cpu_is_omap44xx()) {
 		unsigned long delay;
@@ -322,7 +327,7 @@ static void omap_i2c_unidle(struct omap_i2c_dev *dev)
 				& OMAP_I2C_SYSS_RDONE)) {
 			if (time_after(jiffies, delay)) {
 				dev_err(dev->dev, "omap i2c unidle timeout\n");
-				return;
+				return -ETIMEDOUT;
 			}
 			cpu_relax();
 		}
@@ -335,6 +340,8 @@ static void omap_i2c_unidle(struct omap_i2c_dev *dev)
 	} else {
 		omap_i2c_write_reg(dev, OMAP_I2C_IE_REG, dev->iestate);
 	}
+
+	return ret;
 }
 
 static void omap_i2c_idle(struct omap_i2c_dev *dev)
@@ -792,7 +799,9 @@ omap_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 	/* We have the bus, enable IRQ */
 	enable_irq(dev->irq);
 
-	omap_i2c_unidle(dev);
+	r = omap_i2c_unidle(dev);
+	if ((r < 0) && (r != -ETIMEDOUT))
+		goto out_unlock;
 
 	r = omap_i2c_wait_for_bb(dev);
 	if (r < 0)
@@ -844,6 +853,7 @@ omap_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 	omap_i2c_wait_for_bb(dev);
 out:
 	omap_i2c_idle(dev);
+out_unlock:
 	omap_i2c_hwspinlock_unlock(dev);
 	disable_irq(dev->irq);
 	return r;
@@ -1227,7 +1237,10 @@ omap_i2c_probe(struct platform_device *pdev)
 		dev->regs = (u8 *) reg_map;
 
 	pm_runtime_enable(&pdev->dev);
-	pm_runtime_get_sync(&pdev->dev);
+	r = pm_runtime_get_sync(&pdev->dev);
+        if (IS_ERR_VALUE(r))
+		goto err_free_qos;
+
 	dev->idle = 0;
 
 	dev->rev = omap_i2c_read_reg(dev, OMAP_I2C_REV_REG) & 0xff;
@@ -1317,6 +1330,7 @@ err_free_irq:
 err_unuse_clocks:
 	omap_i2c_write_reg(dev, OMAP_I2C_CON_REG, 0);
 	omap_i2c_idle(dev);
+err_free_qos:
 	if (dev->pm_qos) {
 		pm_qos_remove_request(dev->pm_qos);
 		kfree(dev->pm_qos);
@@ -1359,13 +1373,17 @@ static void
 omap_i2c_shutdown(struct platform_device *pdev)
 {
 	struct omap_i2c_dev	*dev = platform_get_drvdata(pdev);
+	int ret = 0;
 
 	/* Keep pmic i2c alive - for pm_power_off case */
 	if (!strcmp(dev_name(dev->dev), PMIC_I2C_NAME))
 			return;
 
 	/* Shutdown all other i2c controllers */
-	pm_runtime_get_sync(&pdev->dev);
+	ret = pm_runtime_get_sync(&pdev->dev);
+	if (IS_ERR_VALUE(ret))
+		return;
+
 	omap_i2c_write_reg(dev, OMAP_I2C_CON_REG, 0);
 	/* Keep interrupts disabled */
 	free_irq(dev->irq, dev);
