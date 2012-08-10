@@ -246,9 +246,17 @@ static inline unsigned int twl6030_get_usb_max_power(struct otg_transceiver *x)
 };
 #endif
 
+/* sign extension needs a little care */
+static __inline int sign_extend(int n, int num_bits)
+{
+	int shift = (int)(sizeof(int) * 8 - num_bits);
+	return (n << shift) >> shift;
+}
+
 /* Ptr to thermistor table */
 static const unsigned int fuelgauge_rate[4] = {4, 16, 64, 256};
 static struct wake_lock usb_wake_lock;
+static struct wake_lock battery_wake_lock;
 
 #define STATE_BATTERY		0 /* no wall power, charging disabled */
 #define STATE_FAULT		1 /* charging off due to fault condition */
@@ -591,7 +599,31 @@ err:
 
 static void twl6030battery_current(struct twl6030_bci_device_info *di)
 {
-	/* TODO */
+	int ret = 0;
+	u16 read_value = 0;
+	s16 temp = 0;
+	int current_now = 0;
+
+	/* FG_REG_10, 11 is 14 bit signed instantaneous current sample value */
+	ret = twl_i2c_read(TWL6030_MODULE_GASGAUGE, (u8 *)&read_value,
+								FG_REG_10, 2);
+	if (ret < 0) {
+		dev_dbg(di->dev, "failed to read FG_REG_10: current_now\n");
+		return;
+	}
+
+	temp = sign_extend(read_value, 14);
+	current_now = temp - di->cc_offset;
+
+	/* current drawn per sec */
+	current_now = current_now * fuelgauge_rate[0 /*di->fuelgauge_mode*/];
+	/* current in mAmperes */
+	current_now = (current_now * 3000) >> 14;
+	/* current in uAmperes */
+	current_now = current_now * 1000;
+	di->current_uA = current_now;
+
+	return;
 }
 
 static int twl6030backupbatt_setup(void)
@@ -736,7 +768,7 @@ static int twl6030_calibrate_fuelgauge(struct twl6030_bci_device_info *di)
 	if (ret < 0)
 		goto err;
 
-	cc_offset = ((s16)(cc_offset << 6) >> 6);
+	cc_offset = sign_extend(cc_offset, 10);
 	di->cc_offset = cc_offset;
 
 	printk("battery: calibration took %d ms, offset = %d\n", n * 100, cc_offset);
@@ -776,6 +808,61 @@ static int twl6030_get_battery_voltage(struct twl6030_bci_device_info *di)
 		return v;
 }
 
+static int twl6030_read_gasguage_regs(struct twl6030_bci_device_info *di)
+{
+	int ret;
+	u32 data[2];
+
+#if 0
+	s16 integ;
+
+	ret = twl_i2c_read_u8(TWL6030_MODULE_GASGAUGE, (u8 *) data, FG_REG_00);
+	if (ret < 0) {
+		pr_err("twl6030: failed to read gasgauge config\n");
+		goto done;
+	}
+#endif
+
+	/* must pause updates while reading multibyte registers to avoid bogus data */
+	ret = twl_i2c_write_u8(TWL6030_MODULE_GASGAUGE, CC_PAUSE, FG_REG_00);
+	if (ret < 0) {
+		pr_err("twl6030: cannot pause gasgauge\n");
+		goto done;
+	}
+
+	ret = twl_i2c_read(TWL6030_MODULE_GASGAUGE, ((u8*) data) + 1, FG_REG_01, 7);
+	if (ret < 0) {
+		pr_err("twl6030: cannot read gasgauge\n");
+		goto err;
+	}
+
+	di->timer_n1 = data[0] >> 8;	/* FG_REG_{01..03} is 24 bit unsigned sample counter */
+	di->charge_n1 = data[1];	/* FG_REG_{04..07} is 32 bit signed accumulator */
+
+#if 0
+	ret = twl_i2c_read(TWL6030_MODULE_GASGAUGE, (u8 *) &integ, FG_REG_10, 2);
+	if (ret < 0) {
+		pr_err("twl6030: failed to read integrator\n");
+		goto err;
+	}
+
+	/* sign extend the value */
+	integ = sign_extend(integ, 14);
+
+	printk("battery: data[0] = %08x data[1] = %08x\n", data[0], data[1]);
+	printk("battery: integ = %02x (%d)\n", (unsigned) integ, (int) integ);
+#endif
+
+err:
+	ret = twl_i2c_write_u8(TWL6030_MODULE_GASGAUGE, 0, FG_REG_00);
+	if (ret < 0) {
+		pr_err("twl6030: cannot resume gasgauge\n");
+	}
+
+done:
+	return ret;
+}
+
 static void twl6030_read_fuelgauge(struct twl6030_bci_device_info *di)
 {
 	s32 samples;
@@ -785,31 +872,14 @@ static void twl6030_read_fuelgauge(struct twl6030_bci_device_info *di)
 	u64 tmp;
 	int statechanged = 0;
 
+	/* save last reading before taking a new reading */
 	di->charge_n2 = di->charge_n1;
 	di->timer_n2 = di->timer_n1;
 
-	/* must pause updates while reading multibyte registers to avoid bogus data */
-	ret = twl_i2c_write_u8(TWL6030_MODULE_GASGAUGE, CC_PAUSE, FG_REG_00);
-	if (ret < 0) {
-		pr_err("twl6030: cannot pause gasgauge\n");
+	/* update timer_n1 and charge_n1 */
+	ret = twl6030_read_gasguage_regs(di);
+	if (ret < 0)
 		goto err;
-	}
-	ret = twl_i2c_read(TWL6030_MODULE_GASGAUGE, ((u8*) data) + 1, FG_REG_01, 7);
-	if (ret < 0) {
-		pr_err("twl6030: cannot read gasgauge\n");
-		ret = twl_i2c_write_u8(TWL6030_MODULE_GASGAUGE, 0, FG_REG_00);
-		if (ret < 0)
-			pr_err("twl6030: cannot resume gasgauge\n");
-		goto err;
-	}
-	ret = twl_i2c_write_u8(TWL6030_MODULE_GASGAUGE, 0, FG_REG_00);
-	if (ret < 0) {
-		pr_err("twl6030: cannot resume gasgauge\n");
-		goto err;
-	}
-
-	di->timer_n1 = data[0] >> 8;	/* FG_REG_{01..03} is 24 bit unsigned sample counter */
-	di->charge_n1 = data[1];	/* FG_REG_{04..07} is 32 bit signed accumulator */
 
 	samples = di->timer_n1 - di->timer_n2;
 
@@ -1031,6 +1101,8 @@ static void twl6030_monitor_work(struct work_struct *work)
 	int temp;
 	int ret;
 
+	wake_lock(&battery_wake_lock);
+
 	/* pet the charger watchdog */
 	if (is_charging(di))
 		twl6030_set_watchdog(di, di->watchdog_duration);
@@ -1043,6 +1115,8 @@ static void twl6030_monitor_work(struct work_struct *work)
 	/* TODO: monitor battery temperature */
 
 	twl6030_determine_charge_state(di);
+
+	wake_unlock(&battery_wake_lock);
 }
 
 #define to_twl6030_bci_device_info(x) container_of((x), \
@@ -1386,6 +1460,7 @@ static int __devinit twl6030_bci_battery_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, di);
 
 	wake_lock_init(&usb_wake_lock, WAKE_LOCK_SUSPEND, "usb_wake_lock");
+	wake_lock_init(&battery_wake_lock, WAKE_LOCK_SUSPEND, "battery_wake_lock");
 
 	di->wq = create_freezable_workqueue(dev_name(&pdev->dev));
 
@@ -1518,12 +1593,31 @@ temp_setup_fail:
 #ifdef CONFIG_PM
 static int twl6030_bci_battery_suspend(struct device *dev)
 {
+	int ret;
+
 	/* TODO: schedule alarm */
+
+	ret = twl6030battery_current_setup(false);
+	if (ret) {
+		pr_err("%s: Current measurement setup failed (%d)!\n",
+				__func__, ret);
+		return ret;
+	}
+
 	return 0;
 }
 
 static int twl6030_bci_battery_resume(struct device *dev)
 {
+	int ret;
+
+	ret = twl6030battery_current_setup(true);
+	if (ret) {
+		pr_err("%s: Current measurement setup failed (%d)!\n",
+				__func__, ret);
+		return ret;
+	}
+
 	return 0;
 }
 #else
