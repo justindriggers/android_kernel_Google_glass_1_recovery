@@ -608,7 +608,7 @@ int __init notle_dpi_init(void)
             }
 
             r = gpio_request_one(panel_notle_device.reset_gpio,
-                                 GPIOF_OUT_INIT_LOW, "DVI PD");
+                                 GPIOF_OUT_INIT_HIGH, "DVI PD");
             if (r) {
                     pr_err("Failed to get DVI powerdown GPIO\n");
                     goto err1;
