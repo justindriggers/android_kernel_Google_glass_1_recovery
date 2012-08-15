@@ -796,12 +796,12 @@ omap_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 	if (r != 0)
 		return r;
 
-	/* We have the bus, enable IRQ */
-	enable_irq(dev->irq);
-
 	r = omap_i2c_unidle(dev);
 	if ((r < 0) && (r != -ETIMEDOUT))
 		goto out_unlock;
+
+        /* We have the bus, enable IRQ */
+        enable_irq(dev->irq);
 
 	r = omap_i2c_wait_for_bb(dev);
 	if (r < 0)
@@ -852,10 +852,10 @@ omap_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 
 	omap_i2c_wait_for_bb(dev);
 out:
+	disable_irq(dev->irq);
 	omap_i2c_idle(dev);
 out_unlock:
 	omap_i2c_hwspinlock_unlock(dev);
-	disable_irq(dev->irq);
 	return r;
 }
 
