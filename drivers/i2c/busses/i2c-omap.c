@@ -201,6 +201,7 @@ struct omap_i2c_dev {
 	u16			bufstate;
 	u16			westate;
 	u16			errata;
+	bool			got_lock;
 #ifdef CONFIG_OMAP4_DPLL_CASCADING
 	struct notifier_block   nb;
 	int                     dpll_entry;
@@ -279,7 +280,7 @@ static int omap_i2c_hwspinlock_lock(struct omap_i2c_dev *dev)
 		ret = pdata->hwspin_lock_timeout(pdata->handle, 100);
 		if (ret != 0)
 			dev_err(&pdev->dev, "%s: TIMEDOUT: Failed to acquire "
-						"hwspinlock\n", __func__);
+						"hwspinlock got_lock = %d\n", __func__, dev->got_lock);
 		return ret;
 	} else
 		return -EINVAL;
@@ -290,8 +291,10 @@ static void omap_i2c_hwspinlock_unlock(struct omap_i2c_dev *dev)
 	struct platform_device *pdev = to_platform_device(dev->dev);
 	struct omap_i2c_bus_platform_data *pdata = pdev->dev.platform_data;
 
-	if (pdata->hwspin_unlock)
+	if (pdata->hwspin_unlock) {
 		pdata->hwspin_unlock(pdata->handle);
+		dev->got_lock = false;
+	}
 }
 
 static int omap_i2c_unidle(struct omap_i2c_dev *dev)
@@ -795,6 +798,7 @@ omap_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 	try to recover somehow */
 	if (r != 0)
 		return r;
+        dev->got_lock = true;
 
 	r = omap_i2c_unidle(dev);
 	if ((r < 0) && (r != -ETIMEDOUT))
