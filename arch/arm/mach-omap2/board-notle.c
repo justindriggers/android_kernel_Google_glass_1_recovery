@@ -1269,6 +1269,7 @@ static struct gpio_keys_button notle_button_table[] = {
                 .desc   = "Camera",             \
                 .type   = EV_KEY,               \
                 .wakeup = 1,                    \
+                .debounce_interval = 30,        \
                 .active_low = 1,                \
     },
 };

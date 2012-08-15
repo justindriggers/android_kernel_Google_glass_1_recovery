@@ -1122,7 +1122,10 @@ static void __devinit omap_gpio_chip_init(struct gpio_bank *bank)
 	bank->chip.direction_input = gpio_input;
 	bank->chip.get = gpio_get;
 	bank->chip.direction_output = gpio_output;
-	bank->chip.set_debounce = gpio_debounce;
+        /* omap4 debounce limited to 8ms.  Disable so software
+         * debounce can be utilized.
+         */
+	bank->chip.set_debounce = NULL;
 	bank->chip.set = gpio_set;
 	bank->chip.to_irq = gpio_2irq;
 	if (bank->is_mpuio) {
@@ -1727,4 +1730,3 @@ static int __init omap_gpio_drv_reg(void)
 	return platform_driver_register(&omap_gpio_driver);
 }
 postcore_initcall(omap_gpio_drv_reg);
-
