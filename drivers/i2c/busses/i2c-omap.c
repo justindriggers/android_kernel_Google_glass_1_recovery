@@ -571,7 +571,7 @@ static int omap_i2c_xfer_msg(struct i2c_adapter *adap,
 			     struct i2c_msg *msg, int stop)
 {
 	struct omap_i2c_dev *dev = i2c_get_adapdata(adap);
-	int r;
+	int r,i;
 	u16 w;
 
 	dev_dbg(dev->dev, "addr: 0x%04x, len: %d, flags: 0x%x, stop: %d\n",
@@ -643,6 +643,12 @@ static int omap_i2c_xfer_msg(struct i2c_adapter *adap,
 	dev->buf_len = 0;
 	if (r == 0) {
 		dev_err(dev->dev, "controller timed out\n");
+                dev_err(dev->dev, "addr: 0x%04x, len: %d, flags: 0x%x, stop: %d\n",
+                        msg->addr, msg->len, msg->flags, stop);
+		for(i=0;i<dev->buf_len;i++) {
+			dev_err(dev->dev, "%d: 0x%x\n", i, dev->buf[i]);
+		}
+                dump_stack();
 		omap_i2c_reset(dev);
 		omap_i2c_init(dev);
 		return -ETIMEDOUT;
