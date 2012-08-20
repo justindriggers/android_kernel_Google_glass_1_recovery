@@ -271,18 +271,25 @@ static const char *twl6030_state[] = {
 #define is_powered(di)	(di->state > STATE_FAULT)
 #define is_charging(di) (di->state > STATE_FULL)
 
+/* change the order, not the length to keep this a power of 2 */
+#define VOLTAGE_HISTORY_ORDER 3
+#define VOLTAGE_HISTORY_LENGTH (1<<VOLTAGE_HISTORY_ORDER)
+
 struct twl6030_bci_device_info {
 	struct device		*dev;
 
 	int			voltage_mV;
+	int			voltage_history[VOLTAGE_HISTORY_LENGTH];
+	int			voltage_index;
 	int			current_uA;
 	int			current_avg_uA;
 	int			temp_C;
 	int			bat_health;
 	int			state;
 	int			vbus_online;
-	int			counter_vbat;
-	int			counter_full;
+
+	unsigned long vbat_jiffies;
+	unsigned long full_jiffies;
 
 	int			timer_n2;
 	int			timer_n1;
@@ -863,11 +870,74 @@ done:
 	return ret;
 }
 
+static void twl6030_update_voltage(struct twl6030_bci_device_info *di)
+{
+	int i;
+	int ret;
+	int index, q;
+	long long total, denom;
+	int curr_voltage;
+
+	if (is_charging(di)) {
+		if (time_after_eq(jiffies, di->vbat_jiffies)) {
+			di->vbat_jiffies = msecs_to_jiffies(60 * 1000) + jiffies;
+
+			twl6030_stop_usb_charger(di);
+
+			msleep(200);
+
+			ret = twl6030_get_gpadc_conversion(di, di->gpadc_vbat_chnl);
+			if (ret > 0)
+				curr_voltage = ret;
+
+			twl6030_start_usb_charger(di, 500);
+		} else {
+			/* if no sample is taken don't bother recalculating the weighted average */
+			return;
+		}
+	} else {
+		di->vbat_jiffies = jiffies;
+		ret = twl6030_get_gpadc_conversion(di, di->gpadc_vbat_chnl);
+		if (ret > 0)
+			curr_voltage = ret;
+	}
+
+	/*
+	 * store the measured voltage in the history table. the index points
+	 * to the most recent sample.
+	 */
+	di->voltage_index = (di->voltage_index + 1) & (VOLTAGE_HISTORY_LENGTH - 1);
+	di->voltage_history[di->voltage_index] = curr_voltage;
+
+	/* filter the cached voltage using a weighted average */
+	q = VOLTAGE_HISTORY_LENGTH; // we need this many bits in the fraction
+
+	index = di->voltage_index;
+	total = 0;
+	denom = 0;
+
+	for (i=0; i < VOLTAGE_HISTORY_LENGTH; i++) {
+		total += (long long) di->voltage_history[index] << (q - i); // convert to q, divide by 2^i
+		denom += 1LL << (q - i); // denom += 1/(2^i), in q format
+
+		index = (index + 1) & (VOLTAGE_HISTORY_LENGTH - 1);
+
+		printk("battery voltage history[%d] = %d %s\n", i, di->voltage_history[i], i == di->voltage_index ? "*" : "");
+	}
+
+	/* divide by the sum of the weights to get the weighted average */
+	total <<= q;
+	total += denom >> 1; // round up mid value
+	do_div(total, denom);
+
+	/* convert back from q format and store value */
+	di->voltage_mV = total >> q;
+}
+
 static void twl6030_read_fuelgauge(struct twl6030_bci_device_info *di)
 {
 	s32 samples;
 	int ret, newcap;
-	u32 data[2];
 	s64 cap, cur;
 	u64 tmp;
 	int statechanged = 0;
@@ -905,36 +975,22 @@ static void twl6030_read_fuelgauge(struct twl6030_bci_device_info *di)
 	
 	di->current_avg_uA = (int) cur;
 
-	if (is_charging(di)) {
-		di->counter_vbat += di->monitoring_interval;
-		if (di->counter_vbat >= 60) {
-			di->counter_vbat = 0;
-			twl6030_stop_usb_charger(di);
-			msleep(200);
-			ret = twl6030_get_gpadc_conversion(di, di->gpadc_vbat_chnl);
-			if (ret > 0)
-				di->voltage_mV = ret;
-			twl6030_start_usb_charger(di, 500);
-		}
-	} else {
-		ret = twl6030_get_gpadc_conversion(di, di->gpadc_vbat_chnl);
-		if (ret > 0)
-			di->voltage_mV = ret;
-	}
+	twl6030_update_voltage(di);
 
 	/* detect charge termination */
 	/* TODO: make configurable */
 	/* TODO: termination after X s even if other conditions not met */
 	if (is_charging(di) && (di->voltage_mV > 4100) && (di->current_avg_uA < 50000)) {
-		di->counter_full += di->monitoring_interval;
 		if (di->trust_capacity && (di->capacity_uAh < di->capacity_max_uAh) && (di->current_avg_uA > 25000)) {
 			/* if we are charging back to a full state with the CC,
 			 * be a bit more aggressive than if we only have voltage
 			 * to go by
 			 */
-			di->counter_full = 0;
-		} else if (di->counter_full > 120) {
-			di->counter_full = 0;
+
+			/* bump the full time out until the aggressive conditions are not met */
+			di->full_jiffies = msecs_to_jiffies(120 * 1000) + jiffies;
+		} else if (time_after_eq(jiffies, di->full_jiffies)) {
+			di->full_jiffies = msecs_to_jiffies(120 * 1000) + jiffies;
 			di->trust_capacity = 1;
 			printk("battery: full state detected\n");
 
@@ -948,7 +1004,8 @@ static void twl6030_read_fuelgauge(struct twl6030_bci_device_info *di)
 			statechanged = 1;
 		}
 	} else {
-		di->counter_full = 0;
+		/* bump the full time out as long as we aren't charging */
+		di->full_jiffies = msecs_to_jiffies(120 * 1000) + jiffies;
 	}
 
 	cap += di->capacity_offset;
@@ -1001,7 +1058,7 @@ err:
 
 static void twl6030_determine_charge_state(struct twl6030_bci_device_info *di)
 {
-	u8 stat1, int1;
+	u8 stat1;
 	int newstate = STATE_BATTERY;
 
 	/* TODO: i2c error -> fault? */
@@ -1095,11 +1152,7 @@ static void twl6030_calibration_work(struct work_struct *work)
 static void twl6030_monitor_work(struct work_struct *work)
 {
 	struct twl6030_bci_device_info *di = container_of(work,
-		struct twl6030_bci_device_info, monitor_work.work);
-	struct twl6030_gpadc_request req;
-	int adc_code;
-	int temp;
-	int ret;
+			struct twl6030_bci_device_info, monitor_work.work);
 
 	wake_lock(&battery_wake_lock);
 
@@ -1418,8 +1471,9 @@ static int __devinit twl6030_bci_battery_probe(struct platform_device *pdev)
 {
 	struct twl4030_bci_platform_data *pdata = pdev->dev.platform_data;
 	struct twl6030_bci_device_info *di;
-	int irq;
+	int irq = -1;
 	int ret;
+	int i;
 
 	if (!pdata) {
 		dev_dbg(&pdev->dev, "platform_data not available\n");
@@ -1440,6 +1494,9 @@ static int __devinit twl6030_bci_battery_probe(struct platform_device *pdev)
 
 	di->monitoring_interval = 15;
 	di->capacity_max_uAh = 570000;
+
+	di->full_jiffies = msecs_to_jiffies(120 * 1000) + jiffies;
+	di->vbat_jiffies = jiffies;
 
 	di->dev = &pdev->dev;
 	di->bat.name = "twl6030_battery";
@@ -1530,6 +1587,11 @@ static int __devinit twl6030_bci_battery_probe(struct platform_device *pdev)
 	di->voltage_mV = twl6030_get_gpadc_conversion(di, di->gpadc_vbat_chnl);
 	dev_info(&pdev->dev, "Battery Voltage at Bootup is %d mV\n", di->voltage_mV);
 
+	/* initialize the voltage history table */
+	/* TODO: consider the best initial values for the table */
+	for (i=0; i < VOLTAGE_HISTORY_LENGTH; i++)
+		di->voltage_history[i] = di->voltage_mV;
+
 	/* start with a rough estimate */
 	di->capacity = twl6030_estimate_capacity(di);
 	if (di->capacity < 5)
@@ -1581,7 +1643,8 @@ init_failed:
 usb_failed:
 	power_supply_unregister(&di->bat);
 batt_failed:
-	free_irq(irq, di);
+	if (irq != -1)
+		free_irq(irq, di);
 temp_setup_fail:
 	wake_lock_destroy(&usb_wake_lock);
 	platform_set_drvdata(pdev, NULL);
