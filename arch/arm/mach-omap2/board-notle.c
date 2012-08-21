@@ -2448,7 +2448,8 @@ static void __init my_mux_init(void) {
           __raw_writew(flags, CORE_BASE_ADDR + MUX_CAMERA_EMU);
         }
         __raw_writew(flags, CORE_BASE_ADDR + MUX_TOUCHPAD_INT_N);
-        __raw_writew(flags, CORE_BASE_ADDR + MUX_PROX_INT_N);
+        /* ltr506 */
+        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP, CORE_BASE_ADDR + MUX_PROX_INT_N);
 
         // Invensense part configured as push-pull.  Don't need omap to pullup.
         // TODO: (rocky) Do we want wakeup enabled?

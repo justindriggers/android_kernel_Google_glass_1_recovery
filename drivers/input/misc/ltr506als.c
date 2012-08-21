@@ -35,8 +35,10 @@
 #include <asm/setup.h>
 #include <linux/i2c/ltr506als.h>
 
-#define DRIVER_VERSION "1.1"
+#define DRIVER_VERSION "1.2"
 #define PARTID 0x90
+#define PARTID_V2 0x91
+
 #define MANUID 0x05
 
 #define I2C_RETRY 5
@@ -94,6 +96,9 @@ struct ltr506_data {
 	int gpio_int_no;
 	int gpio_int_wake_dev;
 	int is_suspend;
+
+	/* Workarounds */
+	int ps_must_be_on_while_als_on;
 };
 
 struct ltr506_data *sensor_info;
@@ -579,13 +584,14 @@ static int ps_enable(struct ltr506_data *ltr506)
 		return rc;
 	}
 
-	if (ltr506->gpio_int_wake_dev) {
+	if (ltr506->gpio_int_wake_dev && !ltr506->ps_must_be_on_while_als_on) {
 		/* Allows this interrupt to wake the system */
 		rc = irq_set_irq_wake(ltr506->irq, 1);
 		if (rc < 0) {
 			dev_err(&ltr506->i2c_client->dev, "%s: IRQ-%d WakeUp Enable Fail...\n", __func__, ltr506->irq);
 			return rc;
 		}
+		dev_info(&ltr506->i2c_client->dev, "%s: Allowing interrupts to wake system\n", __func__);
 	}
 
 	rc = _ltr506_set_bit(ltr506->i2c_client, SET_BIT, LTR506_PS_CONTR, PS_MODE);
@@ -610,10 +616,12 @@ static int ps_disable(struct ltr506_data *ltr506)
 	}
 
 	/* Don't allow this interrupt to wake the system anymore */
-	rc = irq_set_irq_wake(ltr506->irq, 0);
-	if (rc < 0) {
-		dev_err(&ltr506->i2c_client->dev, "%s: IRQ-%d WakeUp Disable Fail...\n", __func__, ltr506->irq);
-		return rc;
+	if (ltr506->gpio_int_wake_dev && !ltr506->ps_must_be_on_while_als_on) {
+		rc = irq_set_irq_wake(ltr506->irq, 0);
+		if (rc < 0) {
+			dev_err(&ltr506->i2c_client->dev, "%s: IRQ-%d WakeUp Disable Fail...\n", __func__, ltr506->irq);
+			return rc;
+		}
 	}
 
 	rc = _ltr506_set_bit(ltr506->i2c_client, CLR_BIT, LTR506_PS_CONTR, PS_MODE);
@@ -650,37 +658,10 @@ static int ps_release(struct inode *inode, struct file *file)
 	return ps_disable(ltr506);
 }
 
-/* PS IOCTL */
-static long ps_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
-{
-	int val;
-	struct ltr506_data *ltr506 = sensor_info;
-
-	pr_debug("%s cmd %d\n", __func__, _IOC_NR(cmd));
-
-	switch (cmd) {
-		case LTR506_IOCTL_PS_ENABLE:
-			if (get_user(val, (unsigned long __user *)arg))
-				return -EFAULT;
-			if (val)
-				return ps_enable(ltr506);
-			else
-				return ps_disable(ltr506);
-			break;
-		case LTR506_IOCTL_PS_GET_ENABLED:
-			return put_user(ltr506->ps_enable_flag, (unsigned long __user *)arg);
-			break;
-		default:
-			pr_err("%s: INVALID COMMAND %d\n", __func__, _IOC_NR(cmd));
-			return -EINVAL;
-	}
-}
-
 static const struct file_operations ps_fops = {
 	.owner = THIS_MODULE,
 	.open = ps_open,
 	.release = ps_release,
-	.unlocked_ioctl = ps_ioctl
 };
 
 struct miscdevice ps_misc = {
@@ -700,7 +681,12 @@ static int als_enable(struct ltr506_data *ltr506)
 
 	/* NOTE(CMM) This part requires a workaround to enable the PS in order for the
 	 * ALS to operate properly. */
-	ps_enable(ltr506);
+	if (ltr506->ps_must_be_on_while_als_on) {
+		if (ps_enable(ltr506)) {
+			dev_err(&ltr506->i2c_client->dev, "%s : Unable to turn on PS", __func__);
+			return -EIO;
+		}
+	}
 
 	/* Clear thresholds so that interrupts will not be suppressed */
 	rc = set_als_range(ltr506, LTR506_ALS_MIN_MEASURE_VAL, LTR506_ALS_MIN_MEASURE_VAL);
@@ -735,6 +721,14 @@ static int als_disable(struct ltr506_data *ltr506)
 	}
 	dev_info(&ltr506->i2c_client->dev, "%s Turned off ambient light sensor\n", __func__);
 	ltr506->als_enable_flag = 0;
+
+	/* NOTE(CMM) This part requires a workaround to enable the PS in order for the
+	 * ALS to operate properly. */
+	if (ltr506->ps_must_be_on_while_als_on) {
+		if (ps_disable(ltr506)) {
+			dev_err(&ltr506->i2c_client->dev, "%s : Unable to turn off PS", __func__);
+		}
+	}
 
 	return rc;
 }
@@ -1542,10 +1536,13 @@ static int _check_part_id(struct ltr506_data *ltr506)
 		return -1;
 	}
 
-	if (buffer[0] != PARTID) {
+	if (buffer[0] != PARTID && buffer[0] != PARTID_V2) {
 		dev_err(&ltr506->i2c_client->dev, "%s: Part failure miscompare"
 		        " act:0x%02x exp:0x%02x\n", __func__, buffer[0], PARTID);
 		return -2;
+	}
+	if (buffer[0] == PARTID) {
+		ltr506->ps_must_be_on_while_als_on = 1;
 	}
 	return 0;
 }
