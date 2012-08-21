@@ -705,8 +705,8 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 		/* Keep track of count of synthesized keys per suspend cycle. */
 		instance_data->synth_keys_sent++;
 
-		dev_dbg(&function_device->dev, "Created synthesized movement event cnt:%d\n",
-		        instance_data->synth_keys_sent);
+		dev_info(&function_device->dev, "Created synthesized movement event cnt:%d\n",
+		         instance_data->synth_keys_sent);
 	}
 	/* This key info is used to enter and exit hover mode in the Android stack. */
 	input_report_key(function_device->input, BTN_TOUCH, finger_down_count);
