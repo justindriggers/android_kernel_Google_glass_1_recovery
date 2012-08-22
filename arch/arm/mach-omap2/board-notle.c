@@ -2191,7 +2191,7 @@ static int omap_audio_init(void) {
         }
 
         /* GPIO 45 needs export as per Russ request */
-        r = gpio_request_one(GPIO_45, GPIOF_OUT_INIT_LOW,
+        r = gpio_request_one(GPIO_45, GPIOF_OUT_INIT_HIGH,
                 "gpio_45");
         if (r) {
                 pr_err("Failed to get gpio_%d\n", GPIO_45);
