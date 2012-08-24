@@ -92,8 +92,6 @@ CONFIG_SMP=y
 CONFIG_NR_CPUS=2
 CONFIG_PREEMPT=y
 CONFIG_HOTPLUG_CPU=y
-CONFIG_CMDLINE="console=ttyO2,115200n8 mem=1G init=/init vram=32M omapfb.vram=0:16M androidboot.console=ttyO2 androidboot.carrier=wifi-only product_type=w"
-CONFIG_CMDLINE_EXTEND=y
 CONFIG_CPU_FREQ=y
 CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE=y
 CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
@@ -476,6 +474,7 @@ CONFIG_INPUT_SI114X=y
 # NOTE(abliss): this disables the backlight on pre-fly devices.
 CONFIG_REMOTEPROC_WATCHDOG=y
 
+CONFIG_HIGHMEM=y
 CONFIG_OPROFILE=y
 CONFIG_PROFILING=y
 CONFIG_GPS_ELTON=y
