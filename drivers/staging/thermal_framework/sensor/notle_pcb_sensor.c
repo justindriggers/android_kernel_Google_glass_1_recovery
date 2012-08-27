@@ -35,6 +35,7 @@
 #include <linux/stddef.h>
 #include <linux/sysfs.h>
 #include <linux/thermal_framework.h>
+#include <linux/omap4_duty_cycle_governor.h>
 #include <linux/types.h>
 
 #include <plat/common.h>
@@ -50,12 +51,9 @@
 struct pcb_temp_sensor {
 	struct platform_device *pdev;
 	struct device *dev;
-	struct thermal_dev *therm_fw;
-	struct delayed_work pcb_sensor_work;
-	int work_delay;
 };
-static int temp_min_threshold;
-static int temp_max_threshold;
+struct pcb_temp_sensor *temp_sensor;
+struct pcb_sens notle_pcb_sensor;
 
 #define TWL6030_ADC_START_VALUE 0
 #define TWL6030_ADC_END_VALUE   1023
@@ -289,7 +287,7 @@ static int adc_to_temp_conversion(int adc_val)
 	return adc_to_temp[adc_val];
 }
 
-static int pcb_read_current_temp(struct pcb_temp_sensor *temp_sensor)
+static int pcb_read_current_temp(void)
 {
 	int temp = 0;
 	struct twl6030_gpadc_request req;
@@ -305,44 +303,8 @@ static int pcb_read_current_temp(struct pcb_temp_sensor *temp_sensor)
 		return -EINVAL;
 	}
 	temp = adc_to_temp_conversion(req.rbuf[TWL6030_GPADC_CHANNEL]);
-	temp_sensor->therm_fw->current_temp = temp;
-	if (temp > temp_max_threshold || temp < temp_min_threshold) {
-		ret = thermal_sensor_set_temp(temp_sensor->therm_fw);
-		if (ret == -ENODEV)
-			pr_err("%s:thermal_sensor_set_temp reports error\n",
-				__func__);
-	}
 
 	return temp;
-}
-
-static int pcb_get_temp(struct thermal_dev *tdev)
-{
-	struct platform_device *pdev = to_platform_device(tdev->dev);
-	struct pcb_temp_sensor *temp_sensor = platform_get_drvdata(pdev);
-
-	temp_sensor->therm_fw->current_temp =
-			pcb_read_current_temp(temp_sensor);
-
-	return temp_sensor->therm_fw->current_temp;
-}
-
-static void pcb_report_fw_temp(struct thermal_dev *tdev)
-{
-	struct platform_device *pdev = to_platform_device(tdev->dev);
-	struct pcb_temp_sensor *temp_sensor = platform_get_drvdata(pdev);
-	int ret;
-
-	pcb_read_current_temp(temp_sensor);
-	if (temp_sensor->therm_fw->current_temp != -EINVAL) {
-		ret = thermal_sensor_set_temp(temp_sensor->therm_fw);
-		if (ret == -ENODEV)
-			pr_err("%s:thermal_sensor_set_temp reports error\n",
-				__func__);
-		else
-			cancel_delayed_work_sync(&temp_sensor->pcb_sensor_work);
-		kobject_uevent(&temp_sensor->dev->kobj, KOBJ_CHANGE);
-	}
 }
 
 /*
@@ -352,26 +314,9 @@ static int pcb_temp_sensor_read_temp(struct device *dev,
 				      struct device_attribute *devattr,
 				      char *buf)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct pcb_temp_sensor *temp_sensor = platform_get_drvdata(pdev);
-	int temp = 0;
-
-	temp = pcb_read_current_temp(temp_sensor);
+	int temp = pcb_read_current_temp();
 
 	return sprintf(buf, "%d\n", temp);
-}
-
-static int pcb_temp_set_temp_thresh(struct thermal_dev *tdev, int min, int max) {
-	temp_min_threshold = min;
-	temp_max_threshold = max;
-	return 0;
-}
-
-static int pcb_temp_set_measuring_rate(struct thermal_dev *tdev, int rate) {
-	struct platform_device *pdev = to_platform_device(tdev->dev);
-	struct pcb_temp_sensor *temp_sensor = platform_get_drvdata(pdev);
-	temp_sensor->work_delay = rate;
-	return rate;
 }
 
 static DEVICE_ATTR(temperature, S_IRUGO, pcb_temp_sensor_read_temp,
@@ -386,55 +331,19 @@ static const struct attribute_group pcb_temp_sensor_group = {
 	.attrs = pcb_temp_sensor_attributes,
 };
 
-static struct thermal_dev_ops pcb_sensor_ops = {
-	.report_temp = pcb_get_temp,
-	.set_temp_thresh = pcb_temp_set_temp_thresh,
-	.set_temp_report_rate = pcb_temp_set_measuring_rate,
-};
-
-static void pcb_sensor_delayed_work_fn(struct work_struct *work)
-{
-	struct pcb_temp_sensor *temp_sensor =
-				container_of(work, struct pcb_temp_sensor,
-					     pcb_sensor_work.work);
-
-	pcb_report_fw_temp(temp_sensor->therm_fw);
-	schedule_delayed_work(&temp_sensor->pcb_sensor_work,
-				msecs_to_jiffies(temp_sensor->work_delay));
-}
-
 static int __devinit pcb_temp_sensor_probe(struct platform_device *pdev)
 {
-	struct pcb_temp_sensor *temp_sensor;
 	int ret = 0;
 
 	temp_sensor = kzalloc(sizeof(struct pcb_temp_sensor), GFP_KERNEL);
 	if (!temp_sensor)
 		return -ENOMEM;
 
-	/* Init delayed work for PCB sensor temperature */
-	INIT_DELAYED_WORK(&temp_sensor->pcb_sensor_work,
-			  pcb_sensor_delayed_work_fn);
-
 	temp_sensor->pdev = pdev;
 	temp_sensor->dev = &pdev->dev;
 
 	kobject_uevent(&pdev->dev.kobj, KOBJ_ADD);
 	platform_set_drvdata(pdev, temp_sensor);
-
-	temp_sensor->therm_fw = kzalloc(sizeof(struct thermal_dev), GFP_KERNEL);
-	if (temp_sensor->therm_fw) {
-		temp_sensor->therm_fw->name = "notle_pcb_sensor";
-		temp_sensor->therm_fw->domain_name = "cpu";
-		temp_sensor->therm_fw->dev = temp_sensor->dev;
-		temp_sensor->therm_fw->dev_ops = &pcb_sensor_ops;
-		thermal_sensor_dev_register(temp_sensor->therm_fw);
-	} else {
-		dev_err(&pdev->dev, "%s:Cannot alloc memory for thermal fw\n",
-			__func__);
-		ret = -ENOMEM;
-		goto therm_fw_alloc_err;
-	}
 
 	ret = sysfs_create_group(&pdev->dev.kobj,
 				 &pcb_temp_sensor_group);
@@ -443,19 +352,14 @@ static int __devinit pcb_temp_sensor_probe(struct platform_device *pdev)
 		goto sysfs_create_err;
 	}
 
-	temp_sensor->work_delay = PCB_REPORT_DELAY_MS;
-	schedule_delayed_work(&temp_sensor->pcb_sensor_work,
-			msecs_to_jiffies(0));
+	dev_info(&pdev->dev, "%s\n", "notle_pcb_sensor");
 
-	dev_info(&pdev->dev, "%s\n", temp_sensor->therm_fw->name);
-
+	notle_pcb_sensor.update_temp = pcb_read_current_temp;
+	omap4_duty_pcb_register(&notle_pcb_sensor);
 	return 0;
 
 sysfs_create_err:
-	thermal_sensor_dev_unregister(temp_sensor->therm_fw);
-	kfree(temp_sensor->therm_fw);
 	platform_set_drvdata(pdev, NULL);
-therm_fw_alloc_err:
 	kfree(temp_sensor);
 	return ret;
 }
@@ -465,9 +369,6 @@ static int __devexit pcb_temp_sensor_remove(struct platform_device *pdev)
 	struct pcb_temp_sensor *temp_sensor = platform_get_drvdata(pdev);
 
 	sysfs_remove_group(&pdev->dev.kobj, &pcb_temp_sensor_group);
-	cancel_delayed_work_sync(&temp_sensor->pcb_sensor_work);
-	thermal_sensor_dev_unregister(temp_sensor->therm_fw);
-	kfree(temp_sensor->therm_fw);
 	kobject_uevent(&temp_sensor->dev->kobj, KOBJ_REMOVE);
 	platform_set_drvdata(pdev, NULL);
 	kfree(temp_sensor);

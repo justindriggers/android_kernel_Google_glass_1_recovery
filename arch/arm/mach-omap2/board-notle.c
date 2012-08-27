@@ -33,6 +33,7 @@
 #include <linux/i2c/twl.h>
 #include <linux/memblock.h>
 #include <linux/omapfb.h>
+#include <linux/omap4_duty_cycle_governor.h>
 #include <linux/pwm.h>
 #include <linux/pwm_backlight.h>
 #include <linux/reboot.h>
@@ -213,6 +214,86 @@ static char * notle_version_str(notle_version board_ver)
         return "UNVERSIONED";
 }
 
+#ifdef CONFIG_OMAP4_DUTY_CYCLE_GOVERNOR
+
+static struct pcb_section omap4_duty_governor_pcb_sections[] = {
+	{
+		.pcb_temp_level			= 40000,
+		.max_opp			= 1008000,
+		.duty_cycle_enabled		= false,
+		.tduty_params = {
+			.nitro_rate		= 1008000,
+			.cooling_rate		= 800000,
+			.nitro_interval		= 20000,
+			.nitro_percentage	= 80,
+		},
+	},
+	{
+		.pcb_temp_level			= 45000,
+		.max_opp			= 1008000,
+		.duty_cycle_enabled		= true,
+		.tduty_params = {
+			.nitro_rate		= 1008000,
+			.cooling_rate		= 800000,
+			.nitro_interval		= 20000,
+			.nitro_percentage	= 37,
+		},
+	},
+	{
+		.pcb_temp_level			= 50000,
+		.max_opp			= 1008000,
+		.duty_cycle_enabled		= true,
+		.tduty_params = {
+			.nitro_rate		= 1008000,
+			.cooling_rate		= 800000,
+			.nitro_interval		= 20000,
+			.nitro_percentage	= 24,
+		},
+	},
+	{
+		.pcb_temp_level			= 60000,
+		.max_opp			= 800000,
+		.duty_cycle_enabled		= true,
+		.tduty_params = {
+			.nitro_rate		= 800000,
+			.cooling_rate		= 600000,
+			.nitro_interval		= 20000,
+			.nitro_percentage	= 19,
+		},
+	},
+	{
+		.pcb_temp_level			= 65000,
+		.max_opp			= 800000,
+		.duty_cycle_enabled		= true,
+		.tduty_params = {
+			.nitro_rate		= 800000,
+			.cooling_rate		= 600000,
+			.nitro_interval		= 20000,
+			.nitro_percentage	= 14,
+		},
+	},
+	{
+		.pcb_temp_level			= 90000,
+		.max_opp			= 600000,
+		.duty_cycle_enabled		= true,
+		.tduty_params = {
+			.nitro_rate		= 600000,
+			.cooling_rate		= 300000,
+			.nitro_interval		= 20000,
+			.nitro_percentage	= 1,
+		},
+	},
+};
+
+void init_duty_governor(void)
+{
+	omap4_duty_pcb_section_reg(omap4_duty_governor_pcb_sections,
+		ARRAY_SIZE(omap4_duty_governor_pcb_sections));
+}
+#else
+void init_duty_governor(void){}
+#endif /*CONFIG_OMAP4_DUTY_CYCLE*/
+
 static struct gpio_led gpio_leds[] = {
 	{
 		.name			= "notleboard::status1",
@@ -243,6 +324,7 @@ static void __init notle_init_early(void)
 {
 	omap2_init_common_infrastructure();
 	omap2_init_common_devices(NULL, NULL);
+        init_duty_governor();
 }
 
 static struct i2c_client *himax_client;
