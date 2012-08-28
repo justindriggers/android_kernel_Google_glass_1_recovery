@@ -103,7 +103,7 @@ static int reset_fifo_mpu3050(struct iio_dev *indio_dev)
 	result = inv_i2c_single_write(st, reg->user_ctrl, val);
 	if (result)
 		goto reset_fifo_fail;
-	st->last_isr_time = iio_get_time_ns();
+	st->last_isr_time = get_time_ns();
 	if (st->chip_config.dmp_on) {
 		/* enable interrupt when DMP is done */
 		result = inv_i2c_single_write(st, reg->int_enable,
@@ -160,7 +160,7 @@ reset_fifo_fail:
 static int reset_fifo_itg(struct iio_dev *indio_dev)
 {
 	struct inv_reg_map_s *reg;
-	int result;
+	int result, data;
 	unsigned char val;
 	struct inv_mpu_iio_s  *st = iio_priv(indio_dev);
 	reg = &st->reg;
@@ -186,7 +186,7 @@ static int reset_fifo_itg(struct iio_dev *indio_dev)
 		result = inv_i2c_single_write(st, reg->user_ctrl, val);
 		if (result)
 			goto reset_fifo_fail;
-		st->last_isr_time = iio_get_time_ns();
+		st->last_isr_time = get_time_ns();
 		if (st->chip_config.dmp_int_on) {
 			result = inv_i2c_single_write(st, reg->int_enable,
 							BIT_DMP_INT_EN);
@@ -194,18 +194,32 @@ static int reset_fifo_itg(struct iio_dev *indio_dev)
 				return result;
 		}
 		val = (BIT_DMP_EN | BIT_FIFO_EN);
-		if (st->chip_config.compass_enable)
+		if (st->chip_config.compass_enable &
+			(!st->chip_config.dmp_event_int_on))
 			val |= BIT_I2C_MST_EN;
 		result = inv_i2c_single_write(st, reg->user_ctrl, val);
 		if (result)
 			goto reset_fifo_fail;
+
+		if (st->chip_config.compass_enable) {
+			/* I2C_MST_DLY is set according to sample rate,
+			   slow down the power*/
+			data = st->chip_config.fifo_rate /
+				st->chip_config.dmp_output_rate;
+			if (data > 0)
+				data -= 1;
+			result = inv_i2c_single_write(st, REG_I2C_SLV4_CTRL,
+							data);
+			if (result)
+				return result;
+		}
 	} else {
 		/* reset FIFO and possibly reset I2C*/
 		val = BIT_FIFO_RST;
 		result = inv_i2c_single_write(st, reg->user_ctrl, val);
 		if (result)
 			goto reset_fifo_fail;
-		st->last_isr_time = iio_get_time_ns();
+		st->last_isr_time = get_time_ns();
 		/* enable interrupt */
 		if (st->chip_config.accl_fifo_enable ||
 		    st->chip_config.gyro_fifo_enable ||
@@ -222,6 +236,18 @@ static int reset_fifo_itg(struct iio_dev *indio_dev)
 		result = inv_i2c_single_write(st, reg->user_ctrl, val);
 		if (result)
 			goto reset_fifo_fail;
+		if (st->chip_config.compass_enable) {
+			/* I2C_MST_DLY is set according to sample rate,
+			   slow down the power*/
+			data = COMPASS_RATE_SCALE *
+				st->chip_config.fifo_rate / ONE_K_HZ;
+			if (data > 0)
+				data -= 1;
+			result = inv_i2c_single_write(st, REG_I2C_SLV4_CTRL,
+							data);
+			if (result)
+				return result;
+		}
 		/* enable sensor output to FIFO */
 		val = 0;
 		if (st->chip_config.gyro_fifo_enable)
@@ -316,12 +342,12 @@ void inv_clear_kfifo(struct inv_mpu_iio_s *st)
 static irqreturn_t inv_irq_handler(int irq, void *dev_id)
 {
 	struct inv_mpu_iio_s *st;
-	long long timestamp;
+	u64 timestamp;
 	int catch_up;
 	unsigned int time_since_last_irq;
 
 	st = (struct inv_mpu_iio_s *)dev_id;
-	timestamp = iio_get_time_ns();
+	timestamp = get_time_ns();
 	time_since_last_irq = (unsigned int)(timestamp
 		- st->last_isr_time);
 	spin_lock(&st->time_stamp_lock);
@@ -510,9 +536,9 @@ static int inv_report_gyro_accl_compass(struct iio_dev *indio_dev,
 	int q[4];
 	int result, ind, d_ind;
 	s64 buf[8];
-	unsigned int word;
-	unsigned char d[8];
-	unsigned char *tmp;
+	u32 word;
+	u8 d[8];
+	u8 *tmp, compass_divider;
 	int source;
 	struct inv_chip_config_s *conf;
 
@@ -577,7 +603,11 @@ static int inv_report_gyro_accl_compass(struct iio_dev *indio_dev,
 		c[0] = 0;
 		c[1] = 0;
 		c[2] = 0;
-		if (st->compass_divider == st->compass_counter) {
+		if (conf->dmp_on)
+			compass_divider = st->compass_dmp_divider;
+		else
+			compass_divider = st->compass_divider;
+		if (compass_divider == st->compass_counter) {
 			/*read from external sensor data register */
 			result = inv_i2c_read(st, REG_EXT_SENS_DATA_00,
 					      NUM_BYTES_COMPASS_SLAVE, d);
@@ -587,7 +617,7 @@ static int inv_report_gyro_accl_compass(struct iio_dev *indio_dev,
 			if ((DATA_AKM_DRDY == d[0]) &&
 			    (0 == (d[7] & DATA_AKM_STAT_MASK)) &&
 			    (!result)) {
-				unsigned char *sens;
+				u8 *sens;
 				sens = st->chip_info.compass_sens;
 				c[0] = (short)((d[2] << 8) | d[1]);
 				c[1] = (short)((d[4] << 8) | d[3]);
@@ -603,7 +633,7 @@ static int inv_report_gyro_accl_compass(struct iio_dev *indio_dev,
 				st->raw_compass[2] = c[2];
 			}
 			st->compass_counter = 0;
-		} else if (st->compass_divider != 0) {
+		} else if (compass_divider != 0) {
 			st->compass_counter++;
 		}
 	}
@@ -666,7 +696,7 @@ irqreturn_t inv_read_fifo(int irq, void *dev_id)
 		if (result)
 			goto end_session;
 		inv_report_gyro_accl_compass(indio_dev, data,
-					     iio_get_time_ns());
+					     get_time_ns());
 		goto end_session;
 	}
 
