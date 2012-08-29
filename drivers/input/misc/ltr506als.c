@@ -686,6 +686,8 @@ static int als_enable(struct ltr506_data *ltr506)
 			dev_err(&ltr506->i2c_client->dev, "%s : Unable to turn on PS", __func__);
 			return -EIO;
 		}
+		/* Wait some amount of time for the PS to get started. */
+		msleep(30);
 	}
 
 	/* Clear thresholds so that interrupts will not be suppressed */
@@ -723,13 +725,15 @@ static int als_disable(struct ltr506_data *ltr506)
 	ltr506->als_enable_flag = 0;
 
 	/* NOTE(CMM) This part requires a workaround to enable the PS in order for the
-	 * ALS to operate properly. */
+	 * ALS to operate properly.  For symmetry we would typically disable the PS here, but
+	 * we cannot disable the PS elae the ALS will not work.  */
+#if 0
 	if (ltr506->ps_must_be_on_while_als_on) {
 		if (ps_disable(ltr506)) {
 			dev_err(&ltr506->i2c_client->dev, "%s : Unable to turn off PS", __func__);
 		}
 	}
-
+#endif
 	return rc;
 }
 
@@ -1684,13 +1688,13 @@ static void ltr506_late_resume(struct early_suspend *h)
 	ltr506->is_suspend = 0;
 
 	/* If ALS was enbled before suspend, enable during resume */
-	if (ltr506->als_suspend_enable_flag) {
+	if (ltr506->disable_als_on_suspend && ltr506->als_suspend_enable_flag) {
 		ret += als_enable(ltr506);
 		ltr506->als_suspend_enable_flag = 0;
 	}
 
 	/* If PS was enbled before suspend, enable during resume */
-	if (ltr506->ps_suspend_enable_flag) {
+	if (ltr506->disable_ps_on_suspend && ltr506->ps_suspend_enable_flag) {
 		ret += ps_enable(ltr506);
 		ltr506->ps_suspend_enable_flag = 0;
 	}
