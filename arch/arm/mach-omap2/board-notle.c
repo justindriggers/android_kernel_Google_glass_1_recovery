@@ -74,6 +74,7 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
+#include <asm/system.h>
 
 #include <plat/android-display.h>
 #include <plat/board.h>
@@ -101,6 +102,7 @@
 #include "prm-regbits-44xx.h"
 #include "prm44xx.h"
 #include "cm1_44xx.h"
+#include "omap4-sar-layout.h"
 
 #define GPIO_GREEN_LED                  7
 #define MUX_GREEN_LED                   MUX(FREF_CLK4_REQ)
@@ -2462,67 +2464,46 @@ static void __init my_mux_init(void) {
 
 }
 
-#define TWL6030_PHOENIX_DEV_ON_REGISTER (0x25)
-#define TWL6030_SW_RESET_BIT_MASK       (0x40)
-#define APP_DEVOFF	(1<<0)
-#define CON_DEVOFF	(1<<1)
-#define MOD_DEVOFF	(1<<2)
+#define TWL6030_SW_RESET_BIT_MASK       (1<<6)
 
-static int notle_notifier_call(struct notifier_block *this,
-                               unsigned long code, void *cmd)
+static void notle_pm_restart(char str, const char *cmd)
 {
-        void __iomem *sar_base;
-        u32 v = OMAP4430_RST_GLOBAL_COLD_SW_MASK;
+	bool cold_reset = true;
+	bool valid_reason = false;
+	void __iomem *sar_base;
 
-        sar_base = omap4_get_sar_ram_base();
+	sar_base = omap4_get_sar_ram_base();
+	if (!sar_base)
+		printk("Failed to get scratch memory base!\n");
 
-        if (!sar_base)
-                return notifier_from_errno(-ENOMEM);
+	/* determine reset conditions */
+	if (!cmd || !sar_base) {
+		cold_reset = true;
+		valid_reason = false;
+	} else if (!strcmp(cmd, "bootloader")) {
+		cold_reset = false;
+		valid_reason = true;
+	} else if (!strcmp(cmd, "recovery")) {
+		cold_reset = false;
+		valid_reason = true;
+	} else if (!strcmp(cmd, "charger")) {
+		cold_reset = false;
+		valid_reason = true;
+	} else {
+		cold_reset = true;
+		valid_reason = false;
+	}
 
-        /* power off */
-        if ((code == SYS_HALT) || (code == SYS_POWER_OFF)) {
-            twl_i2c_write_u8(TWL6030_MODULE_ID0,
-                    APP_DEVOFF | CON_DEVOFF | MOD_DEVOFF,
-                    TWL6030_PHOENIX_DEV_ON_REGISTER);
-        }
+	/* record reset reason */
+	if (sar_base && valid_reason)
+		strcpy(sar_base + OMAP_REBOOT_REASON_OFFSET, cmd);
 
-        else {
-            if ((code == SYS_RESTART) && (cmd != NULL)) {
-                /* cmd != null; case: warm boot */
-                if (!strcmp(cmd, "bootloader")) {
-                    /* Save reboot mode in scratch memory */
-                    strcpy(sar_base + 0xA0C, cmd);
-                    v |= OMAP4430_RST_GLOBAL_WARM_SW_MASK;
-                } else if (!strcmp(cmd, "recovery")) {
-                    /* Save reboot mode in scratch memory */
-                    strcpy(sar_base + 0xA0C, cmd);
-                    v |= OMAP4430_RST_GLOBAL_WARM_SW_MASK;
-                } else if (!strcmp(cmd, "charger")) {
-                    /* Save reboot mode in scratch memory */
-                    strcpy(sar_base + 0xA0C, cmd);
-                    v |= OMAP4430_RST_GLOBAL_WARM_SW_MASK;
-                } else {
-                    v |= OMAP4430_RST_GLOBAL_COLD_SW_MASK;
-                }
-            }
-
-            if (v == OMAP4430_RST_GLOBAL_COLD_SW_MASK) {
-
-                /* Here we are certain we have no commands              */
-                /* that need to be passed to the bootloader.            */
-                /* Request a full power down / power up cycle from pmic */
-
-                /* TODO: TWL_MODULE_RTC seems wrong here */
-                twl_i2c_write_u8(TWL_MODULE_RTC,
-                        TWL6030_SW_RESET_BIT_MASK,
-                        TWL6030_PHOENIX_DEV_ON_REGISTER);
-            }
-        }
-
-        /* if for some reason communication to pmic failed, */
-        /* proceed to regular cold sw reset                 */
-
-        return NOTIFY_DONE;
+	/* choose reset path */
+	if (cold_reset)
+		twl_i2c_write_u8(TWL_MODULE_PM_MASTER, TWL6030_SW_RESET_BIT_MASK,
+				TWL6030_PHOENIX_DEV_ON);
+	else
+		arm_machine_restart(str, cmd);
 }
 
 /* TODO: This is copied from panda board file.  What size should we use? */
@@ -2536,10 +2517,6 @@ static struct omapfb_platform_data notle_fb_pdata = {
                         },
                 },
         },
-};
-
-static struct notifier_block notle_reboot_notifier = {
-        .notifier_call = notle_notifier_call,
 };
 
 /*
@@ -2581,7 +2558,7 @@ static void __init notle_init(void)
                 pr_err("Audio initialization failed: %d\n", err);
         }
 
-        register_reboot_notifier(&notle_reboot_notifier);
+        arm_pm_restart = notle_pm_restart;
 
 #ifndef CONFIG_MMC_NOTLE
         // Disable support for sd card:
