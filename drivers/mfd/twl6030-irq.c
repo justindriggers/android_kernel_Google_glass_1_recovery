@@ -39,6 +39,7 @@
 #include <linux/platform_device.h>
 #include <linux/suspend.h>
 #include <linux/reboot.h>
+#include <linux/power_supply.h>
 
 #include "twl-core.h"
 
@@ -273,8 +274,10 @@ static irqreturn_t handle_twl6030_vlow(int irq, void *unused)
 	disable_irq_nosync(twl6030_irq_base + TWL_VLOW_INTR_OFFSET);
 	WARN_ON(1);
 #else
-	pr_emerg("handle_twl6030_vlow: kernel_power_off()\n");
-	kernel_power_off();
+	if (!power_supply_is_system_supplied()) {
+		pr_emerg("handle_twl6030_vlow: kernel_power_off()\n");
+		kernel_power_off();
+	}
 #endif
 	return IRQ_HANDLED;
 }
