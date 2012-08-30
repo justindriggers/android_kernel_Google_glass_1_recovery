@@ -2311,6 +2311,11 @@ static int __init notle_imu_init(void) {
         if (r) {
                 pr_err("Failed to get mpu9000_int gpio\n");
         }
+        /* Allow this interrupt to wake the system */
+        r = irq_set_irq_wake(gpio_to_irq(GPIO_MPU9000_INT), 1);
+        if (r) {
+                pr_err("%s Unable to set irq to wake device\n", __FUNCTION__);
+        }
         return r;
 }
 
