@@ -269,7 +269,7 @@ static irqreturn_t handle_twl6030_vlow(int irq, void *unused)
 	pr_err("twl6030: BAT_VLOW interrupt; threshold=%dmV\n",
 	       2300 + (vbatmin_hi_threshold - 0b110) * 50);
 
-#if 0 /* temporary */
+#if 1 /* temporary */
 	pr_err("%s: disabling BAT_VLOW interrupt\n", __func__);
 	disable_irq_nosync(twl6030_irq_base + TWL_VLOW_INTR_OFFSET);
 	WARN_ON(1);
