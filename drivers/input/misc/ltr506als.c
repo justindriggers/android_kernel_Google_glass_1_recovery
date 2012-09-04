@@ -292,7 +292,6 @@ static uint16_t read_adc_value(struct ltr506_data *ltr506)
  *
  * Untested if the threshold window includes or precludes the edge threshold values.
  *
- * Set to "0,0" to disable thresholding interrupts.
  */
 static int set_als_range(struct ltr506_data *ltr506, uint16_t lt, uint16_t ht)
 {
@@ -691,7 +690,7 @@ static int als_enable(struct ltr506_data *ltr506)
 	}
 
 	/* Clear thresholds so that interrupts will not be suppressed */
-	rc = set_als_range(ltr506, LTR506_ALS_MIN_MEASURE_VAL, LTR506_ALS_MIN_MEASURE_VAL);
+	rc = set_als_range(ltr506, LTR506_ALS_MAX_MEASURE_VAL, LTR506_ALS_MAX_MEASURE_VAL);
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s : ALS Thresholds Write Fail...\n", __func__);
 		return rc;
@@ -1346,7 +1345,7 @@ static ssize_t als_filter_interrupts_store(struct device *dev,
 	}
 
 	/* Clear thresholds so that interrupts will not be suppressed */
-	rc = set_als_range(ltr506, LTR506_ALS_MIN_MEASURE_VAL, LTR506_ALS_MIN_MEASURE_VAL);
+	rc = set_als_range(ltr506, LTR506_ALS_MAX_MEASURE_VAL, LTR506_ALS_MAX_MEASURE_VAL);
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s : ALS Thresholds Write Fail...\n", __func__);
 		return -EIO;
@@ -1585,13 +1584,13 @@ static int ltr506_setup(struct ltr506_data *ltr506)
 	dev_dbg(&ltr506->i2c_client->dev, "%s Requested interrupt\n", __func__);
 
 	/* Set count of measurements outside data range before interrupt is generated */
-	ret = _ltr506_set_bit(ltr506->i2c_client, SET_BIT, LTR506_INTERRUPT_PRST, 0x01);
+	ret = _ltr506_set_bit(ltr506->i2c_client, SET_BIT, LTR506_INTERRUPT_PRST, 0x00);
 	if (ret < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s: ALS Set Persist Fail...\n", __func__);
 		goto err_out2;
 	}
 
-	ret = _ltr506_set_bit(ltr506->i2c_client, SET_BIT, LTR506_INTERRUPT_PRST, 0x10);
+	ret = _ltr506_set_bit(ltr506->i2c_client, SET_BIT, LTR506_INTERRUPT_PRST, 0x00);
 	if (ret < 0) {
 		dev_err(&ltr506->i2c_client->dev,"%s: PS Set Persist Fail...\n", __func__);
 		goto err_out2;
