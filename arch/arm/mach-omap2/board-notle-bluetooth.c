@@ -39,10 +39,10 @@
 static void update_host_wake_locked(int);
 
 #define BT_REG_GPIO GPIO_WL_BT_REG_ON
-#define BT_RESET_GPIO GPIO_BT_RST_N
+#define BT_RESET_GPIO notle_get_gpio(GPIO_BT_RST_N_INDEX)
 
 #define BT_WAKE_GPIO GPIO_BCM_BT_WAKE
-#define BT_HOST_WAKE_GPIO GPIO_BCM_BT_HOST_WAKE
+#define BT_HOST_WAKE_GPIO notle_get_gpio(GPIO_BCM_BT_HOST_WAKE_INDEX)
 
 static struct rfkill *bt_rfkill;
 static struct regulator *clk32kg_reg;
@@ -54,8 +54,9 @@ static bool wake_uart_enabled;
  * NOTE(abliss): on versions of notle prior to hog, bt_reg is tied to wlan_reg,
  * so it should not be managed here.  In hog and later, bt_reg is separate and
  * must be managed here.
+ * TODO(jscarr)  can we get rid of this now?
  */
-static bool manage_bt_reg = false;
+static bool manage_bt_reg = true;
 
 struct bcm_bt_lpm {
 	int wake;
@@ -363,12 +364,6 @@ static int __init bcm4330_bluetooth_init(void)
 static void __exit bcm4330_bluetooth_exit(void)
 {
 	platform_driver_unregister(&bcm4330_bluetooth_platform_driver);
-}
-
-int __init notle_bluetooth_init(bool hog_or_later)
-{
-	manage_bt_reg = hog_or_later;
-	return 0;
 }
 
 module_init(bcm4330_bluetooth_init);

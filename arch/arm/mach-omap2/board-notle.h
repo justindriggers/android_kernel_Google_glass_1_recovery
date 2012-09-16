@@ -20,66 +20,101 @@
 #include <linux/serial_core.h>
 #include "mux.h"
 
+// Needed for BoardID checking
 #define MUX(x) OMAP4_CTRL_MODULE_PAD_##x##_OFFSET
-
 #define CORE_BASE_ADDR 0xfc100000
-#define WKUP_BASE_ADDR 0xfc31e000
+
+//#define WKUP_BASE_ADDR 0xfc31e000
 // Choose your board revision.
-//#define NOTLE_VERSION_1
 #define NOTLE_VERSION_2
-//#define NOTLE_VERSION_3
 
-#ifdef NOTLE_VERSION_1
-#define GPIO_BCM_WLAN_HOST_WAKE         86
-#define MUX_BCM_WLAN_HOST_WAKE          MUX(USBB1_ULPITLL_DIR)
-#define GPIO_BCM_BT_HOST_WAKE           87
-#define MUX_BCM_BT_HOST_WAKE            MUX(USBB1_ULPITLL_NXT)
-#define GPIO_BCM_WLAN_WAKE              88
-#define MUX_BCM_WLAN_WAKE               MUX(USBB1_ULPITLL_DAT0)
-#define GPIO_BCM_BT_WAKE                91
-#define MUX_BCM_BT_WAKE                 MUX(USBB1_ULPITLL_DAT3)
-#endif // NOTLE_VERSION_1
-
-#ifdef NOTLE_VERSION_2
 // TODO: Figure out why the wlan_wake and wlan_host_wake gpio's
 // are swapped compared to what the hardware docs imply them
 // to be.
-#define GPIO_BCM_WLAN_HOST_WAKE_HOG     97
-#define MUX_BCM_WLAN_HOST_WAKE_HOG      MUX(USBB1_HSIC_STROBE)
+// TODO(jscarr)  XXX move to new scheme
 #define GPIO_BCM_WLAN_HOST_WAKE_EVT1    0
-#define MUX_BCM_WLAN_HOST_WAKE_EVT1     MUX(SIM_IO)
-#define GPIO_BCM_BT_HOST_WAKE           154
 #define MUX_BCM_BT_HOST_WAKE            MUX(MCSPI4_CS0)
 #define GPIO_BCM_WLAN_WAKE              170
 #define MUX_BCM_WLAN_WAKE               MUX(USBB2_HSIC_STROBE)
-#define GPIO_BCM_BT_WAKE                36
 #define MUX_BCM_BT_WAKE                 MUX(GPMC_AD12)
-#endif // NOTLE_VERSION_2
-
 #define GPIO_WL_RST_N                   43
 #define MUX_WL_RST_N                    MUX(GPMC_A19)
-#define GPIO_BT_RST_N                   151
-#define MUX_BT_RST_N                    MUX(MCSPI4_CLK)
-#define GPIO_WL_BT_REG_ON               48
 #define MUX_WL_BT_REG_ON                MUX(GPMC_A24)
+
+// GPIO settings
+// Board ID pins same across all versions
+#define GPIO_BOARD_ID0                  34
+#define GPIO_BOARD_ID1                  40
+#define GPIO_BOARD_ID2                  42
+#define GPIO_BOARD_ID0_NAME             "gpmc_ad10.gpio_34"
+#define GPIO_BOARD_ID1_NAME             "gpmc_a16.gpio_40"
+#define GPIO_BOARD_ID2_NAME             "gpmc_a18.gpio_42"
+#define MUX_ID0                         MUX(GPMC_AD10)
+#define MUX_ID1                         MUX(GPMC_A16)
+#define MUX_ID2                         MUX(GPMC_A18)
+
+
+// For GPIOs that are different between boards
+enum {
+    GPIO_MPU9000_INT_TIMER_INDEX = 0,
+    GPIO_MPU9000_INT_INDEX,
+    GPIO_USB_MUX_CB0_INDEX,
+    GPIO_USB_MUX_CB1_INDEX,
+    GPIO_GPS_ON_OFF_INDEX,
+    GPIO_GPS_RESET_N_INDEX,
+    GPIO_LCD_RST_N_INDEX,
+    GPIO_DISP_ENB_INDEX,
+    GPIO_CAM_PWDN_INDEX,
+    GPIO_CAMERA_INDEX,
+    GPIO_TOUCHPAD_INT_N_INDEX,
+    GPIO_PROX_INT_INDEX,
+    GPIO_BT_RST_N_INDEX,
+    GPIO_BCM_BT_HOST_WAKE_INDEX,
+    GPIO_MAX_INDEX
+};
+
+#define GPIO_MPU9000_INT_TIMER_EVT1     92
+#define GPIO_MPU9000_INT_EVT1           95
+#define GPIO_MPU9000_INT_EVT2           4
+#define GPIO_USB_MUX_CB1                45
+#define GPIO_USB_MUX_CB0_EVT1           44
+#define GPIO_USB_MUX_CB0_EVT2           46
+#define GPIO_GPS_ON_OFF_EVT1            49
+#define GPIO_GPS_ON_OFF_EVT2            139
+#define GPIO_GPS_RESET_N_EVT1           52
+#define GPIO_GPS_RESET_N_EVT2           140
+#define GPIO_LCD_RST_N_EVT1             53
+#define GPIO_LCD_RST_N_EVT2             94
+#define GPIO_DISP_ENB                   84
+#define GPIO_BT_RST_N_EVT1              151
+#define GPIO_BT_RST_N_EVT2              113
+#define GPIO_CAM_PWDN_EVT1              91
+#define GPIO_CAM_PWDN_EVT2              100
+#define GPIO_CAMERA                     121
+#define GPIO_TOUCHPAD_INT_N_EVT1        32
+#define GPIO_TOUCHPAD_INT_N_EVT2        3
+#define GPIO_PROX_INT_EVT1              90
+#define GPIO_PROX_INT_EVT2              1
+#define GPIO_AUDIO_POWERON              127
+
+#define GPIO_WL_BT_REG_ON               48
+#define GPIO_BCM_BT_WAKE                36
+#define GPIO_BT_RST_N_EVT1              151
+#define GPIO_BT_RST_N_EVT2              113
+#define GPIO_BCM_BT_HOST_WAKE_EVT1      154
+#define GPIO_BCM_BT_HOST_WAKE_EVT2      2
 
 typedef enum {
         UNVERSIONED = 7,
-        V1_DOG      = 7,
-        V3_EMU      = 0,
-        V4_FLY      = 4,
-        V5_GNU      = 5,
-        V6_HOG      = 6,
         V1_EVT1     = 1,
+        V1_EVT2     = 2,
 } notle_version;
 
 extern struct mmc_platform_data tuna_wifi_data;
 // Elton V6 uses GPIO_WL_RST_N to control wifi power; previous versions use
 // GPIO_WL_BT_REG_ON.
 int notle_wlan_init(notle_version NOTLE_VERSION);
-// Elton V6 uses separate power regulators for BT and wifi; previous versions
-// use a single joint regulator.
-int notle_bluetooth_init(bool hog_or_later);
 void bcm_bt_lpm_exit_lpm_locked(struct uart_port *uport);
+int notle_get_gpio(int);
 
 #endif // _MACH_OMAP2_BOARD_NOTLE_H_

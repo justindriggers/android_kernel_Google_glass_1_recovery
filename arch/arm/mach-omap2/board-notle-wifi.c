@@ -359,12 +359,8 @@ static int __init notle_wlan_gpio(notle_version NOTLE_VERSION) {
 
         /* Configuration of requested GPIO lines */
         switch (NOTLE_VERSION) {
-          case V6_HOG:
-            __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN,
-                         CORE_BASE_ADDR + MUX_BCM_WLAN_HOST_WAKE_HOG);
-            gpio_wlan_host_wake = GPIO_BCM_WLAN_HOST_WAKE_HOG;
-            break;
           case V1_EVT1:
+          case V1_EVT2:
             // Mux H4 to be gpio_wk0 (so GPIO 0 is set to be gpio_wk0)
             omap_mux_init_signal("sim_io.gpio_wk0",OMAP_PIN_INPUT | OMAP_WAKEUP_EN);
 
@@ -423,21 +419,14 @@ error:
 int __init notle_wlan_init(notle_version NOTLE_VERSION)
 {
         switch (NOTLE_VERSION) {
-          case V1_DOG:
-          case V3_EMU:
-          case V4_FLY:
-          case V5_GNU:
-            tuna_vwlan.gpio = GPIO_WL_BT_REG_ON;
-            break;
-          case V6_HOG:
-            tuna_vwlan.gpio = GPIO_WL_RST_N;
-            tuna_wifi_resources[0].start = OMAP_GPIO_IRQ(GPIO_BCM_WLAN_HOST_WAKE_HOG);
-            tuna_wifi_resources[0].end   = OMAP_GPIO_IRQ(GPIO_BCM_WLAN_HOST_WAKE_HOG);
-            break;
           case V1_EVT1:
+          case V1_EVT2:
             tuna_vwlan.gpio = GPIO_WL_RST_N;
             tuna_wifi_resources[0].start = OMAP_GPIO_IRQ(GPIO_BCM_WLAN_HOST_WAKE_EVT1);
             tuna_wifi_resources[0].end   = OMAP_GPIO_IRQ(GPIO_BCM_WLAN_HOST_WAKE_EVT1);
+            break;
+          default:
+            pr_err("notle_wlan: Unsupported NOTLE_VERSION: %d\n", NOTLE_VERSION);
             break;
         }
         notle_wlan_gpio(NOTLE_VERSION);
