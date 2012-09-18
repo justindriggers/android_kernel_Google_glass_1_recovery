@@ -58,10 +58,12 @@
 #include <linux/regulator/fixed.h>
 #include <linux/regulator/machine.h>
 
+/* Version 1 Touchpad driver */
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
 #include "../../../drivers/input/touchscreen/rmi_i2c.h"
 #endif
-#ifdef CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C
+/* Version 2 and 3 touchpad drivers. */
+#if defined(CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C) || defined(CONFIG_RMI4_BUS)
 #include <linux/rmi.h>
 #endif
 
@@ -1198,7 +1200,6 @@ static struct omap_uart_port_info omap_serial_port_info[] __initdata = {
         {  /* ttyO3 GPS */
                 .use_dma        = 0,
                 .dma_rx_buf_size = DEFAULT_RXDMA_BUFSIZE,
-                /* TODO(cmanton) Use interrupts for better (?) power management */
                 .dma_rx_poll_rate = DEFAULT_RXDMA_POLLRATE,
                 .dma_rx_timeout = DEFAULT_RXDMA_TIMEOUT,
                 .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
@@ -1571,6 +1572,9 @@ static struct rmi_f11_2d_ctrl f11_ctrl = {
 	.ctrl11 = &f11_ctrl11,
 };
 
+#endif  /* CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C */
+
+#ifdef CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C
 static struct rmi_device_platform_data synaptics_platformdata = {
 	.driver_name = "rmi-generic",
 
@@ -1602,7 +1606,106 @@ static struct rmi_device_platform_data synaptics_platformdata = {
 #ifndef RMI_F11_INDEX
 #define RMI_F11_INDEX 0x11
 #endif  // RMI_F11_INDEX
+#endif  /* CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C */
+
+#ifdef CONFIG_RMI4_BUS
+struct notle_gpio_data_s {
+	int gpio_num;
+	const char *name;
+};
+
+static struct notle_gpio_data_s notle_gpio_data = {
+	.gpio_num = GPIO_TOUCHPAD_INT_N,
+	.name = "touchpad",
+};
+
+static int synaptics_touchpad_gpio_setup(void *gpio_data, bool configure)
+{
+	int retval = 0;
+	struct notle_gpio_data_s *data = gpio_data;
+
+	if (configure) {
+		/* Enable the interrupt */
+		enable_irq(gpio_to_irq(data->gpio_num));
+		printk(KERN_INFO "%s Callback to setup touchpad gpio %d %s\n",
+		       __func__, data->gpio_num, data->name);
+	} else {
+		pr_warn("%s: No way to deconfigure gpio %d.",
+		        __func__, data->gpio_num);
+	}
+	return retval;
+}
+
+static struct rmi_device_platform_data synaptics_platformdata = {
+	.driver_name = "rmi_generic",
+	.sensor_name = "tm2240",
+
+	.attn_gpio = GPIO_TOUCHPAD_INT_N,
+	.attn_polarity = RMI_ATTN_ACTIVE_LOW,
+	.level_triggered = true,
+	.gpio_data = &notle_gpio_data,
+	.gpio_config = synaptics_touchpad_gpio_setup,
+
+	.reset_delay_ms = 100,
+
+        /* function handler pdata */
+        .power_management = {
+	        .nosleep = RMI_F01_NOSLEEP_OFF,
+	        .wakeup_threshold = 0,
+	        .doze_holdoff = 0,
+	        .doze_interval = 0,
+	        .allow_sensor_to_wake = 1,
+	},
+
+        .axis_align = {
+		.swap_axes = false,
+		.flip_x = false,
+		.flip_y = true,
+
+		.clip_X_low = 0,
+		.clip_Y_low = 0,
+		.clip_X_high = 0,
+		.clip_Y_high = 0,
+
+		.offset_X = 0,
+		.offset_Y = 0,
+		.delta_X = 5,
+		.delta_Y = 2,
+		.rel_report_enabled = 0,
+
+#ifdef CONFIG_RMI4_DEBUG
+		.debugfs_flip = NULL,
+		.debugfs_clip = NULL,
+		.debugfs_offset = NULL,
+		.debugfs_swap = NULL,
+		.reg_debug_addr = 0,
+		.reg_debug_size = 0,
 #endif
+		},
+
+        .f19_button_map = NULL,
+        .f1a_button_map = NULL,
+        .gpioled_map = NULL,
+        .f11_button_map = NULL,
+        .f41_button_map = NULL,
+
+#ifdef CONFIG_RMI4_FWLIB
+        .firmware_name = "firmware_name",
+#endif
+#ifdef CONFIG_RMI4_F11_TYPEB
+        .f11_type_b = false;
+#endif
+#ifdef  CONFIG_PM
+        .pm_data = NULL,
+        .pre_suspend = NULL,
+        .post_suspend = NULL,
+        .pre_resume = NULL,
+        .post_resume = NULL,
+#endif
+};
+
+#endif  /* CONFIG_RMI4_BUS */
+
 
 #ifdef CONFIG_INPUT_TOUCHPAD_FTK
 static struct ftk_i2c_platform_data ftk_platformdata = {
@@ -1657,21 +1760,18 @@ static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
                 .platform_data = &synaptics_platformdata,
         },
 #endif
-#ifdef CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C
+#if defined(CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C) || defined(CONFIG_RMI4_BUS)
         {
                 I2C_BOARD_INFO("rmi", 0x20),
                 .platform_data = &synaptics_platformdata,
         },
-#endif
+#endif  /* CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C || CONFIG_RMI4_BUS */
 #ifdef CONFIG_INPUT_TOUCHPAD_FTK
         {
                 I2C_BOARD_INFO("ftk", 0x4b),
                 .platform_data = &ftk_platformdata,
         },
 #endif  /* CONFIG_TOUCHPAD_FTK */
-        {
-                I2C_BOARD_INFO("stmpe32m28", 0x48),
-        },
 };
 
 /*
@@ -2474,7 +2574,8 @@ static void __init my_mux_init(void) {
         } else {
           __raw_writew(flags, CORE_BASE_ADDR + MUX_CAMERA_EMU);
         }
-        __raw_writew(flags, CORE_BASE_ADDR + MUX_TOUCHPAD_INT_N);
+        /* touchpad */
+        omap_mux_init_gpio(GPIO_TOUCHPAD_INT_N, OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN);
         /* ltr506 */
         __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP, CORE_BASE_ADDR + MUX_PROX_INT_N);
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 Synaptics Incorporated
+ * Copyright (c) 2011, 2012 Synaptics Incorporated
  * Copyright (c) 2011 Unixphere
  *
  * This driver adds support for generic RMI4 devices from Synpatics. It
@@ -36,21 +36,22 @@
 #include <linux/pm.h>
 #include <linux/rmi.h>
 #include "rmi_driver.h"
+#include "rmi_f01.h"
 
-#define DELAY_DEBUG 0
+#ifdef CONFIG_RMI4_DEBUG
+#include <linux/debugfs.h>
+#include <linux/fs.h>
+#include <linux/uaccess.h>
+#endif
+
 #define REGISTER_DEBUG 0
 
-#define PDT_END_SCAN_LOCATION	0x0005
-#define PDT_PROPERTIES_LOCATION 0x00EF
-#define BSR_LOCATION 0x00FE
-#define HAS_BSR_MASK 0x20
 #define HAS_NONSTANDARD_PDT_MASK 0x40
-#define RMI4_END_OF_PDT(id) ((id) == 0x00 || (id) == 0xff)
 #define RMI4_MAX_PAGE 0xff
 #define RMI4_PAGE_SIZE 0x100
 
 #define RMI_DEVICE_RESET_CMD	0x01
-#define INITIAL_RESET_WAIT_MS	20
+#define DEFAULT_RESET_DELAY_MS	100
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void rmi_driver_early_suspend(struct early_suspend *h);
@@ -58,9 +59,6 @@ static void rmi_driver_late_resume(struct early_suspend *h);
 #endif
 
 /* sysfs files for attributes for driver values. */
-static ssize_t rmi_driver_hasbsr_show(struct device *dev,
-				      struct device_attribute *attr, char *buf);
-
 static ssize_t rmi_driver_bsr_show(struct device *dev,
 				   struct device_attribute *attr, char *buf);
 
@@ -76,50 +74,234 @@ static ssize_t rmi_driver_enabled_store(struct device *dev,
 					struct device_attribute *attr,
 					const char *buf, size_t count);
 
-static ssize_t rmi_driver_phys_show(struct device *dev,
-				       struct device_attribute *attr,
-				       char *buf);
-
-static ssize_t rmi_driver_version_show(struct device *dev,
-				       struct device_attribute *attr,
-				       char *buf);
-
 #if REGISTER_DEBUG
 static ssize_t rmi_driver_reg_store(struct device *dev,
 					struct device_attribute *attr,
 					const char *buf, size_t count);
 #endif
 
-#if DELAY_DEBUG
-static ssize_t rmi_delay_show(struct device *dev,
-				       struct device_attribute *attr,
-				       char *buf);
+#ifdef CONFIG_RMI4_DEBUG
 
-static ssize_t rmi_delay_store(struct device *dev,
-					struct device_attribute *attr,
-					const char *buf, size_t count);
+struct driver_debugfs_data {
+	bool done;
+	struct rmi_device *rmi_dev;
+};
+
+static int debug_open(struct inode *inodep, struct file *filp)
+{
+	struct driver_debugfs_data *data;
+
+	data = kzalloc(sizeof(struct driver_debugfs_data), GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+
+	data->rmi_dev = inodep->i_private;
+	filp->private_data = data;
+	return 0;
+}
+
+static int debug_release(struct inode *inodep, struct file *filp)
+{
+	kfree(filp->private_data);
+	return 0;
+}
+
+#ifdef CONFIG_RMI4_SPI
+#define DELAY_NAME "delay"
+
+static ssize_t delay_read(struct file *filp, char __user *buffer, size_t size,
+		    loff_t *offset) {
+	struct driver_debugfs_data *data = filp->private_data;
+	struct rmi_device_platform_data *pdata =
+			data->rmi_dev->phys->dev->platform_data;
+	int retval;
+	char local_buf[size];
+
+	if (data->done)
+		return 0;
+
+	data->done = 1;
+
+	retval = snprintf(local_buf, size, "%d %d %d %d %d\n",
+		pdata->spi_data.read_delay_us, pdata->spi_data.write_delay_us,
+		pdata->spi_data.block_delay_us,
+		pdata->spi_data.pre_delay_us, pdata->spi_data.post_delay_us);
+
+	if (retval <= 0 || copy_to_user(buffer, local_buf, retval))
+		return -EFAULT;
+
+	return retval;
+}
+
+static ssize_t delay_write(struct file *filp, const char __user *buffer,
+			   size_t size, loff_t *offset) {
+	struct driver_debugfs_data *data = filp->private_data;
+	struct rmi_device_platform_data *pdata =
+			data->rmi_dev->phys->dev->platform_data;
+	int retval;
+	char local_buf[size];
+	unsigned int new_read_delay;
+	unsigned int new_write_delay;
+	unsigned int new_block_delay;
+	unsigned int new_pre_delay;
+	unsigned int new_post_delay;
+
+	retval = copy_from_user(local_buf, buffer, size);
+	if (retval)
+		return -EFAULT;
+
+	retval = sscanf(local_buf, "%u %u %u %u %u", &new_read_delay,
+			&new_write_delay, &new_block_delay,
+			&new_pre_delay, &new_post_delay);
+	if (retval != 5) {
+		dev_err(&data->rmi_dev->dev,
+			"Incorrect number of values provided for delay.");
+		return -EINVAL;
+	}
+	if (new_read_delay < 0) {
+		dev_err(&data->rmi_dev->dev,
+			"Byte delay must be positive microseconds.\n");
+		return -EINVAL;
+	}
+	if (new_write_delay < 0) {
+		dev_err(&data->rmi_dev->dev,
+			"Write delay must be positive microseconds.\n");
+		return -EINVAL;
+	}
+	if (new_block_delay < 0) {
+		dev_err(&data->rmi_dev->dev,
+			"Block delay must be positive microseconds.\n");
+		return -EINVAL;
+	}
+	if (new_pre_delay < 0) {
+		dev_err(&data->rmi_dev->dev,
+			"Pre-transfer delay must be positive microseconds.\n");
+		return -EINVAL;
+	}
+	if (new_post_delay < 0) {
+		dev_err(&data->rmi_dev->dev,
+			"Post-transfer delay must be positive microseconds.\n");
+		return -EINVAL;
+	}
+
+	dev_dbg(&data->rmi_dev->dev,
+		 "Setting delays to %u %u %u %u %u.\n", new_read_delay,
+		 new_write_delay, new_block_delay, new_pre_delay,
+		 new_post_delay);
+	pdata->spi_data.read_delay_us = new_read_delay;
+	pdata->spi_data.write_delay_us = new_write_delay;
+	pdata->spi_data.block_delay_us = new_block_delay;
+	pdata->spi_data.pre_delay_us = new_pre_delay;
+	pdata->spi_data.post_delay_us = new_post_delay;
+
+	return size;
+}
+
+static const struct file_operations delay_fops = {
+	.owner = THIS_MODULE,
+	.open = debug_open,
+	.release = debug_release,
+	.read = delay_read,
+	.write = delay_write,
+};
+#endif /* CONFIG_RMI4_SPI */
+
+#define PHYS_NAME "phys"
+
+static ssize_t phys_read(struct file *filp, char __user *buffer, size_t size,
+		    loff_t *offset) {
+	struct driver_debugfs_data *data = filp->private_data;
+	struct rmi_phys_info *info = &data->rmi_dev->phys->info;
+	int retval;
+	char local_buf[size];
+
+	if (data->done)
+		return 0;
+
+	data->done = 1;
+
+	retval = snprintf(local_buf, PAGE_SIZE,
+		"%-5s %ld %ld %ld %ld %ld %ld %ld\n",
+		 info->proto ? info->proto : "unk",
+		 info->tx_count, info->tx_bytes, info->tx_errs,
+		 info->rx_count, info->rx_bytes, info->rx_errs,
+		 info->attn_count);
+	if (retval <= 0 || copy_to_user(buffer, local_buf, retval))
+		return -EFAULT;
+
+	return retval;
+}
+
+static const struct file_operations phys_fops = {
+	.owner = THIS_MODULE,
+	.open = debug_open,
+	.release = debug_release,
+	.read = phys_read,
+};
+
+static int setup_debugfs(struct rmi_device *rmi_dev)
+{
+	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
+#ifdef CONFIG_RMI4_SPI
+	struct rmi_phys_info *info = &rmi_dev->phys->info;
+#endif
+	int retval = 0;
+
+	if (!rmi_dev->debugfs_root)
+		return -ENODEV;
+
+#ifdef CONFIG_RMI4_SPI
+	if (!strncmp("spi", info->proto, 3)) {
+		data->debugfs_delay = debugfs_create_file(DELAY_NAME,
+				RMI_RW_ATTR, rmi_dev->debugfs_root, rmi_dev,
+				&delay_fops);
+		if (!data->debugfs_delay || IS_ERR(data->debugfs_delay)) {
+			dev_warn(&rmi_dev->dev, "Failed to create debugfs delay.\n");
+			data->debugfs_delay = NULL;
+		}
+	}
 #endif
 
+	data->debugfs_phys = debugfs_create_file(PHYS_NAME, RMI_RO_ATTR,
+				rmi_dev->debugfs_root, rmi_dev, &phys_fops);
+	if (!data->debugfs_phys || IS_ERR(data->debugfs_phys)) {
+		dev_warn(&rmi_dev->dev, "Failed to create debugfs phys.\n");
+		data->debugfs_phys = NULL;
+	}
+
+	return retval;
+}
+
+static void teardown_debugfs(struct rmi_device *rmi_dev)
+{
+	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
+
+#ifdef CONFIG_RMI4_SPI
+	if (!data->debugfs_delay)
+		debugfs_remove(data->debugfs_delay);
+#endif
+	if (!data->debugfs_phys)
+		debugfs_remove(data->debugfs_phys);
+}
+#endif
+
+static int rmi_driver_process_reset_requests(struct rmi_device *rmi_dev);
+
+static int rmi_driver_process_config_requests(struct rmi_device *rmi_dev);
+
+static int rmi_driver_irq_restore(struct rmi_device *rmi_dev);
+
 static struct device_attribute attrs[] = {
-	__ATTR(hasbsr, RMI_RO_ATTR,
-	       rmi_driver_hasbsr_show, rmi_store_error),
-	__ATTR(bsr, RMI_RW_ATTR,
-	       rmi_driver_bsr_show, rmi_driver_bsr_store),
 	__ATTR(enabled, RMI_RW_ATTR,
 	       rmi_driver_enabled_show, rmi_driver_enabled_store),
-	__ATTR(phys, RMI_RO_ATTR,
-	       rmi_driver_phys_show, rmi_store_error),
 #if REGISTER_DEBUG
 	__ATTR(reg, RMI_WO_ATTR,
 	       rmi_show_error, rmi_driver_reg_store),
 #endif
-#if DELAY_DEBUG
-	__ATTR(delay, RMI_RW_ATTR,
-	       rmi_delay_show, rmi_delay_store),
-#endif
-	__ATTR(version, RMI_RO_ATTR,
-	       rmi_driver_version_show, rmi_store_error),
 };
+
+static struct device_attribute bsr_attribute = __ATTR(bsr, RMI_RW_ATTR,
+	       rmi_driver_bsr_show, rmi_driver_bsr_store);
 
 /* Useful helper functions for u8* */
 
@@ -162,34 +344,8 @@ void u8_and(u8 *dest, u8 *target1, u8 *target2, int size)
 		dest[i] = target1[i] & target2[i];
 }
 
-/* Helper fn to convert a byte array representing a short in the RMI
- * endian-ness to a short in the native processor's specific endianness.
- * We don't use ntohs/htons here because, well, we're not dealing with
- * a pair of shorts. And casting dest to short* wouldn't work, because
- * that would imply knowing the byte order of short in the first place.
- */
-void batohs(unsigned short *dest, unsigned char *src)
-{
-	*dest = src[1] * 0x100 + src[0];
-}
-
-/* Helper function to convert a short (in host processor endianess) to
- * a byte array in the RMI endianess for shorts.  See above comment for
- * why we dont us htons or something like that.
- */
-void hstoba(unsigned char *dest, unsigned short src)
-{
-	dest[0] = src % 0x100;
-	dest[1] = src / 0x100;
-}
-
-static bool has_bsr(struct rmi_driver_data *data)
-{
-	return (data->pdt_props & HAS_BSR_MASK) != 0;
-}
-
 /* Utility routine to set bits in a register. */
-int rmi_set_bits(struct rmi_device *rmi_dev, unsigned short address,
+int rmi_set_bits(struct rmi_device *rmi_dev, u16 address,
 		 unsigned char bits)
 {
 	unsigned char reg_contents;
@@ -209,7 +365,7 @@ int rmi_set_bits(struct rmi_device *rmi_dev, unsigned short address,
 EXPORT_SYMBOL(rmi_set_bits);
 
 /* Utility routine to clear bits in a register. */
-int rmi_clear_bits(struct rmi_device *rmi_dev, unsigned short address,
+int rmi_clear_bits(struct rmi_device *rmi_dev, u16 address,
 		   unsigned char bits)
 {
 	unsigned char reg_contents;
@@ -233,19 +389,46 @@ static void rmi_free_function_list(struct rmi_device *rmi_dev)
 	struct rmi_function_container *entry, *n;
 	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
 
+	if (!data) {
+		dev_err(&rmi_dev->dev, "WTF: No driver data in %s\n", __func__);
+		return;
+	}
+
+	if (data->f01_container) {
+		if (data->f01_container->fh &&
+				data->f01_container->fh->remove)
+			data->f01_container->fh->remove(data->f01_container);
+		device_unregister(&data->f01_container->dev);
+		kfree(data->f01_container->irq_mask);
+		kfree(data->f01_container);
+		data->f01_container = NULL;
+	}
+
+	if (list_empty(&data->rmi_functions.list))
+		return;
+
 	list_for_each_entry_safe(entry, n, &data->rmi_functions.list, list) {
+		if (entry->fh) {
+			if (entry->fh->remove)
+				entry->fh->remove(entry);
+			device_unregister(&entry->dev);
+		}
 		kfree(entry->irq_mask);
 		list_del(&entry->list);
+		kfree(entry);
 	}
+}
+
+static void no_op(struct device *dev)
+{
+	dev_dbg(dev, "REMOVING KOBJ!");
+	kobject_put(&dev->kobj);
 }
 
 static int init_one_function(struct rmi_device *rmi_dev,
 			     struct rmi_function_container *fc)
 {
 	int retval;
-
-	dev_dbg(&rmi_dev->dev, "Initializing F%02X.\n",
-			fc->fd.function_number);
 
 	if (!fc->fh) {
 		struct rmi_function_handler *fh =
@@ -260,11 +443,13 @@ static int init_one_function(struct rmi_device *rmi_dev,
 
 	if (!fc->fh->init)
 		return 0;
-
+	/* This memset might not be what we want to do... */
+	memset(&(fc->dev), 0, sizeof(struct device));
 	dev_set_name(&(fc->dev), "fn%02x", fc->fd.function_number);
+	fc->dev.release = no_op;
 
 	fc->dev.parent = &rmi_dev->dev;
-
+	dev_dbg(&rmi_dev->dev, "Register F%02X.\n", fc->fd.function_number);
 	retval = device_register(&fc->dev);
 	if (retval) {
 		dev_err(&rmi_dev->dev, "Failed device_register for F%02X.\n",
@@ -272,12 +457,15 @@ static int init_one_function(struct rmi_device *rmi_dev,
 		return retval;
 	}
 
+	dev_dbg(&rmi_dev->dev, "Init F%02X.\n", fc->fd.function_number);
 	retval = fc->fh->init(fc);
 	if (retval < 0) {
 		dev_err(&rmi_dev->dev, "Failed to initialize function F%02x\n",
 			fc->fd.function_number);
 		goto error_exit;
 	}
+	dev_info(&rmi_dev->dev, "%s: initialized function F%02x\n",
+	         __func__, fc->fd.function_number);
 
 	return 0;
 
@@ -292,14 +480,20 @@ static void rmi_driver_fh_add(struct rmi_device *rmi_dev,
 	struct rmi_function_container *entry;
 	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
 
-	if (fh->func == 0x01)
-		data->f01_container->fh = fh;
-	else {
+	if (!data)
+		return;
+	if (fh->func == 0x01) {
+		if (data->f01_container)
+			data->f01_container->fh = fh;
+	} else if (!list_empty(&data->rmi_functions.list)) {
+		mutex_lock(&data->pdt_mutex);
 		list_for_each_entry(entry, &data->rmi_functions.list, list)
 			if (entry->fd.function_number == fh->func) {
 				entry->fh = fh;
-				init_one_function(rmi_dev, entry);
+				if (init_one_function(rmi_dev, entry) < 0)
+					entry->fh = NULL;
 			}
+		mutex_unlock(&data->pdt_mutex);
 	}
 
 }
@@ -307,16 +501,99 @@ static void rmi_driver_fh_add(struct rmi_device *rmi_dev,
 static void rmi_driver_fh_remove(struct rmi_device *rmi_dev,
 				 struct rmi_function_handler *fh)
 {
-	struct rmi_function_container *entry;
+	struct rmi_function_container *entry, *temp;
 	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
 
-	list_for_each_entry(entry, &data->rmi_functions.list, list)
-		if (entry->fd.function_number == fh->func) {
+	if (fh->func == 0x01) {
+		/* don't call remove here since
+		 * rmi_f01_initialize just get call one time */
+		if (data->f01_container)
+			data->f01_container->fh = NULL;
+		return;
+	}
+
+	list_for_each_entry_safe(entry, temp, &data->rmi_functions.list,
+									list) {
+		if (entry->fh && entry->fd.function_number == fh->func) {
 			if (fh->remove)
 				fh->remove(entry);
 
 			entry->fh = NULL;
+			device_unregister(&entry->dev);
 		}
+	}
+}
+
+static int rmi_driver_process_reset_requests(struct rmi_device *rmi_dev)
+{
+	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
+	struct device *dev = &rmi_dev->dev;
+	struct rmi_function_container *entry;
+	int retval;
+
+	/* Device control (F01) is handled before anything else. */
+
+	if (data->f01_container && data->f01_container->fh &&
+			data->f01_container->fh->reset) {
+		retval = data->f01_container->fh->reset(data->f01_container);
+		if (retval < 0) {
+			dev_err(dev, "F%02x reset handler failed: %d.\n",
+				data->f01_container->fh->func, retval);
+			return retval;
+		}
+	}
+
+	if (list_empty(&data->rmi_functions.list))
+		return 0;
+
+	list_for_each_entry(entry, &data->rmi_functions.list, list) {
+		if (entry->fh && entry->fh->reset) {
+			retval = entry->fh->reset(entry);
+			if (retval < 0) {
+				dev_err(dev, "F%02x reset handler failed: %d\n",
+					entry->fh->func, retval);
+				return retval;
+			}
+		}
+	}
+
+	return 0;
+}
+
+static int rmi_driver_process_config_requests(struct rmi_device *rmi_dev)
+{
+	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
+	struct device *dev = &rmi_dev->dev;
+	struct rmi_function_container *entry;
+	int retval;
+
+	/* Device control (F01) is handled before anything else. */
+
+	if (data->f01_container && data->f01_container->fh &&
+			data->f01_container->fh->config) {
+		retval = data->f01_container->fh->config(data->f01_container);
+		if (retval < 0) {
+			dev_err(dev, "F%02x config handler failed: %d.\n",
+					data->f01_container->fh->func, retval);
+			return retval;
+		}
+	}
+
+	if (list_empty(&data->rmi_functions.list))
+		return 0;
+
+	list_for_each_entry(entry, &data->rmi_functions.list, list) {
+		if (entry->fh && entry->fh->config) {
+			retval = entry->fh->config(entry);
+			if (retval < 0) {
+				dev_err(dev, "F%02x config handler failed: %d.\n",
+					entry->fh->func, retval);
+				return retval;
+			}
+		}
+	}
+
+	return 0;
 }
 
 static void construct_mask(u8 *mask, int num, int pos)
@@ -340,15 +617,18 @@ static int process_interrupt_requests(struct rmi_device *rmi_dev)
 				data->f01_container->fd.data_base_addr + 1,
 				irq_status, data->num_of_irq_regs);
 	if (error < 0) {
-		dev_err(dev, "%s: failed to read irqs.", __func__);
+		dev_err(dev, "Failed to read irqs, code=%d\n", error);
 		return error;
 	}
 	/* Device control (F01) is handled before anything else. */
-	u8_and(irq_bits, irq_status, data->f01_container->irq_mask,
-			data->num_of_irq_regs);
-	if (u8_is_any_set(irq_bits, data->num_of_irq_regs))
-		data->f01_container->fh->attention(
-				data->f01_container, irq_bits);
+	if (data->f01_container->irq_mask &&
+				data->f01_container->fh->attention) {
+		u8_and(irq_bits, irq_status, data->f01_container->irq_mask,
+				data->num_of_irq_regs);
+		if (u8_is_any_set(irq_bits, data->num_of_irq_regs))
+			data->f01_container->fh->attention(
+					data->f01_container, irq_bits);
+	}
 
 	u8_and(irq_status, irq_status, data->current_irq_mask,
 	       data->num_of_irq_regs);
@@ -381,13 +661,47 @@ static int rmi_driver_irq_handler(struct rmi_device *rmi_dev, int irq)
 	 * interrupts.
 	 */
 	if (!data || !data->f01_container || !data->f01_container->fh) {
-		dev_warn(&rmi_dev->dev,
+		dev_dbg(&rmi_dev->dev,
 			 "Not ready to handle interrupts yet!\n");
 		return 0;
 	}
 
 	return process_interrupt_requests(rmi_dev);
 }
+
+static int rmi_driver_reset_handler(struct rmi_device *rmi_dev)
+{
+	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
+	int error;
+
+	/* Can get called before the driver is fully ready to deal with
+	 * interrupts.
+	 */
+	if (!data || !data->f01_container || !data->f01_container->fh) {
+		dev_warn(&rmi_dev->dev,
+			 "Not ready to handle reset yet!\n");
+		return 0;
+	}
+
+	error = rmi_driver_process_reset_requests(rmi_dev);
+	if (error < 0)
+		return error;
+
+
+	error = rmi_driver_process_config_requests(rmi_dev);
+	if (error < 0)
+		return error;
+
+	if (data->irq_stored) {
+		error = rmi_driver_irq_restore(rmi_dev);
+		if (error < 0)
+			return error;
+	}
+
+	return 0;
+}
+
+
 
 /*
  * Construct a function's IRQ mask. This should
@@ -397,8 +711,7 @@ static u8 *rmi_driver_irq_get_mask(struct rmi_device *rmi_dev,
 				   struct rmi_function_container *fc) {
 	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
 
-	/* TODO: Where should this be freed? */
-	u8 *irq_mask = kzalloc(sizeof(u8) * data->num_of_irq_regs, GFP_KERNEL);
+	u8 *irq_mask = kcalloc(data->num_of_irq_regs, sizeof(u8), GFP_KERNEL);
 	if (irq_mask)
 		construct_mask(irq_mask, fc->num_of_irqs, fc->irq_pos);
 
@@ -418,7 +731,7 @@ static int rmi_driver_irq_save(struct rmi_device *rmi_dev, u8 * new_ints)
 
 	mutex_lock(&data->irq_mutex);
 	if (!data->irq_stored) {
-		/* Save current enabled interupts */
+		/* Save current enabled interrupts */
 		retval = rmi_read_block(rmi_dev,
 				data->f01_container->fd.control_base_addr+1,
 				data->irq_mask_store, data->num_of_irq_regs);
@@ -428,7 +741,7 @@ static int rmi_driver_irq_save(struct rmi_device *rmi_dev, u8 * new_ints)
 			goto error_unlock;
 		}
 		/*
-		 * Disable every interupt except for function 54
+		 * Disable every interrupt except for function 54
 		 * TODO:Will also want to not disable function 1-like functions.
 		 * No need to take care of this now, since there's no good way
 		 * to identify them.
@@ -485,6 +798,59 @@ error_unlock:
 	return retval;
 }
 
+static int rmi_driver_fn_generic(struct rmi_device *rmi_dev,
+				     struct pdt_entry *pdt_ptr,
+				     int *current_irq_count,
+				     u16 page_start)
+{
+	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
+	struct rmi_function_container *fc = NULL;
+	int retval = 0;
+	struct device *dev = &rmi_dev->dev;
+	struct rmi_device_platform_data *pdata;
+
+	pdata = to_rmi_platform_data(rmi_dev);
+
+	dev_dbg(dev, "Initializing F%02X for %s.\n", pdt_ptr->function_number,
+		pdata->sensor_name);
+
+	fc = kzalloc(sizeof(struct rmi_function_container),
+			GFP_KERNEL);
+	if (!fc) {
+		dev_err(dev, "Failed to allocate container for F%02X.\n",
+			pdt_ptr->function_number);
+		retval = -ENOMEM;
+		goto error_free_data;
+	}
+
+	copy_pdt_entry_to_fd(pdt_ptr, &fc->fd, page_start);
+
+	fc->rmi_dev = rmi_dev;
+	fc->num_of_irqs = pdt_ptr->interrupt_source_count;
+	fc->irq_pos = *current_irq_count;
+	*current_irq_count += fc->num_of_irqs;
+
+	retval = init_one_function(rmi_dev, fc);
+	if (retval < 0) {
+		dev_err(dev, "Failed to initialize F%.2x\n",
+			pdt_ptr->function_number);
+		goto error_free_data;
+	}
+
+	INIT_LIST_HEAD(&fc->list);
+	list_add_tail(&fc->list, &data->rmi_functions.list);
+	return 0;
+
+error_free_data:
+	kfree(fc);
+	return retval;
+}
+
+/*
+ * F01 was once handled very differently from all other functions.  It is
+ * now only slightly special, and as the driver is refined we expect this
+ * function to go away.
+ */
 static int rmi_driver_fn_01_specific(struct rmi_device *rmi_dev,
 				     struct pdt_entry *pdt_ptr,
 				     int *current_irq_count,
@@ -492,14 +858,24 @@ static int rmi_driver_fn_01_specific(struct rmi_device *rmi_dev,
 {
 	struct rmi_driver_data *data = NULL;
 	struct rmi_function_container *fc = NULL;
+	union f01_device_status device_status;
 	int retval = 0;
 	struct device *dev = &rmi_dev->dev;
 	struct rmi_function_handler *fh =
 		rmi_get_function_handler(0x01);
+	struct rmi_device_platform_data *pdata;
 
+	pdata = to_rmi_platform_data(rmi_dev);
 	data = rmi_get_driverdata(rmi_dev);
 
-	dev_info(dev, "%s: Found F01, initializing.\n", __func__);
+	retval = rmi_read(rmi_dev, pdt_ptr->data_base_addr,
+			  device_status.regs);
+	if (retval) {
+		dev_err(dev, "Failed to read device status.\n");
+		return retval;
+	}
+
+	dev_dbg(dev, "Initializing F01 for %s.\n", pdata->sensor_name);
 	if (!fh)
 		dev_dbg(dev, "%s: No function handler for F01?!", __func__);
 
@@ -512,15 +888,16 @@ static int rmi_driver_fn_01_specific(struct rmi_device *rmi_dev,
 	copy_pdt_entry_to_fd(pdt_ptr, &fc->fd, page_start);
 	fc->num_of_irqs = pdt_ptr->interrupt_source_count;
 	fc->irq_pos = *current_irq_count;
-
 	*current_irq_count += fc->num_of_irqs;
 
 	fc->rmi_dev        = rmi_dev;
 	fc->dev.parent     = &fc->rmi_dev->dev;
-	fc->fh             = fh;
+	fc->fh = fh;
 
 	dev_set_name(&(fc->dev), "fn%02x", fc->fd.function_number);
+	fc->dev.release = no_op;
 
+	dev_dbg(dev, "Register F01.\n");
 	retval = device_register(&fc->dev);
 	if (retval) {
 		dev_err(dev, "%s: Failed device_register for F01.\n", __func__);
@@ -528,6 +905,11 @@ static int rmi_driver_fn_01_specific(struct rmi_device *rmi_dev,
 	}
 
 	data->f01_container = fc;
+	data->f01_bootloader_mode = device_status.flash_prog;
+	if (device_status.flash_prog)
+		dev_warn(dev, "WARNING: RMI4 device is in bootloader mode!\n");
+
+	INIT_LIST_HEAD(&fc->list);
 
 	return retval;
 
@@ -544,15 +926,23 @@ error_free_data:
  * building the PDT because the reflash might cause various registers
  * to move around.
  */
-static int do_initial_reset(struct rmi_device* rmi_dev)
+static int do_initial_reset(struct rmi_device *rmi_dev)
 {
 	struct pdt_entry pdt_entry;
 	int page;
 	struct device *dev = &rmi_dev->dev;
 	bool done = false;
+	bool has_f01 = false;
+#ifdef	CONFIG_RMI4_FWLIB
+	bool has_f34 = false;
+	struct pdt_entry f34_pdt, f01_pdt;
+#endif
 	int i;
 	int retval;
+	struct rmi_device_platform_data *pdata;
 
+	dev_dbg(dev, "Initial reset.\n");
+	pdata = to_rmi_platform_data(rmi_dev);
 	for (page = 0; (page <= RMI4_MAX_PAGE) && !done; page++) {
 		u16 page_start = RMI4_PAGE_SIZE * page;
 		u16 pdt_start = page_start + PDT_START_SCAN_LOCATION;
@@ -583,21 +973,42 @@ static int do_initial_reset(struct rmi_device* rmi_dev)
 						"Code = %d.\n", retval);
 					return retval;
 				}
-				/* Some devices take longer to come out of reset. */
-				mdelay(2*INITIAL_RESET_WAIT_MS);
-				return 0;
+				mdelay(pdata->reset_delay_ms);
+#ifndef CONFIG_RMI4_FWLIB
+				done = true;
+#else
+				memcpy(&f01_pdt, &pdt_entry, sizeof(pdt_entry));
+#endif
+				has_f01 = true;
+				break;
 			}
+#ifdef	CONFIG_RMI4_FWLIB
+			else if (pdt_entry.function_number == 0x34) {
+				memcpy(&f34_pdt, &pdt_entry, sizeof(pdt_entry));
+				has_f34 = true;
+			}
+#endif
 		}
 	}
 
-	dev_warn(dev, "WARNING: Failed to find F01 for initial reset.\n");
-	return -ENODEV;
+	if (!has_f01) {
+		dev_warn(dev, "WARNING: Failed to find F01 for initial reset.\n");
+		return -ENODEV;
+	}
+
+#ifdef CONFIG_RMI4_FWLIB
+	if (has_f34)
+		rmi4_fw_update(rmi_dev, &f01_pdt, &f34_pdt);
+	else
+		dev_warn(dev, "WARNING: No F34, firmware update will not be done.\n");
+#endif
+
+	return 0;
 }
 
 static int rmi_scan_pdt(struct rmi_device *rmi_dev)
 {
 	struct rmi_driver_data *data;
-	struct rmi_function_container *fc;
 	struct pdt_entry pdt_entry;
 	int page;
 	struct device *dev = &rmi_dev->dev;
@@ -606,15 +1017,11 @@ static int rmi_scan_pdt(struct rmi_device *rmi_dev)
 	int i;
 	int retval;
 
-	retval = do_initial_reset(rmi_dev);
-	if (retval)
-		dev_err(dev, "WARNING: Initial reset failed! Soldiering on.\n");
+	dev_dbg(dev, "Scanning PDT...\n");
 
 	data = rmi_get_driverdata(rmi_dev);
+	mutex_lock(&data->pdt_mutex);
 
-	INIT_LIST_HEAD(&data->rmi_functions.list);
-
-	/* parse the PDT */
 	for (page = 0; (page <= RMI4_MAX_PAGE) && !done; page++) {
 		u16 page_start = RMI4_PAGE_SIZE * page;
 		u16 pdt_start = page_start + PDT_START_SCAN_LOCATION;
@@ -625,7 +1032,7 @@ static int rmi_scan_pdt(struct rmi_device *rmi_dev)
 			retval = rmi_read_block(rmi_dev, i, (u8 *)&pdt_entry,
 					       sizeof(pdt_entry));
 			if (retval != sizeof(pdt_entry)) {
-				dev_err(dev, "Read PDT entry at 0x%04x"
+				dev_err(dev, "Read PDT entry at 0x%04x "
 					"failed.\n", i);
 				goto error_exit;
 			}
@@ -637,62 +1044,36 @@ static int rmi_scan_pdt(struct rmi_device *rmi_dev)
 				__func__, pdt_entry.function_number, page);
 			done = false;
 
-			/*
-			 * F01 is handled by rmi_driver. Hopefully we will get
-			 * rid of the special treatment of f01 at some point
-			 * in time.
-			 */
-			if (pdt_entry.function_number == 0x01) {
+			if (pdt_entry.function_number == 0x01)
 				retval = rmi_driver_fn_01_specific(rmi_dev,
 						&pdt_entry, &irq_count,
 						page_start);
-				if (retval)
-					goto error_exit;
-				continue;
-			}
+			else
+				retval = rmi_driver_fn_generic(rmi_dev,
+						&pdt_entry, &irq_count,
+						page_start);
 
-			fc = kzalloc(sizeof(struct rmi_function_container),
-				     GFP_KERNEL);
-			if (!fc) {
-				dev_err(dev, "Failed to allocate function "
-					"container for F%02X.\n",
-					pdt_entry.function_number);
-				retval = -ENOMEM;
+			if (retval)
 				goto error_exit;
-			}
-
-			copy_pdt_entry_to_fd(&pdt_entry, &fc->fd, page_start);
-
-			fc->rmi_dev = rmi_dev;
-			fc->num_of_irqs = pdt_entry.interrupt_source_count;
-			fc->irq_pos = irq_count;
-			irq_count += fc->num_of_irqs;
-
-			retval = init_one_function(rmi_dev, fc);
-			if (retval < 0) {
-				dev_err(dev, "Failed to initialize F%.2x\n",
-					pdt_entry.function_number);
-				kfree(fc);
-				goto error_exit;
-			}
-
-			list_add_tail(&fc->list, &data->rmi_functions.list);
 		}
+		done = done || data->f01_bootloader_mode;
 	}
+	data->irq_count = irq_count;
 	data->num_of_irq_regs = (irq_count + 7) / 8;
 	dev_dbg(dev, "%s: Done with PDT scan.\n", __func__);
-	return 0;
+	retval = 0;
 
 error_exit:
+	mutex_unlock(&data->pdt_mutex);
 	return retval;
 }
 
 static int rmi_driver_probe(struct rmi_device *rmi_dev)
 {
-	struct rmi_driver_data *data;
+	struct rmi_driver_data *data = NULL;
 	struct rmi_function_container *fc;
 	struct rmi_device_platform_data *pdata;
-	int error = 0;
+	int retval = 0;
 	struct device *dev = &rmi_dev->dev;
 	int attr_count = 0;
 
@@ -705,26 +1086,35 @@ static int rmi_driver_probe(struct rmi_device *rmi_dev)
 		dev_err(dev, "%s: Failed to allocate driver data.\n", __func__);
 		return -ENOMEM;
 	}
-
+	INIT_LIST_HEAD(&data->rmi_functions.list);
 	rmi_set_driverdata(rmi_dev, data);
+	mutex_init(&data->pdt_mutex);
 
-	error = rmi_scan_pdt(rmi_dev);
-	if (error) {
-		dev_err(dev, "PDT scan failed with code %d.\n", error);
+	if (!pdata->reset_delay_ms)
+		pdata->reset_delay_ms = DEFAULT_RESET_DELAY_MS;
+	retval = do_initial_reset(rmi_dev);
+	if (retval)
+		dev_warn(dev, "RMI initial reset failed! Soldiering on.\n");
+
+
+	retval = rmi_scan_pdt(rmi_dev);
+	if (retval) {
+		dev_err(dev, "PDT scan for %s failed with code %d.\n",
+			pdata->sensor_name, retval);
 		goto err_free_data;
 	}
 
 	if (!data->f01_container) {
-		dev_err(dev, "missing f01 function!\n");
-		error = -EINVAL;
+		dev_err(dev, "missing F01 container!\n");
+		retval = -EINVAL;
 		goto err_free_data;
 	}
 
-	data->f01_container->irq_mask = kzalloc(
-			sizeof(u8) * data->num_of_irq_regs, GFP_KERNEL);
+	data->f01_container->irq_mask = kcalloc(data->num_of_irq_regs,
+			sizeof(u8), GFP_KERNEL);
 	if (!data->f01_container->irq_mask) {
 		dev_err(dev, "Failed to allocate F01 IRQ mask.\n");
-		error = -ENOMEM;
+		retval = -ENOMEM;
 		goto err_free_data;
 	}
 	construct_mask(data->f01_container->irq_mask,
@@ -733,15 +1123,15 @@ static int rmi_driver_probe(struct rmi_device *rmi_dev)
 	list_for_each_entry(fc, &data->rmi_functions.list, list)
 		fc->irq_mask = rmi_driver_irq_get_mask(rmi_dev, fc);
 
-	error = rmi_driver_f01_init(rmi_dev);
-	if (error < 0) {
+	retval = rmi_driver_f01_init(rmi_dev);
+	if (retval < 0) {
 		dev_err(dev, "Failed to initialize F01.\n");
 		goto err_free_data;
 	}
 
-	error = rmi_read(rmi_dev, PDT_PROPERTIES_LOCATION,
-			 (char *) &data->pdt_props);
-	if (error < 0) {
+	retval = rmi_read(rmi_dev, PDT_PROPERTIES_LOCATION,
+			 data->pdt_props.regs);
+	if (retval < 0) {
 		/* we'll print out a warning and continue since
 		 * failure to get the PDT properties is not a cause to fail
 		 */
@@ -751,46 +1141,51 @@ static int rmi_driver_probe(struct rmi_device *rmi_dev)
 
 	dev_dbg(dev, "%s: Creating sysfs files.", __func__);
 	for (attr_count = 0; attr_count < ARRAY_SIZE(attrs); attr_count++) {
-		error = device_create_file(dev, &attrs[attr_count]);
-		if (error < 0) {
+		retval = device_create_file(dev, &attrs[attr_count]);
+		if (retval < 0) {
 			dev_err(dev, "%s: Failed to create sysfs file %s.\n",
 				__func__, attrs[attr_count].attr.name);
 			goto err_free_data;
 		}
 	}
+	if (data->pdt_props.has_bsr) {
+		retval = device_create_file(dev, &bsr_attribute);
+		if (retval < 0) {
+			dev_err(dev, "%s: Failed to create sysfs file bsr.\n",
+				__func__);
+			goto err_free_data;
+		}
+	}
 
-	__mutex_init(&data->irq_mutex, "irq_mutex", &data->irq_key);
-	data->current_irq_mask = kzalloc(sizeof(u8) * data->num_of_irq_regs,
+	mutex_init(&data->irq_mutex);
+	data->current_irq_mask = kcalloc(data->num_of_irq_regs, sizeof(u8),
 					 GFP_KERNEL);
 	if (!data->current_irq_mask) {
 		dev_err(dev, "Failed to allocate current_irq_mask.\n");
-		error = -ENOMEM;
+		retval = -ENOMEM;
 		goto err_free_data;
 	}
-	error = rmi_read_block(rmi_dev,
+	retval = rmi_read_block(rmi_dev,
 				data->f01_container->fd.control_base_addr+1,
 				data->current_irq_mask, data->num_of_irq_regs);
-	if (error < 0) {
+	if (retval < 0) {
 		dev_err(dev, "%s: Failed to read current IRQ mask.\n",
 			__func__);
 		goto err_free_data;
 	}
-	data->irq_mask_store = kzalloc(sizeof(u8) * data->num_of_irq_regs,
+	data->irq_mask_store = kcalloc(data->num_of_irq_regs, sizeof(u8),
 				       GFP_KERNEL);
 	if (!data->irq_mask_store) {
 		dev_err(dev, "Failed to allocate mask store.\n");
-		error = -ENOMEM;
+		retval = -ENOMEM;
 		goto err_free_data;
 	}
-
-#if defined(CONFIG_RMI4_DEV)
-	if (rmi_char_dev_register(rmi_dev->phys))
-		pr_err("%s: error register char device", __func__);
-#endif /*CONFIG_RMI4_DEV*/
 
 #ifdef	CONFIG_PM
 	data->pm_data = pdata->pm_data;
 	data->pre_suspend = pdata->pre_suspend;
+	data->post_suspend = pdata->post_suspend;
+	data->pre_resume = pdata->pre_resume;
 	data->post_resume = pdata->post_resume;
 
 	mutex_init(&data->suspend_mutex);
@@ -805,9 +1200,12 @@ static int rmi_driver_probe(struct rmi_device *rmi_dev)
 #endif /* CONFIG_PM */
 	data->enabled = true;
 
-	dev_info(dev, "connected RMI device manufacturer: %s product: %s\n",
-		 data->manufacturer_id == 1 ? "synaptics" : "unknown",
-		 data->product_id);
+#ifdef CONFIG_RMI4_DEBUG
+	retval = setup_debugfs(rmi_dev);
+	if (retval < 0)
+		dev_warn(&fc->dev, "Failed to setup debugfs. Code: %d.\n",
+			 retval);
+#endif
 
 	return 0;
 
@@ -815,33 +1213,63 @@ static int rmi_driver_probe(struct rmi_device *rmi_dev)
 	rmi_free_function_list(rmi_dev);
 	for (attr_count--; attr_count >= 0; attr_count--)
 		device_remove_file(dev, &attrs[attr_count]);
-	kfree(data->f01_container->irq_mask);
+	if (data->pdt_props.has_bsr)
+		device_remove_file(dev, &bsr_attribute);
+	if (data->f01_container)
+		kfree(data->f01_container->irq_mask);
 	kfree(data->irq_mask_store);
 	kfree(data->current_irq_mask);
 	kfree(data);
-	return error;
+	rmi_set_driverdata(rmi_dev, NULL);
+	return retval;
+}
+
+static void disable_sensor(struct rmi_device *rmi_dev)
+{
+	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
+
+	rmi_dev->phys->disable_device(rmi_dev->phys);
+
+	data->enabled = false;
+}
+
+static int enable_sensor(struct rmi_device *rmi_dev)
+{
+	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
+	int retval = 0;
+
+	retval = rmi_dev->phys->enable_device(rmi_dev->phys);
+	if (retval)
+		return retval;
+
+	data->enabled = true;
+
+	return 0;
 }
 
 #ifdef CONFIG_PM
-static int rmi_driver_suspend(struct device *dev)
+static int standard_suspend(struct rmi_device *rmi_dev)
 {
-	struct rmi_device *rmi_dev;
 	struct rmi_driver_data *data;
 	struct rmi_function_container *entry;
 	int retval = 0;
 
-	rmi_dev = to_rmi_device(dev);
 	data = rmi_get_driverdata(rmi_dev);
 
 	mutex_lock(&data->suspend_mutex);
 	if (data->suspended)
 		goto exit;
 
+#if !defined(CONFIG_HAS_EARLYSUSPEND) || \
+			defined(CONFIG_RMI4_SPECIAL_EARLYSUSPEND)
 	if (data->pre_suspend) {
 		retval = data->pre_suspend(data->pm_data);
 		if (retval)
 			goto exit;
 	}
+#endif  /* !CONFIG_HAS_EARLYSUSPEND */
+
+	disable_sensor(rmi_dev);
 
 	list_for_each_entry(entry, &data->rmi_functions.list, list)
 		if (entry->fh && entry->fh->suspend) {
@@ -850,35 +1278,45 @@ static int rmi_driver_suspend(struct device *dev)
 				goto exit;
 		}
 
-	if (data->f01_container->fh && data->f01_container->fh->suspend)
+	if (data->f01_container && data->f01_container->fh
+				&& data->f01_container->fh->suspend) {
 		retval = data->f01_container->fh->suspend(data->f01_container);
-		if (retval)
+		if (retval < 0)
 			goto exit;
+	}
 	data->suspended = true;
+
+	if (data->post_suspend)
+		retval = data->post_suspend(data->pm_data);
 
 exit:
 	mutex_unlock(&data->suspend_mutex);
 	return retval;
 }
 
-static int rmi_driver_resume(struct device *dev)
+static int standard_resume(struct rmi_device *rmi_dev)
 {
-	struct rmi_device *rmi_dev;
 	struct rmi_driver_data *data;
 	struct rmi_function_container *entry;
 	int retval = 0;
-
-	rmi_dev = to_rmi_device(dev);
 	data = rmi_get_driverdata(rmi_dev);
 
 	mutex_lock(&data->suspend_mutex);
 	if (!data->suspended)
 		goto exit;
 
-	if (data->f01_container->fh && data->f01_container->fh->resume)
-		retval = data->f01_container->fh->resume(data->f01_container);
+	if (data->pre_resume) {
+		retval = data->pre_resume(data->pm_data);
 		if (retval)
 			goto exit;
+	}
+
+	if (data->f01_container && data->f01_container->fh
+				&& data->f01_container->fh->resume) {
+		retval = data->f01_container->fh->resume(data->f01_container);
+		if (retval < 0)
+			goto exit;
+	}
 
 	list_for_each_entry(entry, &data->rmi_functions.list, list)
 		if (entry->fh && entry->fh->resume) {
@@ -887,38 +1325,177 @@ static int rmi_driver_resume(struct device *dev)
 				goto exit;
 		}
 
+	retval = enable_sensor(rmi_dev);
+	if (retval)
+		goto exit;
+
+#if !defined(CONFIG_HAS_EARLYSUSPEND) || \
+			defined(CONFIG_RMI4_SPECIAL_EARLYSUSPEND)
 	if (data->post_resume) {
 		retval = data->post_resume(data->pm_data);
 		if (retval)
 			goto exit;
 	}
+#endif
 
 	data->suspended = false;
-
 exit:
 	mutex_unlock(&data->suspend_mutex);
 	return retval;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
+#if defined(CONFIG_HAS_EARLYSUSPEND) && \
+			!defined(CONFIG_RMI4_SPECIAL_EARLYSUSPEND)
+static void standard_early_suspend(struct early_suspend *h)
+{
+	struct rmi_device *rmi_dev =
+	    container_of(h, struct rmi_device, early_suspend_handler);
+	struct rmi_driver_data *data;
+	struct rmi_function_container *entry;
+	int retval = 0;
+
+	data = rmi_get_driverdata(rmi_dev);
+
+	mutex_lock(&data->suspend_mutex);
+	if (data->early_suspended)
+		goto exit;
+
+	if (data->pre_suspend) {
+		retval = data->pre_suspend(data->pm_data);
+		if (retval) {
+			dev_err(&rmi_dev->dev, "Presuspend failed with %d.\n",
+				retval);
+			goto exit;
+		}
+	}
+
+	list_for_each_entry(entry, &data->rmi_functions.list, list)
+		if (entry->fh && entry->fh->early_suspend) {
+			retval = entry->fh->early_suspend(entry);
+			if (retval < 0) {
+				dev_err(&rmi_dev->dev, "F%02x early suspend failed with %d.\n",
+					entry->fd.function_number, retval);
+				goto exit;
+			}
+		}
+
+	if (data->f01_container && data->f01_container->fh
+				&& data->f01_container->fh->early_suspend) {
+		retval = data->f01_container->fh->early_suspend(
+				data->f01_container);
+		if (retval < 0) {
+			dev_err(&rmi_dev->dev, "F01 early suspend failed with %d.\n",
+				retval);
+			goto exit;
+		}
+	}
+
+	data->early_suspended = true;
+exit:
+	mutex_unlock(&data->suspend_mutex);
+}
+
+static void standard_late_resume(struct early_suspend *h)
+{
+	struct rmi_device *rmi_dev =
+	    container_of(h, struct rmi_device, early_suspend_handler);
+	struct rmi_driver_data *data;
+	struct rmi_function_container *entry;
+	int retval = 0;
+
+	data = rmi_get_driverdata(rmi_dev);
+
+	mutex_lock(&data->suspend_mutex);
+	if (!data->early_suspended)
+		goto exit;
+
+	if (data->f01_container && data->f01_container->fh
+				&& data->f01_container->fh->late_resume) {
+		retval = data->f01_container->fh->late_resume(
+				data->f01_container);
+		if (retval < 0) {
+			dev_err(&rmi_dev->dev, "F01 late resume failed with %d.\n",
+				retval);
+			goto exit;
+		}
+	}
+
+	list_for_each_entry(entry, &data->rmi_functions.list, list)
+		if (entry->fh && entry->fh->late_resume) {
+			retval = entry->fh->late_resume(entry);
+			if (retval < 0) {
+				dev_err(&rmi_dev->dev, "F%02X late resume failed with %d.\n",
+					entry->fd.function_number, retval);
+				goto exit;
+			}
+		}
+
+	if (data->post_resume) {
+		retval = data->post_resume(data->pm_data);
+		if (retval) {
+			dev_err(&rmi_dev->dev, "Post resume failed with %d.\n",
+				retval);
+			goto exit;
+		}
+	}
+
+	data->early_suspended = false;
+
+exit:
+	mutex_unlock(&data->suspend_mutex);
+}
+#endif /* defined(CONFIG_HAS_EARLYSUSPEND) && !de... */
+
+#ifdef CONFIG_RMI4_SPECIAL_EARLYSUSPEND
+static int rmi_driver_suspend(struct device *dev)
+{
+	return 0;
+}
+
+static int rmi_driver_resume(struct device *dev)
+{
+	return 0;
+}
+
 static void rmi_driver_early_suspend(struct early_suspend *h)
 {
 	struct rmi_device *rmi_dev =
 	    container_of(h, struct rmi_device, early_suspend_handler);
-
-	dev_dbg(&rmi_dev->dev, "Early suspend.\n");
-	rmi_driver_suspend(&rmi_dev->dev);
+	standard_suspend(rmi_dev);
 }
 
 static void rmi_driver_late_resume(struct early_suspend *h)
 {
 	struct rmi_device *rmi_dev =
 	    container_of(h, struct rmi_device, early_suspend_handler);
+	standard_resume(rmi_dev);
+}
+#else
+static int rmi_driver_suspend(struct device *dev)
+{
+	struct rmi_device *rmi_dev = to_rmi_device(dev);
+	return standard_suspend(rmi_dev);
+}
 
-	dev_dbg(&rmi_dev->dev, "Late resume.\n");
-	rmi_driver_resume(&rmi_dev->dev);
+static int rmi_driver_resume(struct device *dev)
+{
+	struct rmi_device *rmi_dev = to_rmi_device(dev);
+	return standard_resume(rmi_dev);
+}
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void rmi_driver_early_suspend(struct early_suspend *h)
+{
+	return standard_early_suspend(h);
+}
+
+static void rmi_driver_late_resume(struct early_suspend *h)
+{
+	return standard_late_resume(h);
 }
 #endif /* CONFIG_HAS_EARLYSUSPEND */
+#endif /* CONFIG_RMI4_SPECIAL_EARLYSUSPEND */
+
 #endif /* CONFIG_PM */
 
 static int __devexit rmi_driver_remove(struct rmi_device *rmi_dev)
@@ -927,6 +1504,13 @@ static int __devexit rmi_driver_remove(struct rmi_device *rmi_dev)
 	struct rmi_function_container *entry;
 	int i;
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	unregister_early_suspend(&rmi_dev->early_suspend_handler);
+#endif /* CONFIG_HAS_EARLYSUSPEND */
+#ifdef	CONFIG_RMI4_DEBUG
+	teardown_debugfs(rmi_dev);
+#endif
+
 	list_for_each_entry(entry, &data->rmi_functions.list, list)
 		if (entry->fh && entry->fh->remove)
 			entry->fh->remove(entry);
@@ -934,6 +1518,8 @@ static int __devexit rmi_driver_remove(struct rmi_device *rmi_dev)
 	rmi_free_function_list(rmi_dev);
 	for (i = 0; i < ARRAY_SIZE(attrs); i++)
 		device_remove_file(&rmi_dev->dev, &attrs[i]);
+	if (data->pdt_props.has_bsr)
+		device_remove_file(&rmi_dev->dev, &bsr_attribute);
 	kfree(data->f01_container->irq_mask);
 	kfree(data->irq_mask_store);
 	kfree(data->current_irq_mask);
@@ -950,13 +1536,14 @@ static UNIVERSAL_DEV_PM_OPS(rmi_driver_pm, rmi_driver_suspend,
 static struct rmi_driver sensor_driver = {
 	.driver = {
 		.owner = THIS_MODULE,
-		.name = "rmi-generic",
+		.name = "rmi_generic",
 #ifdef UNIVERSAL_DEV_PM_OPS
 		.pm = &rmi_driver_pm,
 #endif
 	},
 	.probe = rmi_driver_probe,
 	.irq_handler = rmi_driver_irq_handler,
+	.reset_handler = rmi_driver_reset_handler,
 	.fh_add = rmi_driver_fh_add,
 	.fh_remove = rmi_driver_fh_remove,
 	.get_func_irq_mask = rmi_driver_irq_get_mask,
@@ -965,48 +1552,7 @@ static struct rmi_driver sensor_driver = {
 	.remove = __devexit_p(rmi_driver_remove)
 };
 
-/* Utility routine to handle writes to read-only attributes.  Hopefully
- * this will never happen, but if the user does something stupid, we don't
- * want to accept it quietly (which is what can happen if you just put NULL
- * for the attribute's store function).
- */
-ssize_t rmi_store_error(struct device *dev,
-			struct device_attribute *attr,
-			const char *buf, size_t count)
-{
-	dev_warn(dev,
-		 "RMI4 WARNING: Attempt to write %d characters to read-only "
-		 "attribute %s.", count, attr->attr.name);
-	return -EPERM;
-}
-
-/* Utility routine to handle reads of write-only attributes.  Hopefully
- * this will never happen, but if the user does something stupid, we don't
- * want to accept it quietly (which is what can happen if you just put NULL
- * for the attribute's show function).
- */
-ssize_t rmi_show_error(struct device *dev,
-		       struct device_attribute *attr,
-		       char *buf)
-{
-	dev_warn(dev,
-		 "RMI4 WARNING: Attempt to read from write-only attribute %s.",
-		 attr->attr.name);
-	return -EPERM;
-}
-
 /* sysfs show and store fns for driver attributes */
-static ssize_t rmi_driver_hasbsr_show(struct device *dev,
-				      struct device_attribute *attr,
-				      char *buf)
-{
-	struct rmi_device *rmi_dev;
-	struct rmi_driver_data *data;
-	rmi_dev = to_rmi_device(dev);
-	data = rmi_get_driverdata(rmi_dev);
-
-	return snprintf(buf, PAGE_SIZE, "%u\n", has_bsr(data));
-}
 
 static ssize_t rmi_driver_bsr_show(struct device *dev,
 				   struct device_attribute *attr, char *buf)
@@ -1048,30 +1594,6 @@ static ssize_t rmi_driver_bsr_store(struct device *dev,
 	data->bsr = val;
 
 	return count;
-}
-
-static void disable_sensor(struct rmi_device *rmi_dev)
-{
-	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
-
-	rmi_dev->phys->disable_device(rmi_dev->phys);
-
-	data->enabled = false;
-}
-
-static int enable_sensor(struct rmi_device *rmi_dev)
-{
-	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
-	int retval = 0;
-
-	retval = rmi_dev->phys->enable_device(rmi_dev->phys);
-	/* non-zero means error occurred */
-	if (retval)
-		return retval;
-
-	data->enabled = true;
-
-	return 0;
 }
 
 static ssize_t rmi_driver_enabled_show(struct device *dev,
@@ -1125,7 +1647,7 @@ static ssize_t rmi_driver_reg_store(struct device *dev,
 					const char *buf, size_t count)
 {
 	int retval;
-	unsigned int address;
+	u32 address;	/* use large addr here so we can catch overflow */
 	unsigned int bytes;
 	struct rmi_device *rmi_dev;
 	struct rmi_driver_data *data;
@@ -1177,104 +1699,6 @@ static ssize_t rmi_driver_reg_store(struct device *dev,
 }
 #endif
 
-#if DELAY_DEBUG
-static ssize_t rmi_delay_store(struct device *dev,
-					struct device_attribute *attr,
-					const char *buf, size_t count)
-{
-	int retval;
-	struct rmi_device *rmi_dev;
-	struct rmi_device_platform_data *pdata;
-	unsigned int new_read_delay;
-	unsigned int new_write_delay;
-	unsigned int new_block_delay;
-	unsigned int new_pre_delay;
-	unsigned int new_post_delay;
-
-	retval = sscanf(buf, "%u %u %u %u %u", &new_read_delay,
-			&new_write_delay, &new_block_delay,
-			&new_pre_delay, &new_post_delay);
-	if (retval != 5) {
-		dev_err(dev, "Incorrect number of values provided for delay.");
-		return -EINVAL;
-	}
-	if (new_read_delay < 0) {
-		dev_err(dev, "Byte delay must be positive microseconds.\n");
-		return -EINVAL;
-	}
-	if (new_write_delay < 0) {
-		dev_err(dev, "Write delay must be positive microseconds.\n");
-		return -EINVAL;
-	}
-	if (new_block_delay < 0) {
-		dev_err(dev, "Block delay must be positive microseconds.\n");
-		return -EINVAL;
-	}
-	if (new_pre_delay < 0) {
-		dev_err(dev,
-			"Pre-transfer delay must be positive microseconds.\n");
-		return -EINVAL;
-	}
-	if (new_post_delay < 0) {
-		dev_err(dev,
-			"Post-transfer delay must be positive microseconds.\n");
-		return -EINVAL;
-	}
-
-	rmi_dev = to_rmi_device(dev);
-	pdata = rmi_dev->phys->dev->platform_data;
-
-	dev_info(dev, "Setting delays to %u %u %u %u %u.\n", new_read_delay,
-		 new_write_delay, new_block_delay, new_pre_delay,
-		 new_post_delay);
-	pdata->spi_data.read_delay_us = new_read_delay;
-	pdata->spi_data.write_delay_us = new_write_delay;
-	pdata->spi_data.block_delay_us = new_block_delay;
-	pdata->spi_data.pre_delay_us = new_pre_delay;
-	pdata->spi_data.post_delay_us = new_post_delay;
-
-	return count;
-}
-
-static ssize_t rmi_delay_show(struct device *dev,
-				       struct device_attribute *attr, char *buf)
-{
-	struct rmi_device *rmi_dev;
-	struct rmi_device_platform_data *pdata;
-
-	rmi_dev = to_rmi_device(dev);
-	pdata = rmi_dev->phys->dev->platform_data;
-
-	return snprintf(buf, PAGE_SIZE, "%d %d %d %d %d\n",
-		pdata->spi_data.read_delay_us, pdata->spi_data.write_delay_us,
-		pdata->spi_data.block_delay_us,
-		pdata->spi_data.pre_delay_us, pdata->spi_data.post_delay_us);
-}
-#endif
-
-static ssize_t rmi_driver_phys_show(struct device *dev,
-				       struct device_attribute *attr, char *buf)
-{
-	struct rmi_device *rmi_dev;
-	struct rmi_phys_info *info;
-
-	rmi_dev = to_rmi_device(dev);
-	info = &rmi_dev->phys->info;
-
-	return snprintf(buf, PAGE_SIZE, "%-5s %ld %ld %ld %ld %ld %ld %ld\n",
-		 info->proto ? info->proto : "unk",
-		 info->tx_count, info->tx_bytes, info->tx_errs,
-		 info->rx_count, info->rx_bytes, info->rx_errs,
-		 info->attn_count);
-}
-
-static ssize_t rmi_driver_version_show(struct device *dev,
-				       struct device_attribute *attr, char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "%s\n",
-		 RMI_DRIVER_VERSION_STRING);
-}
-
 static int __init rmi_driver_init(void)
 {
 	return rmi_register_driver(&sensor_driver);
@@ -1288,6 +1712,7 @@ static void __exit rmi_driver_exit(void)
 module_init(rmi_driver_init);
 module_exit(rmi_driver_exit);
 
-MODULE_AUTHOR("Eric Andersson <eric.andersson@unixphere.com>");
+MODULE_AUTHOR("Christopher Heiny <cheiny@synaptics.com");
 MODULE_DESCRIPTION("RMI generic driver");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(RMI_DRIVER_VERSION);
