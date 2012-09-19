@@ -45,6 +45,8 @@
 #include <asm/ptrace.h>
 #include <asm/irq_regs.h>
 
+extern int log_buf_copy(char *dest, int idx, int len);
+
 /* Whether we react on sysrq keys or just ignore them */
 static int __read_mostly sysrq_enabled = SYSRQ_DEFAULT_ENABLE;
 static bool __read_mostly sysrq_always_enabled;
@@ -359,6 +361,43 @@ static struct sysrq_key_op sysrq_moom_op = {
 	.enable_mask	= SYSRQ_ENABLE_SIGNAL,
 };
 
+
+/* Taken from fiq debugger */
+static void dump_kernel_log(void)
+{
+	char buf[1024];
+	int idx = 0;
+	int ret;
+	int saved_oip;
+
+	/* setting oops_in_progress prevents log_buf_copy()
+	 * from trying to take a spinlock which will make it
+	 * very unhappy in some cases...
+	 */
+	saved_oip = oops_in_progress;
+	oops_in_progress = 1;
+	for (;;) {
+		ret = log_buf_copy(buf, idx, 1023);
+		if (ret <= 0)
+			break;
+		buf[ret] = 0;
+		/* debug_puts(state, buf); */
+		printk("%s\n", buf);
+		idx += ret;
+	}
+	oops_in_progress = saved_oip;
+}
+static void sysrq_handle_kmsg(int key)
+{
+	dump_kernel_log();
+}
+static struct sysrq_key_op sysrq_kmsg_op = {
+	.handler	= sysrq_handle_kmsg,
+	.help_msg	= "kmsg dump(G)",
+	.action_msg	= "Kernel Message Dump",
+	.enable_mask	= SYSRQ_ENABLE_SIGNAL,
+};
+
 #ifdef CONFIG_BLOCK
 static void sysrq_handle_thaw(int key)
 {
@@ -421,7 +460,7 @@ static struct sysrq_key_op *sysrq_key_table[36] = {
 	&sysrq_term_op,			/* e */
 	&sysrq_moom_op,			/* f */
 	/* g: May be registered for the kernel debugger */
-	NULL,				/* g */
+	&sysrq_kmsg_op,				/* g */
 	NULL,				/* h - reserved for help */
 	&sysrq_kill_op,			/* i */
 #ifdef CONFIG_BLOCK
