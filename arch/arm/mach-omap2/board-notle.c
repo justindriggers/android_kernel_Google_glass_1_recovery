@@ -200,6 +200,10 @@ static void notle_version_init(void)
         NOTLE_VERSION = gpio_get_value(GPIO_ID0) | (gpio_get_value(GPIO_ID1) << 1)
             | (gpio_get_value(GPIO_ID2) << 2);
 
+        gpio_free(GPIO_ID0);
+        gpio_free(GPIO_ID1);
+        gpio_free(GPIO_ID2);
+
 }
 
 
