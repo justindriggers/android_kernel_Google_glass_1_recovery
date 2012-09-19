@@ -223,12 +223,9 @@ static int rmi_i2c_read(struct rmi_phys_device *phys, u16 addr, u8 *buf)
 
 static int acquire_attn_irq(struct rmi_i2c_data *data)
 {
-	int rc = 0;
 	const char *name = "touchpad";
-	request_threaded_irq(data->irq, NULL, rmi_i2c_irq_thread,
+	return request_threaded_irq(data->irq, NULL, rmi_i2c_irq_thread,
 	                     data->irq_flags, name, data->phys);
-	disable_irq(data->irq);
-	return rc;
 }
 
 static int enable_device(struct rmi_phys_device *phys)
@@ -379,6 +376,7 @@ static int __devinit rmi_i2c_probe(struct i2c_client *client,
 				pdata->attn_gpio);
 			goto err_unregister;
 		}
+		disable_irq(data->irq);
 	}
 
 #if defined(CONFIG_RMI4_DEV)
