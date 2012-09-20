@@ -1677,7 +1677,9 @@ static void __init notle_i2c_irq_fixup(void)
 notle_glasshub_data.gpio_int_no = gpio_prox;
 #endif
 
+#ifdef CONFIG_RMI4_BUS
     notle_touchpad_gpio_data.gpio_num = gpio_touchpad;
+#endif
 
     // Now fixup the irqs set in the various 2c boardinfo structs
     pinfo = notle_i2c_4_boardinfo;
