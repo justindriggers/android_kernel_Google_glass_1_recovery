@@ -22,6 +22,11 @@
  *#############################################################################
  */
 
+#ifdef CONFIG_WAKELOCK
+#include <linux/wakelock.h>
+#define WAKELOCK_TIMEOUT_IN_MS 250
+#endif
+
 #include <linux/kernel.h>
 #include <linux/device.h>
 #include <linux/delay.h>
@@ -177,8 +182,17 @@ struct f11_instance_data {
 	unsigned char gesture_data_offset;
 	unsigned char *finger_data_buffer;
 	int last_finger_down_count;
-	int suspended;
-	int synth_keys_sent;
+#define NUM_SYNTH_KEYS_PER_SUSPEND 1
+        bool suspended;
+        int last_finger_pressed_count;
+        int synth_events_sent;
+        unsigned int movement_seq_cnt;
+        unsigned int last_suspend_cnt;
+        u8 finger_tracker[8];
+
+#ifdef CONFIG_WAKELOCK
+        struct wake_lock wakelock;
+#endif
 
 	unsigned int old_X;
 	unsigned int old_Y;
@@ -290,6 +304,8 @@ static struct device_attribute attrs[] = {
 
 static void handle_absolute_reports(struct rmi_function_info *rmifninfo);
 static void handle_relative_report(struct rmi_function_info *rmifninfo);
+
+extern unsigned int get_suspend_cnt(void);
 
 /*
  * Read the device query register and extract interesting data.
@@ -646,6 +662,17 @@ static enum finger_state get_finger_state(unsigned char finger,
 	return (buffer[finger_byte] >> finger_shift) & FINGER_STATE_MASK;
 }
 
+static int send_synth_key(struct f11_instance_data *f11, int finger_pressed_count)
+{
+        if (f11->suspended && (f11->last_suspend_cnt != get_suspend_cnt())
+            && finger_pressed_count == 0 && (f11->synth_events_sent < NUM_SYNTH_KEYS_PER_SUSPEND)
+            && !wake_lock_active(&f11->wakelock))
+        {
+                return 1;
+        }
+        return 0;
+}
+
 /*
  * This reads in a sample and reports the function $11 source data to the
  * input subsystem. It is used for both polling and interrupt driven
@@ -661,6 +688,8 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 	struct rmi_function_device *function_device =
 			rmifninfo->function_device;
 	struct f11_instance_data *instance_data = rmifninfo->fndata;
+	/* Alias for backporting */
+	struct f11_instance_data *f11 = instance_data;
 	int retval;
 
 	/* get 2D sensor finger data */
@@ -686,32 +715,6 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 		}
 	}
 
-	if (finger_down_count == 0 && instance_data->last_finger_down_count == 0 && instance_data->suspended
-	    && instance_data->synth_keys_sent < NUM_SYNTH_KEYS_PER_SUSPEND) {
-		/* We were interrupted while in a suspend state and there
-		 * were no fingers detected by the time we polled the sensor.
-		 * Craft an event sequence to force an ACTION_DOWN
-		 * and ACTION_UP to be propogated through the Android InputEvent
-		 * stack to allow the device to wakeup.
-		 */
-		input_report_key(function_device->input, BTN_TOUCH, 1);
-#if defined(ABS_MT_PRESSURE)
-		/* We have to apply a non-zero pressure or the Android InputEvent
-		 * layer will consider this a hover event. */
-		input_report_abs(function_device->input, ABS_MT_PRESSURE, 1);
-#endif
-		input_sync(function_device->input); /* sync after groups of events */
-
-		/* Keep track of count of synthesized keys per suspend cycle. */
-		instance_data->synth_keys_sent++;
-
-		dev_info(&function_device->dev, "Created synthesized movement event cnt:%d\n",
-		         instance_data->synth_keys_sent);
-	}
-	/* This key info is used to enter and exit hover mode in the Android stack. */
-	input_report_key(function_device->input, BTN_TOUCH, finger_down_count);
-	instance_data->last_finger_down_count = finger_down_count;
-
 	if (instance_data->sensor_info->has_absolute)
 		handle_absolute_reports(rmifninfo);
 
@@ -719,6 +722,45 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 			instance_data->rel_report_enabled)
 		handle_relative_report(rmifninfo);
 
+        if (send_synth_key(f11, finger_down_count)) {
+#if defined(ABS_MT_PRESSURE)
+                /* We have to supply the minimum values required to get event through
+                   Android InputEvent layer */
+                input_report_abs(function_device->input, ABS_MT_PRESSURE, 1);
+#endif
+                input_mt_sync(function_device->input);
+                input_sync(function_device->input); /* sync after groups of events */
+
+                input_mt_sync(function_device->input);
+                input_sync(function_device->input); /* sync after groups of events */
+
+                /* Keep track of count of synthesized keys per suspend cycle. */
+                f11->synth_events_sent++;
+
+                pr_info("%s Created synthesized movement event cnt:%d\n",
+                        __func__, f11->synth_events_sent);
+                return;
+        }
+
+        /* CMM Debugging loggging */
+        if (f11->last_finger_down_count == 0 && finger_down_count != 0) {
+                pr_info("%s Starting movement sequence cnt:%d\n", __func__, f11->movement_seq_cnt);
+        }
+        if (f11->last_finger_down_count != 0 && finger_down_count == 0) {
+                pr_info("%s Ending movement sequence cnt:%d\n", __func__, f11->movement_seq_cnt);
+                f11->movement_seq_cnt = 0;
+        }
+        if (f11->last_finger_down_count == 0 && finger_down_count == 0) {
+                pr_info("%s Extraneous event\n", __func__);
+        } else {
+                f11->movement_seq_cnt++;
+        }
+
+        if (finger_down_count) {
+                wake_lock_timeout(&f11->wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
+        }
+
+	instance_data->last_finger_down_count = finger_down_count;
 	input_sync(function_device->input); /* sync after groups of events */
 
 }
@@ -738,9 +780,25 @@ static void handle_absolute_reports(struct rmi_function_info *rmifninfo)
 				instance_data->finger_data_buffer);
 		int X = 0, Y = 0, Z = 0, Wy = 0, Wx = 0;
 
+		int prev_state = instance_data->finger_tracker[finger];
+
 		/* if finger status indicates a finger is present then
 		 *   extract the finger data and report it */
-		if (finger_status == F11_PRESENT
+		if (finger_status == F11_NO_FINGER) {
+			if (prev_state) {
+				/* this is a release */
+
+				/* MT sync between fingers */
+				input_report_abs(function_device->input, ABS_MT_TRACKING_ID, finger);
+				input_mt_sync(function_device->input);
+				instance_data->finger_tracker[finger] = finger_status;
+				continue;
+			} else {
+				/* nothing to report */
+				continue;
+			}
+
+		} else if (finger_status == F11_PRESENT
 				|| finger_status == F11_INACCURATE) {
 			int max_X = instance_data->control_registers->
 				sensor_max_X_pos;
@@ -750,6 +808,7 @@ static void handle_absolute_reports(struct rmi_function_info *rmifninfo)
 				(finger * instance_data->abs_data_size);
 
 			finger_down_count++;
+			instance_data->finger_tracker[finger] = finger_status;
 
 			X = ((instance_data->finger_data_buffer[reg +
 					X_HIGH_BITS_OFFSET] <<
@@ -971,6 +1030,8 @@ static void f11_set_abs_params(struct rmi_function_device *function_device)
 int FN_11_init(struct rmi_function_device *function_device)
 {
 	struct f11_instance_data *instance_data = function_device->rfi->fndata;
+        /* Alias for backporting */
+        struct f11_instance_data *f11 = instance_data;
 	int retval = 0;
 	int attr_count = 0;
 	struct rmi_f11_functiondata *functiondata =
@@ -1036,7 +1097,10 @@ int FN_11_init(struct rmi_function_device *function_device)
 	/* need to init the input abs params for the 2D */
 	set_bit(EV_ABS, function_device->input->evbit);
 	set_bit(EV_SYN, function_device->input->evbit);
-	input_set_capability(function_device->input, EV_KEY, BTN_TOUCH);
+
+#ifdef CONFIG_WAKELOCK
+        wake_lock_init(&f11->wakelock, WAKE_LOCK_SUSPEND, "touchpad_wakelock");
+#endif
 
 	f11_set_abs_params(function_device);
 
@@ -1183,7 +1247,8 @@ int FN_11_suspend(struct rmi_function_info *rmifninfo)
 {
         struct f11_instance_data *instance = rmifninfo->fndata;
         instance->suspended = 1;
-        instance->synth_keys_sent = 0;
+	instance->last_suspend_cnt = get_suspend_cnt();
+        instance->synth_events_sent = 0;
         dev_info(&rmifninfo->function_device->dev, "%s Suspended touchpad\n", __FUNCTION__);
         return 0;
 }

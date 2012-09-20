@@ -311,10 +311,11 @@ static int
 acquire_attn_irq(struct instance_data *instance_data)
 {
 	int retval;
+	const char *name = "touchpad";
 
 	unsigned long irq_type = IRQ_TYPE_LEVEL_LOW;
 	retval = request_irq(instance_data->irq, i2c_attn_isr,
-			irq_type, "rmi_i2c",
+			irq_type, name,
 		     instance_data);
 	if (retval)
 		return retval;
