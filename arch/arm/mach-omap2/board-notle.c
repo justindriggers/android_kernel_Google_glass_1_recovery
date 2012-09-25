@@ -116,6 +116,24 @@ static notle_version NOTLE_VERSION = UNVERSIONED;
 
 // gpio pin assignment settings for various board types
 // TODO(jscarr) get rid of common, or put in complete set
+// HOG support is needed for a little longer, HOG & EVT1 were similar
+static int notle_gpio_board_hog[GPIO_MAX_INDEX] = {
+    [GPIO_MPU9000_INT_TIMER_INDEX] = GPIO_MPU9000_INT_TIMER_EVT1,
+    [GPIO_MPU9000_INT_INDEX] = GPIO_MPU9000_INT_EVT1,
+    [GPIO_USB_MUX_CB0_INDEX] = GPIO_USB_MUX_CB0_EVT1,
+    [GPIO_USB_MUX_CB1_INDEX] = GPIO_USB_MUX_CB1,
+    [GPIO_GPS_ON_OFF_INDEX] = GPIO_GPS_ON_OFF_EVT1,
+    [GPIO_GPS_RESET_N_INDEX] = GPIO_GPS_RESET_N_EVT1,
+    [GPIO_LCD_RST_N_INDEX] = GPIO_LCD_RST_N_EVT1,
+    [GPIO_DISP_ENB_INDEX] = GPIO_DISP_ENB,
+    [GPIO_BT_RST_N_INDEX] = GPIO_BT_RST_N_EVT1,
+    [GPIO_CAM_PWDN_INDEX] = GPIO_CAM_PWDN_EVT1,
+    [GPIO_TOUCHPAD_INT_N_INDEX] = GPIO_TOUCHPAD_INT_N_EVT1,
+    [GPIO_PROX_INT_INDEX] = GPIO_PROX_INT_EVT1,
+    [GPIO_BT_RST_N_INDEX] = GPIO_BT_RST_N_EVT1,
+    [GPIO_BCM_BT_HOST_WAKE_INDEX] = GPIO_BCM_BT_HOST_WAKE_EVT1,
+    [GPIO_BCM_WLAN_HOST_WAKE_INDEX] = GPIO_BCM_WLAN_HOST_WAKE_HOG,
+};
 static int notle_gpio_board_evt1[GPIO_MAX_INDEX] = {
     [GPIO_MPU9000_INT_TIMER_INDEX] = GPIO_MPU9000_INT_TIMER_EVT1,
     [GPIO_MPU9000_INT_INDEX] = GPIO_MPU9000_INT_EVT1,
@@ -131,6 +149,7 @@ static int notle_gpio_board_evt1[GPIO_MAX_INDEX] = {
     [GPIO_PROX_INT_INDEX] = GPIO_PROX_INT_EVT1,
     [GPIO_BT_RST_N_INDEX] = GPIO_BT_RST_N_EVT1,
     [GPIO_BCM_BT_HOST_WAKE_INDEX] = GPIO_BCM_BT_HOST_WAKE_EVT1,
+    [GPIO_BCM_WLAN_HOST_WAKE_INDEX] = GPIO_BCM_WLAN_HOST_WAKE_EVT,
 };
 static int notle_gpio_board_evt2[GPIO_MAX_INDEX] = {
     [GPIO_MPU9000_INT_INDEX] = GPIO_MPU9000_INT_EVT2,
@@ -145,6 +164,7 @@ static int notle_gpio_board_evt2[GPIO_MAX_INDEX] = {
     [GPIO_PROX_INT_INDEX] = GPIO_PROX_INT_EVT2,
     [GPIO_BT_RST_N_INDEX] = GPIO_BT_RST_N_EVT2,
     [GPIO_BCM_BT_HOST_WAKE_INDEX] = GPIO_BCM_BT_HOST_WAKE_EVT2,
+    [GPIO_BCM_WLAN_HOST_WAKE_INDEX] = GPIO_BCM_WLAN_HOST_WAKE_EVT,
 };
 
 /* Read board version from GPIO.  Result in NOTLE_VERSION. */
@@ -189,6 +209,8 @@ static char * notle_version_str(notle_version board_ver)
 {
         switch (board_ver)
         {
+        case V1_HOG:
+                return "V1 HOG";
         case V1_EVT1:
                 return "V1 EVT1";
         case V1_EVT2:
@@ -285,6 +307,9 @@ notle_get_gpio(int gpio_index)
     int ret = -1;
 
     switch (NOTLE_VERSION) {
+    case V1_HOG:
+        ret = notle_gpio_board_hog[gpio_index];
+        break;
     case V1_EVT1:
         ret = notle_gpio_board_evt1[gpio_index];
         break;
@@ -296,7 +321,9 @@ notle_get_gpio(int gpio_index)
                notle_version_str(NOTLE_VERSION));
         break;
     }
-    if (ret == 0) {
+    // Special case gpio_wk0
+    if (ret == 0 && NOTLE_VERSION != V1_HOG &&
+            gpio_index != GPIO_BCM_WLAN_HOST_WAKE_INDEX) {
         pr_err("%s:Uninitialized index %d\n", __FUNCTION__, gpio_index);
         ret = -1;
     }
@@ -346,14 +373,14 @@ static void notle_disable_dpi(struct omap_dss_device *dssdev) {
 }
 
 static int notle_enable_panel(void) {
-        if (NOTLE_VERSION == V1_EVT1) {
+        if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
             gpio_set_value(GPIO_DISP_ENB, 1);
         }
         return 0;
 };
 
 static void notle_disable_panel(void) {
-        if (NOTLE_VERSION == V1_EVT1) {
+        if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
             gpio_set_value(GPIO_DISP_ENB, 0);
         }
 };
@@ -408,10 +435,10 @@ int __init notle_dpi_init(void)
         int r;
 
         panel_notle_device.reset_gpio = notle_get_gpio(GPIO_LCD_RST_N_INDEX);
-        if (NOTLE_VERSION == V1_EVT1) {
-            r = gpio_request_one(GPIO_DISP_ENB, GPIOF_OUT_INIT_LOW, "enable_10V");
+        if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
+            r = gpio_request_one(GPIO_DISP_ENB, GPIOF_OUT_INIT_LOW, "disp_enable");
             if (r) {
-                    pr_err("Failed to get display enable/enable_10V gpio\n");
+                    pr_err("Failed to get display enable gpio\n");
                     return r;
             }
         }
@@ -420,13 +447,13 @@ int __init notle_dpi_init(void)
                              GPIOF_OUT_INIT_HIGH, "panel_reset");
         if (r) {
                 pr_err("Failed to get panel reset powerdown GPIO\n");
-                if (NOTLE_VERSION == V1_EVT1) {
+                if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
                     gpio_free(GPIO_DISP_ENB);
                 }
                 return r;
         }
 
-        if (NOTLE_VERSION == V1_EVT1 ||
+        if (NOTLE_VERSION == V1_HOG || NOTLE_VERSION == V1_EVT1 ||
             NOTLE_VERSION == V1_EVT2) {
           spi_register_board_info(ice40_spi_board_info,
                                   ARRAY_SIZE(ice40_spi_board_info));
@@ -614,7 +641,7 @@ static struct regulator_init_data notle_vaux2 = {
         .consumer_supplies = notle_cam2_supply,
 };
 
-static struct regulator_init_data hog_vaux3 = {
+static struct regulator_init_data notle_vaux3 = {
 	.constraints = {
 		.min_uV			= 1200000,
 		.max_uV			= 1200000,
@@ -1079,7 +1106,7 @@ static struct twl4030_platform_data notle_twldata = {
 	.vusb		= &notle_vusb,
 	.vaux1		= &notle_vaux1,
 	.vaux2		= &notle_vaux2,
-	.vaux3		= &hog_vaux3,
+	.vaux3		= &notle_vaux3,
 	.clk32kg	= &omap4_notle_clk32kg,
 	.usb		= &omap4_usbphy_data,
 
@@ -1420,7 +1447,7 @@ static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
  * i2c-4
  */
 /* MPU */
-static struct mpu_platform_data mpu9150_hog_data = {
+static struct mpu_platform_data mpu9150_notle_data = {
         .int_config     = 0x10,
         .orientation    = { 0, 1, 0,
                             0, 0, 1,
@@ -1439,8 +1466,6 @@ static struct mpu_platform_data mpu9150_hog_data = {
 // gpio_int_no is board specific
 #ifdef CONFIG_INPUT_LTR506ALS
 static struct ltr506_platform_data notle_ltr506als_data = {
-	/* Interrupt */
-
 	/* Boolean to allow interrupt to wake device or not */
 	.pfd_gpio_int_wake_dev = 0,
 
@@ -1588,7 +1613,7 @@ static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
         },
         {
                 I2C_BOARD_INFO("mpu9150", 0x68),
-                .platform_data = &mpu9150_hog_data,
+                .platform_data = &mpu9150_notle_data,
         },
 #ifdef CONFIG_INPUT_LTR506ALS
         {
@@ -1707,6 +1732,7 @@ static int __init notle_i2c_init(void)
         omap_register_i2c_bus_board_data(4, &notle_i2c_4_bus_pdata);
 
         switch (NOTLE_VERSION) {
+          case V1_HOG:
           case V1_EVT1:
           case V1_EVT2:
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
@@ -1733,15 +1759,51 @@ static int __init notle_i2c_init(void)
 
 #ifdef CONFIG_OMAP_MUX
 // Board specific MUX settings
-// EVT1 Core:
-static struct omap_board_mux evt1_board_mux[] __initdata = {
+// HOG Core:
+static struct omap_board_mux hog_board_mux[] __initdata = {
+    OMAP4_MUX(GPMC_AD12,            OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BCM_BT_WAKE
+    OMAP4_MUX(GPMC_A19,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // WL_RST_N
     OMAP4_MUX(GPMC_A20,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // USB_MUX_CB0
     OMAP4_MUX(GPMC_A21,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // USB_MUX_CB1
+    OMAP4_MUX(GPMC_A24,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // WL_BT_REG_ON
     OMAP4_MUX(GPMC_A25,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GPS_ON_OFF
     OMAP4_MUX(GPMC_NCS2,            OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GPS_RESET_N
     OMAP4_MUX(GPMC_NCS3,            OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // LCD_RST_N
-    OMAP4_MUX(USBB1_ULPITLL_CLK,    OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // DISP_ENB (EN_10V)
+    OMAP4_MUX(USBB1_ULPITLL_CLK,    OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // DISP_ENB
+    OMAP4_MUX(USBB1_HSIC_STROBE,    OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),  // BCM_WLAN_HOST_WAKE_HOG
+    OMAP4_MUX(USBB2_HSIC_STROBE,    OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BCM_WLAN_WAKE
     OMAP4_MUX(MCSPI4_CLK,           OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BT_RST_N
+    OMAP4_MUX(MCSPI4_CS0,           OMAP_MUX_MODE3 | OMAP_PIN_INPUT),   // BCM_BT_HOST_WAKE
+    OMAP4_MUX(USBB1_ULPITLL_DAT3,   OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // CAM_PWDN
+    OMAP4_MUX(USBB1_ULPITLL_DAT5,   OMAP_MUX_MODE7 | OMAP_PULL_ENA),    // BACKLIGHT XXX Remove? NC on EVT1
+    OMAP4_MUX(ABE_DMIC_DIN2,        OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN),    // CAMERA, TOP_SW
+    OMAP4_MUX(GPMC_AD8,             OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN),    // TOUCHPAD_INT_N
+    OMAP4_MUX(USBB1_ULPITLL_DAT2,   OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // PROX_INT
+    OMAP4_MUX(USBB1_ULPITLL_DAT7,   OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),           // MPU9000_INT
+    OMAP4_MUX(USBB1_ULPITLL_DAT4,   OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),           // MPU9000_INT_TIMER
+	{ .reg_offset = OMAP_MUX_TERMINATOR },
+};
+// HOG WakeUp:
+static struct omap_board_mux hog_board_wkup_mux[] __initdata = {
+    OMAP4_MUX(FREF_CLK4_REQ, OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GREEN_LED
+    OMAP4_MUX(FREF_CLK4_OUT, OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // YELLOW_LED
+	{ .reg_offset = OMAP_MUX_TERMINATOR },
+};
+
+// EVT1 Core:
+static struct omap_board_mux evt1_board_mux[] __initdata = {
+    OMAP4_MUX(GPMC_AD12,            OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BCM_BT_WAKE
+    OMAP4_MUX(GPMC_A19,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // WL_RST_N
+    OMAP4_MUX(GPMC_A20,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // USB_MUX_CB0
+    OMAP4_MUX(GPMC_A21,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // USB_MUX_CB1
+    OMAP4_MUX(GPMC_A24,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // WL_BT_REG_ON
+    OMAP4_MUX(GPMC_A25,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GPS_ON_OFF
+    OMAP4_MUX(GPMC_NCS2,            OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GPS_RESET_N
+    OMAP4_MUX(GPMC_NCS3,            OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // LCD_RST_N
+    OMAP4_MUX(USBB1_ULPITLL_CLK,    OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // DISP_ENB
+    OMAP4_MUX(USBB2_HSIC_STROBE,    OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BCM_WLAN_WAKE
+    OMAP4_MUX(MCSPI4_CLK,           OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BT_RST_N
+    OMAP4_MUX(MCSPI4_CS0,           OMAP_MUX_MODE3 | OMAP_PIN_INPUT),   // BCM_BT_HOST_WAKE
     OMAP4_MUX(USBB1_ULPITLL_DAT3,   OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // CAM_PWDN
     OMAP4_MUX(USBB1_ULPITLL_DAT5,   OMAP_MUX_MODE7 | OMAP_PULL_ENA),    // BACKLIGHT XXX Remove? NC on EVT1
     OMAP4_MUX(ABE_DMIC_DIN2,        OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN),    // CAMERA, TOP_SW
@@ -1753,18 +1815,24 @@ static struct omap_board_mux evt1_board_mux[] __initdata = {
 };
 // EVT1 WakeUp:
 static struct omap_board_mux evt1_board_wkup_mux[] __initdata = {
-    OMAP4_MUX(FREF_CLK4_REQ, OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GREEN_LED
-    OMAP4_MUX(FREF_CLK4_OUT, OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // YELLOW_LED
+    OMAP4_MUX(SIM_IO,               OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),  // BCM_WLAN_HOST_WAKE
+    OMAP4_MUX(FREF_CLK4_REQ,        OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GREEN_LED
+    OMAP4_MUX(FREF_CLK4_OUT,        OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // YELLOW_LED
 	{ .reg_offset = OMAP_MUX_TERMINATOR },
 };
 
 // EVT2 Core:
 static struct omap_board_mux evt2_board_mux[] __initdata = {
+    OMAP4_MUX(GPMC_AD12,            OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BCM_BT_WAKE
+    OMAP4_MUX(GPMC_A19,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // WL_RST_N
     OMAP4_MUX(GPMC_A22,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // USB_MUX_CB0
     OMAP4_MUX(GPMC_A21,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // USB_MUX_CB1
+    OMAP4_MUX(GPMC_A24,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // WL_BT_REG_ON
     OMAP4_MUX(MCSPI1_CS2,           OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GPS_ON_OFF
     OMAP4_MUX(MCSPI1_CS3,           OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GPS_RESET_N
     OMAP4_MUX(USBB1_ULPITLL_DAT6,   OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // LCD_RST_N
+    OMAP4_MUX(USBB2_HSIC_STROBE,    OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BCM_WLAN_WAKE
+    OMAP4_MUX(MCSPI4_CS0,           OMAP_MUX_MODE3 | OMAP_PIN_INPUT),   // BCM_BT_HOST_WAKE
     OMAP4_MUX(ABE_MCBSP2_FSX,       OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BT_RST_N
     OMAP4_MUX(SDMMC1_CLK,           OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // CAM_PWDN
     OMAP4_MUX(ABE_DMIC_DIN2,        OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN),    // CAMERA, TOP_SW
@@ -1772,6 +1840,7 @@ static struct omap_board_mux evt2_board_mux[] __initdata = {
 };
 // EVT2 WakeUp:
 static struct omap_board_mux evt2_board_wkup_mux[] __initdata = {
+    OMAP4_MUX(SIM_IO,               OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),  // BCM_WLAN_HOST_WAKE
     OMAP4_MUX(FREF_CLK3_REQ,        OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN),    // CAMERA, TOP_SW
     OMAP4_MUX(SIM_CD,               OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN),    // TOUCHPAD_INT_N
     OMAP4_MUX(SIM_CLK,              OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // PROX_INT
@@ -1912,7 +1981,7 @@ static int __init notle_imu_init(void) {
 
         /* Configuration of requested GPIO line */
 
-        if (NOTLE_VERSION == V1_EVT1) {
+        if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
             gpio_mpu9000_int_timer = notle_get_gpio(GPIO_MPU9000_INT_TIMER_INDEX);
             r = gpio_request_one(gpio_mpu9000_int_timer, GPIOF_IN, "mpuirq_timer");
             if (r) {
@@ -1956,8 +2025,6 @@ static int __init notle_glasshub_init(void) {
 }
 #endif
 
-#ifndef BACKLIGHT_HACK
-// TODO  Can all of this be deleted??
 static void notle_dmtimer_pwm_enable(void) {
         // pwm timer output:
         omap_mux_init_signal("usbb1_ulpitll_dat5.dmtimer9_pwm_evt", 0);
@@ -2006,45 +2073,6 @@ static int __init notle_pwm_backlight_init(void) {
    be called after device initialization is finished.
 */
 late_initcall(notle_pwm_backlight_init);
-#else
-static int notle_backlight_hack(void) {
-        // *** Adjust this value to set the backlight brightness. ***
-        float brightness = .01;
-        struct omap_dm_timer* notle_pwm_timer;
-        const unsigned int sys_clock_hz = 19200000;
-        // This wants to be high enough we don't see flicker,
-        // but if it's too high, the display just blanks when
-        // set to a 1% duty cycle.
-        const unsigned int pwm_rate_hz = 991;
-        unsigned int denom = sys_clock_hz / pwm_rate_hz;
-        unsigned int num = denom * brightness;
-        const unsigned int max = 0xffffffff;
-
-        if (num > denom) num = denom;
-        if (num == denom) {
-                num = 0xfffffffe;
-                denom = 0xffffffff;
-        }
-
-        notle_pwm_timer = omap_dm_timer_request_specific(PWM_TIMER);
-        if (!notle_pwm_timer) {
-                return -1;
-        }
-        omap_dm_timer_set_source(notle_pwm_timer, OMAP_TIMER_SRC_SYS_CLK);
-        // pwm mode, turn it on, toggle, not pulse, and change on both
-        // compare and overflow.
-        omap_dm_timer_set_pwm(notle_pwm_timer, 1, 1,
-                OMAP_TIMER_TRIGGER_OVERFLOW_AND_COMPARE);
-        omap_dm_timer_set_load_start(notle_pwm_timer, 1, max - denom);
-        omap_dm_timer_set_match(notle_pwm_timer, 1, max - num);
-
-        __raw_writew(OMAP_MUX_MODE1, CORE_BASE_ADDR + MUX_BACKLIGHT);
-        pr_info("Set brightness to %i via BACKLIGHT_HACK\n", (int)(brightness * 100));
-        return 0;
-}
-late_initcall(notle_backlight_hack);
-
-#endif
 
 #define TWL6030_SW_RESET_BIT_MASK       (1<<6)
 
@@ -2131,14 +2159,31 @@ static void __init notle_init(void)
                 package = OMAP_PACKAGE_CBL;
         notle_version_init();
         switch (NOTLE_VERSION) {
+        case V1_HOG:
+            omap4_mux_init(hog_board_mux, hog_board_wkup_mux, package);
+            break;
+
         case V1_EVT1:
             omap4_mux_init(evt1_board_mux, evt1_board_wkup_mux, package);
+
+            // Additional mux/pad settings
+
+            // The GPIOWK_IO_PWRDNZ bit needs to be set after muxing
+            //and before you set it to input
+            omap4_ctrl_wk_pad_writel(OMAP4_USIM_PWRDNZ_MASK,
+                    OMAP4_CTRL_MODULE_PAD_WKUP_CONTROL_USIMIO);
             break;
 
         case V1_EVT2:
             omap4_mux_init(evt2_board_mux, evt2_board_wkup_mux, package);
 
             // Additional mux/pad settings
+
+            // The GPIOWK_IO_PWRDNZ bit needs to be set after muxing
+            //and before you set it to input
+            omap4_ctrl_wk_pad_writel(OMAP4_USIM_PWRDNZ_MASK,
+                    OMAP4_CTRL_MODULE_PAD_WKUP_CONTROL_USIMIO);
+
             // Camera power down on gpio_100 needs the correct voltage of 1.8V
             // wk1 needs correct magic bias settings
             omap_reg = omap4_ctrl_pad_readl(OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_PBIASLITE);
@@ -2179,7 +2224,7 @@ static void __init notle_init(void)
 
         notle_serial_init();
 
-        err = notle_wlan_init(NOTLE_VERSION);
+        err = notle_wlan_init();
         if (err) {
                 pr_err("Wifi initialization failed: %d\n", err);
         }
@@ -2198,13 +2243,10 @@ static void __init notle_init(void)
         // Do this after the wlan_init, which inits the regulator shared
         // with the bluetooth device and muxes the bt signals.
         platform_add_devices(notle_devices, ARRAY_SIZE(notle_devices));
-        // TODO(jscarr) remove if?  no longer board dependent?
-        if (NOTLE_VERSION == V1_EVT1 ||
-            NOTLE_VERSION == V1_EVT2) {
-                err = platform_device_register(&notle_pcb_temp_sensor);
-                if (err) {
-                        pr_err("notle_pcb_temp_sensor registration failed: %d\n", err);
-                }
+
+        err = platform_device_register(&notle_pcb_temp_sensor);
+        if (err) {
+            pr_err("notle_pcb_temp_sensor registration failed: %d\n", err);
         }
 
         err = notle_touchpad_init();
@@ -2219,22 +2261,12 @@ static void __init notle_init(void)
         }
 #endif
 
-        // TODO(jscarr) remove switch?  no longer board dependent?
-        switch (NOTLE_VERSION) {
-          case V1_EVT1:
-          case V1_EVT2:
-            err = notle_dpi_init();
-            if (!err) {
-                    panel_notle.notle_version = NOTLE_VERSION;
-                    omap_display_init(&panel_notle_dss_data);
-            } else {
-                    pr_err("DPI initialization failed: %d\n", err);
-            }
-            break;
-          default:
-            pr_err("No display supported for Notle version: %s\n",
-                   notle_version_str(NOTLE_VERSION));
-            break;
+        err = notle_dpi_init();
+        if (!err) {
+            panel_notle.notle_version = NOTLE_VERSION;
+            omap_display_init(&panel_notle_dss_data);
+        } else {
+            pr_err("DPI initialization failed: %d\n", err);
         }
 
         omap_enable_smartreflex_on_init();

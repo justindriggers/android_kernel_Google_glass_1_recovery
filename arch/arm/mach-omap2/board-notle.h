@@ -24,22 +24,9 @@
 #define MUX(x) OMAP4_CTRL_MODULE_PAD_##x##_OFFSET
 #define CORE_BASE_ADDR 0xfc100000
 
-//#define WKUP_BASE_ADDR 0xfc31e000
-// Choose your board revision.
-#define NOTLE_VERSION_2
-
 // TODO: Figure out why the wlan_wake and wlan_host_wake gpio's
 // are swapped compared to what the hardware docs imply them
 // to be.
-// TODO(jscarr)  XXX move to new scheme
-#define GPIO_BCM_WLAN_HOST_WAKE_EVT1    0
-#define MUX_BCM_BT_HOST_WAKE            MUX(MCSPI4_CS0)
-#define GPIO_BCM_WLAN_WAKE              170
-#define MUX_BCM_WLAN_WAKE               MUX(USBB2_HSIC_STROBE)
-#define MUX_BCM_BT_WAKE                 MUX(GPMC_AD12)
-#define GPIO_WL_RST_N                   43
-#define MUX_WL_RST_N                    MUX(GPMC_A19)
-#define MUX_WL_BT_REG_ON                MUX(GPMC_A24)
 
 // GPIO settings
 // Board ID pins same across all versions
@@ -52,7 +39,6 @@
 #define MUX_ID0                         MUX(GPMC_AD10)
 #define MUX_ID1                         MUX(GPMC_A16)
 #define MUX_ID2                         MUX(GPMC_A18)
-
 
 // For GPIOs that are different between boards
 enum {
@@ -70,6 +56,7 @@ enum {
     GPIO_PROX_INT_INDEX,
     GPIO_BT_RST_N_INDEX,
     GPIO_BCM_BT_HOST_WAKE_INDEX,
+    GPIO_BCM_WLAN_HOST_WAKE_INDEX,
     GPIO_MAX_INDEX
 };
 
@@ -96,7 +83,10 @@ enum {
 #define GPIO_PROX_INT_EVT1              90
 #define GPIO_PROX_INT_EVT2              1
 #define GPIO_AUDIO_POWERON              127
-
+#define GPIO_BCM_WLAN_HOST_WAKE_EVT     0
+#define GPIO_BCM_WLAN_HOST_WAKE_HOG     97
+#define GPIO_BCM_WLAN_WAKE              170
+#define GPIO_WL_RST_N                   43
 #define GPIO_WL_BT_REG_ON               48
 #define GPIO_BCM_BT_WAKE                36
 #define GPIO_BT_RST_N_EVT1              151
@@ -108,12 +98,13 @@ typedef enum {
         UNVERSIONED = 7,
         V1_EVT1     = 1,
         V1_EVT2     = 2,
+        V1_HOG      = 6,
 } notle_version;
 
 extern struct mmc_platform_data tuna_wifi_data;
 // Elton V6 uses GPIO_WL_RST_N to control wifi power; previous versions use
 // GPIO_WL_BT_REG_ON.
-int notle_wlan_init(notle_version NOTLE_VERSION);
+int notle_wlan_init(void);
 void bcm_bt_lpm_exit_lpm_locked(struct uart_port *uport);
 int notle_get_gpio(int);
 

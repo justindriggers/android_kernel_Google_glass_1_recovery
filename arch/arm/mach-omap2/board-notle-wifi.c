@@ -345,64 +345,35 @@ static struct platform_device tuna_wifi_device = {
 };
 
 
-static int __init notle_wlan_gpio(notle_version NOTLE_VERSION) {
+static int __init notle_wlan_gpio(void) {
         int r = -1;
-        int gpio_wlan_host_wake = -1;
+        int gpio_wlan_host_wake;
 
         if (!machine_is_notle())
                 return 0;
 
         pr_info("%s()+\n", __func__);
 
-        /* Mux power signal.  GPIO config done by regulator driver */
-        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_WL_BT_REG_ON);
-
         /* Configuration of requested GPIO lines */
-        switch (NOTLE_VERSION) {
-          case V1_EVT1:
-          case V1_EVT2:
-            // Mux H4 to be gpio_wk0 (so GPIO 0 is set to be gpio_wk0)
-            omap_mux_init_signal("sim_io.gpio_wk0",OMAP_PIN_INPUT | OMAP_WAKEUP_EN);
-
-            // The GPIOWK_IO_PWRDNZ bit needs to be set after muxing
-            //and before you set it to input
-            omap4_ctrl_wk_pad_writel(OMAP4_USIM_PWRDNZ_MASK,
-                    OMAP4_CTRL_MODULE_PAD_WKUP_CONTROL_USIMIO);
-
-            gpio_wlan_host_wake = GPIO_BCM_WLAN_HOST_WAKE_EVT1;
-            break;
-          default:
-            pr_err("notle_wlan: Unsupported NOTLE_VERSION: %d\n", NOTLE_VERSION);
-            goto error;
-        }
-
+        gpio_wlan_host_wake = notle_get_gpio(GPIO_BCM_WLAN_HOST_WAKE_INDEX);
         r = gpio_request_one(gpio_wlan_host_wake, GPIOF_IN, "wlan_irq");
         if (r) {
                 pr_err("Failed to get wlan_irq gpio\n");
                 goto error;
         }
 
-        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_BCM_WLAN_WAKE);
         r = gpio_request_one(GPIO_BCM_WLAN_WAKE, GPIOF_OUT_INIT_HIGH, "wlan_wake");
         if (r) {
                 pr_err("Failed to get wlan_wake gpio\n");
                 goto error1;
         }
 
-        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_WL_RST_N);
         r = gpio_request_one(GPIO_WL_RST_N, GPIOF_OUT_INIT_LOW, "wlan_reset");
         if (r) {
                 pr_err("Failed to get wlan_reset gpio\n");
                 goto error2;
         }
         gpio_set_value(GPIO_WL_RST_N, 1);
-
-        /* Mux the bt signals here, but handle the gpio requests in the
-         * bluetooth board file.
-         */
-        __raw_writew(OMAP_MUX_MODE3 | OMAP_PIN_INPUT,
-                CORE_BASE_ADDR + MUX_BCM_BT_HOST_WAKE);
-        __raw_writew(OMAP_MUX_MODE3, CORE_BASE_ADDR + MUX_BCM_BT_WAKE);
 
         pr_info("%s()-: 0\n", __func__);
         return 0;
@@ -416,20 +387,15 @@ error:
         return r;
 }
 
-int __init notle_wlan_init(notle_version NOTLE_VERSION)
+int __init notle_wlan_init()
 {
-        switch (NOTLE_VERSION) {
-          case V1_EVT1:
-          case V1_EVT2:
-            tuna_vwlan.gpio = GPIO_WL_RST_N;
-            tuna_wifi_resources[0].start = OMAP_GPIO_IRQ(GPIO_BCM_WLAN_HOST_WAKE_EVT1);
-            tuna_wifi_resources[0].end   = OMAP_GPIO_IRQ(GPIO_BCM_WLAN_HOST_WAKE_EVT1);
-            break;
-          default:
-            pr_err("notle_wlan: Unsupported NOTLE_VERSION: %d\n", NOTLE_VERSION);
-            break;
-        }
-        notle_wlan_gpio(NOTLE_VERSION);
+        int gpio_wlan_host_wake;
+
+        gpio_wlan_host_wake = notle_get_gpio(GPIO_BCM_WLAN_HOST_WAKE_INDEX);
+        tuna_vwlan.gpio = GPIO_WL_RST_N;
+        tuna_wifi_resources[0].start = OMAP_GPIO_IRQ(gpio_wlan_host_wake);
+        tuna_wifi_resources[0].end   = OMAP_GPIO_IRQ(gpio_wlan_host_wake);
+        notle_wlan_gpio();
         tuna_init_wifi_mem();
         platform_device_register(&omap_vwlan_device);
         return platform_device_register(&tuna_wifi_device);
