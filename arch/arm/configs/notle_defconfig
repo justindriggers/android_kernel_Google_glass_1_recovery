@@ -486,8 +486,7 @@ CONFIG_INPUT_GLASSHUB=n
 # CONFIG_INPUT_TOUCHPAD is not set
 # CONFIG_INPUT_TOUCHPAD_FTK is not set
 
-# NOTE(abliss): this disables the backlight on pre-fly devices.
-CONFIG_REMOTEPROC_WATCHDOG=y
+# CONFIG_REMOTEPROC_WATCHDOG is not set
 
 CONFIG_HIGHMEM=y
 CONFIG_OPROFILE=y

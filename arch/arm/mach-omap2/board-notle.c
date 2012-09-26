@@ -83,7 +83,6 @@
 
 #include <plat/android-display.h>
 #include <plat/board.h>
-#include <plat/dmtimer.h>
 #include <plat/common.h>
 #include <plat/usb.h>
 #include <plat/mmc.h>
@@ -91,7 +90,6 @@
 #include <plat/vram.h>
 #include <plat/omap-pm.h>
 #include <plat/omap-serial.h>
-#include <plat/dmtimer-pwm.h>
 
 #include <video/omapdss.h>
 #include <video/omap-panel-generic-dpi.h>
@@ -962,49 +960,6 @@ void __init notle_serial_init(void)
 	omap_serial_init_port_pads(3, notle_uart4_pads,
 		ARRAY_SIZE(notle_uart4_pads), &omap_serial_port_info[3]);
 }
-
-/*
- * Driver data struct for the pwm-backlight driver.  Fields:
- *
- *   max_brightness:  Determines the scale for the 'brightness' values.  A
- *     brightness of max_brightness results in a pwm duty cycle of (almost)
- *     always on.  The almost is because the dmtimer pwm support requires
- *     the duty cycle to be at least 1 clock cycle less than the period.
- *
- *   dft_brightness: Default brightness, this value will be used to
- *     initialize the brightness value.
- *
- *   lth_brightness: Lower threshold brightness, this determines the baseline
- *     for calculating duty cycles for the pwm output.  That is, a value of
- *     1 for brightness will result in a duty cycle of slightly over
- *     lth_brightness / max_brightness, and brightness values scale between
- *     lth_brightness and max_brightness linearly.
- *
- *   uth_brightness: Upper threshold brightness, this determines the maximum
- *     duty cycle of the pwm backlight.  That is, at a brightness of
- *     max_brightness, the duty cycle of the pwm will be
- *     uth_brightness / max_brightness.  If a value of 0 is given, the
- *     pwm will max at a 100% duty cycle (full on).
- *
- *   pwm_period_ns: Period of the pwm signal in nanoseconds.  This value
- *     (1009082) corresponds to approximately 991 Hz, where we seem to get
- *     minimal visible flickering of the backlight.
- */
-static struct platform_pwm_backlight_data backlight_data = {
-        .max_brightness = 0xff,
-        .dft_brightness = 0x00,
-        .lth_brightness = 0x00,
-        .uth_brightness = 0x04,
-        .pwm_period_ns = 1009082,
-};
-
-static struct platform_device backlight_device = {
-        .name = "pwm-backlight",
-        .id = -1,
-        .dev = {
-                .platform_data = &backlight_data,
-        },
-};
 
 static struct platform_device bcm4330_bluetooth_device = {
 	.name = "bcm4330_bluetooth",
@@ -2024,55 +1979,6 @@ static int __init notle_glasshub_init(void) {
         return r;
 }
 #endif
-
-static void notle_dmtimer_pwm_enable(void) {
-        // pwm timer output:
-        omap_mux_init_signal("usbb1_ulpitll_dat5.dmtimer9_pwm_evt", 0);
-}
-
-static void notle_dmtimer_pwm_disable(void) {
-        // pwm timer output:
-        omap_mux_init_signal("usbb1_ulpitll_dat5.safe_mode", OMAP_PULL_ENA);
-}
-
-static struct dmtimer_pwm_ops notle_dmtimer_pwm_ops = {
-  .enable       = notle_dmtimer_pwm_enable,
-  .disable      = notle_dmtimer_pwm_disable,
-};
-
-static int __init notle_pwm_backlight_init(void) {
-        int r;
-        struct pwm_device *pwm;
-#ifdef CONFIG_REMOTEPROC_WATCHDOG
-        // the watchdog uses gpt9.
-        pr_err("NOT setting up backlight pwm!  Turn off REMOTERPOC_WATCHDOG.\n");
-        return -1;
-#endif
-        pwm = pwm_request_dmtimer(PWM_TIMER, "backlight",
-                                  &notle_dmtimer_pwm_ops);
-
-        if (!pwm) {
-                pr_err("Failed to request backlight dmtimer\n");
-                return -1;
-        }
-
-        backlight_data.pwm_id = pwm->pwm_id;
-        r = platform_device_register(&backlight_device);
-        if (r) {
-                pr_err("Failed to register backlight platform device\n");
-                pwm_free(pwm);
-                return -1;
-        }
-
-        pr_info("Successfully initialized backlight\n");
-        return 0;
-}
-
-/*
-   This code uses omap4 timers that are initialized as devices, so it must
-   be called after device initialization is finished.
-*/
-late_initcall(notle_pwm_backlight_init);
 
 #define TWL6030_SW_RESET_BIT_MASK       (1<<6)
 
