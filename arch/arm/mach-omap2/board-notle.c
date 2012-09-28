@@ -34,8 +34,6 @@
 #include <linux/memblock.h>
 #include <linux/omapfb.h>
 #include <linux/omap4_duty_cycle_governor.h>
-#include <linux/pwm.h>
-#include <linux/pwm_backlight.h>
 #include <linux/reboot.h>
 #include <linux/spi/spi.h>
 #include <plat/mcspi.h>
@@ -64,10 +62,6 @@
 #if defined(CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C) || defined(CONFIG_RMI4_BUS)
 #include <linux/rmi.h>
 #endif
-
-#ifdef CONFIG_INPUT_TOUCHPAD_FTK
-#include <linux/i2c/ftk_patch.h>
-#endif  /* CONFIG_INPUT_TOUCHPAD_FTK */
 
 #include <mach/hardware.h>
 #include <mach/omap4-common.h>
@@ -106,9 +100,6 @@
 #include "prm44xx.h"
 #include "cm1_44xx.h"
 #include "omap4-sar-layout.h"
-
-
-#define PWM_TIMER                       9
 
 static notle_version NOTLE_VERSION = UNVERSIONED;
 
@@ -155,6 +146,7 @@ static int notle_gpio_board_evt2[GPIO_MAX_INDEX] = {
     [GPIO_USB_MUX_CB1_INDEX] = GPIO_USB_MUX_CB1,
     [GPIO_GPS_ON_OFF_INDEX] = GPIO_GPS_ON_OFF_EVT2,
     [GPIO_GPS_RESET_N_INDEX] = GPIO_GPS_RESET_N_EVT2,
+    [GPIO_GPS_AWAKE_INDEX] = GPIO_GPS_RESET_N_EVT2,
     [GPIO_LCD_RST_N_INDEX] = GPIO_LCD_RST_N_EVT2,
     [GPIO_BT_RST_N_INDEX] = GPIO_BT_RST_N_EVT2,
     [GPIO_CAM_PWDN_INDEX] = GPIO_CAM_PWDN_EVT2,
@@ -163,6 +155,9 @@ static int notle_gpio_board_evt2[GPIO_MAX_INDEX] = {
     [GPIO_BT_RST_N_INDEX] = GPIO_BT_RST_N_EVT2,
     [GPIO_BCM_BT_HOST_WAKE_INDEX] = GPIO_BCM_BT_HOST_WAKE_EVT2,
     [GPIO_BCM_WLAN_HOST_WAKE_INDEX] = GPIO_BCM_WLAN_HOST_WAKE_EVT,
+    [GPIO_BLINK_INT_INDEX] = GPIO_BLINK_INT_EVT2,
+    [GPIO_SOC_INT_INDEX] = GPIO_SOC_INT_EVT2,
+    [GPIO_BAT_LOW_INDEX] = GPIO_BAT_LOW_EVT2,
 };
 
 /* Read board version from GPIO.  Result in NOTLE_VERSION. */
@@ -1071,10 +1066,6 @@ static struct twl4030_platform_data notle_twldata = {
 	.madc           = &notle_gpadc_data,
 };
 
-#if defined(CONFIG_INPUT_TOUCHPAD_FTK) && defined(CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C)
-#error "Can only define either FTK or Synaptics touchpad"
-#endif
-
 #if defined(CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C) && defined(CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C)
 #error "Can only define touchpad (v2) or touchscreen (v1) Synaptics touchpad"
 #endif
@@ -1331,14 +1322,6 @@ static struct rmi_device_platform_data synaptics_platformdata = {
 #endif  /* CONFIG_RMI4_BUS */
 
 
-#ifdef CONFIG_INPUT_TOUCHPAD_FTK
-static struct ftk_i2c_platform_data ftk_platformdata = {
-  /* TODO(cmanton) Implement this based upon pending information from ST
-   * For now do nothing */
-  .power = NULL,
-};
-#endif  /* CONFIG_INPUT_TOUCHPAD_FTK */
-
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
 static struct rmi_sensor_suspend_custom_ops synaptics_custom_ops = {
         .rmi_sensor_custom_suspend = 0,
@@ -1390,12 +1373,6 @@ static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
                 .platform_data = &synaptics_platformdata,
         },
 #endif  /* CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C || CONFIG_RMI4_BUS */
-#ifdef CONFIG_INPUT_TOUCHPAD_FTK
-        {
-                I2C_BOARD_INFO("ftk", 0x4b),
-                .platform_data = &ftk_platformdata,
-        },
-#endif  /* CONFIG_TOUCHPAD_FTK */
 };
 
 /*
@@ -1783,14 +1760,16 @@ static struct omap_board_mux evt2_board_mux[] __initdata = {
     OMAP4_MUX(GPMC_A22,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // USB_MUX_CB0
     OMAP4_MUX(GPMC_A21,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // USB_MUX_CB1
     OMAP4_MUX(GPMC_A24,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // WL_BT_REG_ON
+    OMAP4_MUX(MCSPI1_CS1,           OMAP_MUX_MODE3 | OMAP_PIN_INPUT),   // GPS_AWAKE
     OMAP4_MUX(MCSPI1_CS2,           OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GPS_ON_OFF
     OMAP4_MUX(MCSPI1_CS3,           OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GPS_RESET_N
     OMAP4_MUX(USBB1_ULPITLL_DAT6,   OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // LCD_RST_N
     OMAP4_MUX(USBB2_HSIC_STROBE,    OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BCM_WLAN_WAKE
-    OMAP4_MUX(MCSPI4_CS0,           OMAP_MUX_MODE3 | OMAP_PIN_INPUT),   // BCM_BT_HOST_WAKE
     OMAP4_MUX(ABE_MCBSP2_FSX,       OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BT_RST_N
     OMAP4_MUX(SDMMC1_CLK,           OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // CAM_PWDN
+    OMAP4_MUX(C2C_DATA14,           OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // PROX_INT
     OMAP4_MUX(ABE_DMIC_DIN2,        OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN),    // CAMERA, TOP_SW
+    OMAP4_MUX(DPM_EMU2,             OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // SOC_INT
 	{ .reg_offset = OMAP_MUX_TERMINATOR },
 };
 // EVT2 WakeUp:
@@ -1798,8 +1777,10 @@ static struct omap_board_mux evt2_board_wkup_mux[] __initdata = {
     OMAP4_MUX(SIM_IO,               OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),  // BCM_WLAN_HOST_WAKE
     OMAP4_MUX(FREF_CLK3_REQ,        OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN),    // CAMERA, TOP_SW
     OMAP4_MUX(SIM_CD,               OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN),    // TOUCHPAD_INT_N
-    OMAP4_MUX(SIM_CLK,              OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // PROX_INT
+    OMAP4_MUX(SIM_CLK,              OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // BLINK_INT
     OMAP4_MUX(SIM_PWRCTRL,          OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),           // MPU9000_INT_TIMER
+    OMAP4_MUX(SIM_RESET,            OMAP_MUX_MODE3 | OMAP_PIN_INPUT),   // BCM_BT_HOST_WAKE
+    OMAP4_MUX(FREF_CLK3_OUT,        OMAP_MUX_MODE3 | OMAP_PIN_INPUT),   // BAT_LOW
 	{ .reg_offset = OMAP_MUX_TERMINATOR },
 };
 #else
@@ -1891,6 +1872,19 @@ static int notle_gps_init(void) {
                 pr_err("Unable to export gps_on_off gpio\n");
         }
 
+        /* EVT2 added the GPS_AWAKE connection, was NC in EVT1 */
+        if (NOTLE_VERSION == V1_EVT2) {
+            r = gpio_request_one(GPIO_GPS_AWAKE_EVT2, GPIOF_IN, "gps_awake");
+            if (r) {
+                    pr_err("Failed to get gps_awake gpio\n");
+                    goto error;
+            }
+
+            r = gpio_export(GPIO_GPS_AWAKE_EVT2, false);
+            if (r) {
+                    pr_err("Unable to export gps_awake gpio\n");
+            }
+        }
         return 0;
 
 error:

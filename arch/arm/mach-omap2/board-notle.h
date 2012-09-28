@@ -48,6 +48,7 @@ enum {
     GPIO_USB_MUX_CB1_INDEX,
     GPIO_GPS_ON_OFF_INDEX,
     GPIO_GPS_RESET_N_INDEX,
+    GPIO_GPS_AWAKE_INDEX,
     GPIO_LCD_RST_N_INDEX,
     GPIO_DISP_ENB_INDEX,
     GPIO_CAM_PWDN_INDEX,
@@ -57,6 +58,9 @@ enum {
     GPIO_BT_RST_N_INDEX,
     GPIO_BCM_BT_HOST_WAKE_INDEX,
     GPIO_BCM_WLAN_HOST_WAKE_INDEX,
+    GPIO_BLINK_INT_INDEX,
+    GPIO_SOC_INT_INDEX,
+    GPIO_BAT_LOW_INDEX,
     GPIO_MAX_INDEX
 };
 
@@ -70,6 +74,8 @@ enum {
 #define GPIO_GPS_ON_OFF_EVT2            139
 #define GPIO_GPS_RESET_N_EVT1           52
 #define GPIO_GPS_RESET_N_EVT2           140
+#define GPIO_GPS_AWAKE_EVT1             41
+#define GPIO_GPS_AWAKE_EVT2             138
 #define GPIO_LCD_RST_N_EVT1             53
 #define GPIO_LCD_RST_N_EVT2             94
 #define GPIO_DISP_ENB                   84
@@ -81,7 +87,7 @@ enum {
 #define GPIO_TOUCHPAD_INT_N_EVT1        32
 #define GPIO_TOUCHPAD_INT_N_EVT2        3
 #define GPIO_PROX_INT_EVT1              90
-#define GPIO_PROX_INT_EVT2              1
+#define GPIO_PROX_INT_EVT2              103
 #define GPIO_AUDIO_POWERON              127
 #define GPIO_BCM_WLAN_HOST_WAKE_EVT     0
 #define GPIO_BCM_WLAN_HOST_WAKE_HOG     97
@@ -93,6 +99,9 @@ enum {
 #define GPIO_BT_RST_N_EVT2              113
 #define GPIO_BCM_BT_HOST_WAKE_EVT1      154
 #define GPIO_BCM_BT_HOST_WAKE_EVT2      2
+#define GPIO_BLINK_INT_EVT2             1
+#define GPIO_SOC_INT_EVT2               13
+#define GPIO_BAT_LOW_EVT2               31
 
 typedef enum {
         UNVERSIONED = 7,
