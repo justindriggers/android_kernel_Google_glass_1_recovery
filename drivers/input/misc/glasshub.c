@@ -74,7 +74,10 @@
 #define REG_DON_DOFF_HYSTERESIS		21
 #define REG_LED_DRIVE			22
 #define REG_ERROR_CODE			23
-#define REGISTER_FILE_SIZE		24
+#define REG_ADDR_LO			24
+#define REG_ADDR_HI			25
+#define REG_FLASH_DATA			26
+#define REGISTER_FILE_SIZE		27
 
 #define CMD_BOOT			0xFA
 #define CMD_FLASH			0xF9
@@ -131,6 +134,13 @@
 #define FW_STATE_BYTE_LO		13
 #define FW_STATE_CHECKSUM_HI		14
 #define FW_STATE_CHECKSUM_LO		15
+
+/* location of calibration data */
+#define CALIB_ADDR_HI			0x9f
+#define CALIB_ADDR_LO			0xf0
+
+/* number of samples to take for calibration mean */
+#define NUM_CALIBRATION_SAMPLES		3
 
 /*
  * Basic theory of operation:
@@ -197,9 +207,9 @@ struct glasshub_data *glasshub_private = NULL;
 /*
  * Filesystem API is implemented with the kernel fifo.
  */
-#define GLASSHUB_RD_QUEUE_SZ 256
+#define READ_QUEUE_SZ 256
 static DECLARE_WAIT_QUEUE_HEAD(glasshub_read_wait);
-static struct glasshub_data_user glasshub_fifo_buffer[GLASSHUB_RD_QUEUE_SZ];
+static struct glasshub_data_user glasshub_fifo_buffer[READ_QUEUE_SZ];
 static struct glasshub_data_user *glasshub_user_wr_ptr = NULL;
 static struct glasshub_data_user *glasshub_user_rd_ptr = NULL;
 static struct mutex glasshub_user_lock;
@@ -209,7 +219,8 @@ static atomic_t glasshub_opened = ATOMIC_INIT(0);
  * I2C bus transaction read for consecutive data.
  * Returns 0 on success.
  */
-static int _i2c_read(struct glasshub_data *glasshub, uint8_t *txData, int txLength, uint8_t *rxData, int rxLength)
+static int _i2c_read(struct glasshub_data *glasshub, uint8_t *txData, int txLength,
+		uint8_t *rxData,int rxLength)
 {
 	int i;
 	struct i2c_msg data[] = {
@@ -231,7 +242,8 @@ static int _i2c_read(struct glasshub_data *glasshub, uint8_t *txData, int txLeng
 		if (i2c_transfer(glasshub->i2c_client->adapter, data, 2) > 0)
 			break;
 		/* Delay before retrying */
-		dev_warn(&glasshub->i2c_client->dev, "%s Retried read count:%d\n", __FUNCTION__, i);
+		dev_warn(&glasshub->i2c_client->dev, "%s Retried read count:%d\n",
+				__FUNCTION__, i);
 		mdelay(10);
 	}
 
@@ -262,7 +274,8 @@ static int _i2c_write_mult(struct glasshub_data *glasshub, uint8_t *txData, int 
 		if (i2c_transfer(glasshub->i2c_client->adapter, data, 1) > 0)
 			break;
 		/* Delay before retrying */
-		dev_warn(&glasshub->i2c_client->dev, "%s Retried read count:%d\n", __FUNCTION__, i);
+		dev_warn(&glasshub->i2c_client->dev, "%s Retried read count:%d\n",
+				__FUNCTION__, i);
 		mdelay(10);
 	}
 
@@ -318,7 +331,8 @@ static int _check_part_id(struct glasshub_data *glasshub)
 	}
 
 	if (data != GLASSHUB_PART_ID) {
-		dev_err(&i2c_client->dev, "%s Unexpected part ID = %u\n", __FUNCTION__, (unsigned)data);
+		dev_err(&i2c_client->dev, "%s Unexpected part ID = %u\n",
+				__FUNCTION__, (unsigned)data);
 		rc = -ENODEV;
 	}
 
@@ -337,25 +351,29 @@ int boot_device_l(struct glasshub_data *glasshub)
 	/* tell glass hub to boot */
 	temp = CMD_BOOT;
 	for (retry = 0; retry < 5; retry++) {
-		dev_info(&glasshub->i2c_client->dev, "%s Attempt %d to boot glasshub device\n", __FUNCTION__, retry);
+		dev_info(&glasshub->i2c_client->dev, "%s Attempt %d to boot glasshub device\n",
+				__FUNCTION__, retry);
 		rc = _i2c_write_mult(glasshub, &temp, sizeof(temp));
 		msleep(50);
 		if (rc == 0) break;
 	}
 	if (rc) {
-		dev_err(&glasshub->i2c_client->dev, "%s Unable to boot glasshub device\n", __FUNCTION__);
+		dev_err(&glasshub->i2c_client->dev, "%s Unable to boot glasshub device\n",
+				__FUNCTION__);
 		goto err_out;
 	}
 
 	/* verify part ID */
-	dev_info(&glasshub->i2c_client->dev, "%s Attempt to verify glasshub part ID\n", __FUNCTION__);
+	dev_info(&glasshub->i2c_client->dev, "%s Attempt to verify glasshub part ID\n",
+			__FUNCTION__);
 	if (_check_part_id(glasshub)) {
 		rc = -ENODEV;
 		goto err_out;
 	}
 
 	/* get current don/doff state */
-	dev_info(&glasshub->i2c_client->dev, "%s Attempt to read glasshub don/doff status\n", __FUNCTION__);
+	dev_info(&glasshub->i2c_client->dev, "%s Attempt to read glasshub don/doff status\n",
+			__FUNCTION__);
 	_i2c_read_one(glasshub, REG_DON_DOFF, &glasshub->don_doff_state);
 
 	set_bit(FLAG_DEVICE_BOOTED, &glasshub->flags);
@@ -375,13 +393,15 @@ int reset_device_l(struct glasshub_data *glasshub, int force)
 
 	/* reset glass hub */
 	for (retry = 0; retry < 5; retry++) {
-		dev_info(&glasshub->i2c_client->dev, "%s Attempt %d to reset glasshub device\n", __FUNCTION__, retry);
+		dev_info(&glasshub->i2c_client->dev, "%s Attempt %d to reset glasshub device\n",
+				__FUNCTION__, retry);
 		temp = REG_RESET;
 		rc = _i2c_write_mult(glasshub, &temp, sizeof(temp));
 		if (rc == 0) break;
 	}
 	if (rc) {
-		dev_err(&glasshub->i2c_client->dev, "%s Unable to reset glasshub device\n", __FUNCTION__);
+		dev_err(&glasshub->i2c_client->dev, "%s Unable to reset glasshub device\n",
+				__FUNCTION__);
 		goto err_out;
 	}
 	msleep(30);
@@ -448,10 +468,12 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 
 		/* process don/doff */
 		if (status & IRQ_DON_DOFF) {
-			dev_info(&glasshub->i2c_client->dev, "%s: don/doff signal received\n", __FUNCTION__);
+			dev_info(&glasshub->i2c_client->dev, "%s: don/doff signal received\n",
+					__FUNCTION__);
 			rc = _i2c_read_one(glasshub, REG_DON_DOFF, &glasshub->don_doff_state);
 			if (rc) goto Error;
-			dev_info(&glasshub->i2c_client->dev, "%s: don/doff state = %u\n", __FUNCTION__, glasshub->don_doff_state);
+			dev_info(&glasshub->i2c_client->dev, "%s: don/doff state = %u\n",
+					__FUNCTION__, glasshub->don_doff_state);
 			input_report_key(glasshub->don_doff_dev, BTN_0, glasshub->don_doff_state);
 			input_sync(glasshub->don_doff_dev);
 		}
@@ -484,7 +506,7 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 
 			mutex_lock(&glasshub_user_lock);
 			glasshub_user_wr_ptr++;
-			if (glasshub_user_wr_ptr == (glasshub_fifo_buffer + GLASSHUB_RD_QUEUE_SZ)) {
+			if (glasshub_user_wr_ptr == (glasshub_fifo_buffer + READ_QUEUE_SZ)) {
 				glasshub_user_wr_ptr = glasshub_fifo_buffer;
 			}
 			mutex_unlock(&glasshub_user_lock);
@@ -507,7 +529,8 @@ Error:
 static int set_interrupt_state(struct glasshub_data *glasshub, uint8_t interrupt, int enable)
 {
 	int rc;
-	dev_info(&glasshub->i2c_client->dev, "%s: interrupt = 0x%08x enable = %d\n", __FUNCTION__, interrupt, enable);
+	dev_info(&glasshub->i2c_client->dev, "%s: interrupt = 0x%08x enable = %d\n",
+			__FUNCTION__, interrupt, enable);
 	if (enable) {
 		glasshub->irq_enable |= interrupt;
 	} else {
@@ -560,7 +583,8 @@ static ssize_t don_doff_enable_show(struct device *dev, struct device_attribute 
 }
 
 /* enable/disable don/doff */
-static ssize_t don_doff_enable_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+static ssize_t don_doff_enable_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
 {
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 	uint8_t enable = parse_enable(buf);
@@ -579,7 +603,8 @@ static ssize_t passthru_enable_show(struct device *dev, struct device_attribute 
 }
 
 /* enable/disable prox passthrough mode */
-static ssize_t passthru_enable_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+static ssize_t passthru_enable_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
 {
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 	uint8_t enable = parse_enable(buf);
@@ -591,16 +616,14 @@ static ssize_t passthru_enable_store(struct device *dev, struct device_attribute
 	return count;
 }
 
-/* show raw prox value */
-static ssize_t proxraw_show(struct device *dev, struct device_attribute *attr, char *buf)
+/* read prox value */
+static int readProxRaw(struct glasshub_data *glasshub, uint16_t *pProxData)
 {
 	int rc;
 	uint8_t buffer[1];
 	uint16_t data;
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 
-	mutex_lock(&glasshub->device_lock);
-	boot_device_l(glasshub);
+	*pProxData = 0xffff;
 	buffer[0] = REG_PROX_RAW_DATA_LO;
 	rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
 	if (rc == 0) {
@@ -609,12 +632,25 @@ static ssize_t proxraw_show(struct device *dev, struct device_attribute *attr, c
 		rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
 		if (rc == 0) {
 			data |= (uint16_t) buffer[0] << 8;
+			*pProxData = data;
 		}
 	}
+	return rc;
+}
+
+/* show raw prox value */
+static ssize_t proxraw_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int rc;
+	uint16_t data;
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+
+	mutex_lock(&glasshub->device_lock);
+	boot_device_l(glasshub);
+	rc = readProxRaw(glasshub, &data);
 	mutex_unlock(&glasshub->device_lock);
 
 	if (rc) {
-		data = 0xffff;
 		dev_err(dev, "Comm error in %s\n", __FUNCTION__);
 	}
 	return sprintf(buf, "%u\n", data);
@@ -679,7 +715,8 @@ static ssize_t vis_show(struct device *dev, struct device_attribute *attr, char 
 }
 
 /* show don/doff threshold value */
-static ssize_t don_doff_threshold_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t don_doff_threshold_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
 {
 	uint8_t value = 0;
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
@@ -692,7 +729,8 @@ static ssize_t don_doff_threshold_show(struct device *dev, struct device_attribu
 }
 
 /* set don/doff threshold value */
-static ssize_t don_doff_threshold_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+static ssize_t don_doff_threshold_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
 {
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 	unsigned long value = 0;
@@ -708,13 +746,15 @@ static ssize_t don_doff_threshold_store(struct device *dev, struct device_attrib
 }
 
 /* show don/doff hysteresis value */
-static ssize_t don_doff_hysteresis_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t don_doff_hysteresis_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
 {
 	return show_reg(dev, attr, buf, REG_DON_DOFF_HYSTERESIS);
 }
 
 /* set don/doff hysteresis value */
-static ssize_t don_doff_hysteresis_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+static ssize_t don_doff_hysteresis_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
 {
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 	uint8_t value = 0;
@@ -734,7 +774,8 @@ static ssize_t led_drive_show(struct device *dev, struct device_attribute *attr,
 }
 
 /* set IR LED drive value */
-static ssize_t led_drive_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+static ssize_t led_drive_store(struct device *dev, struct device_attribute *attr, const char *buf,
+		size_t count)
 {
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 	uint8_t value = 0;
@@ -747,6 +788,103 @@ static ssize_t led_drive_store(struct device *dev, struct device_attribute *attr
 	return count;
 }
 
+/* calibrate IR LED drive levels */
+static ssize_t calibrate_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	uint32_t sum;
+	uint16_t temp;
+	uint16_t proxValues[8];
+	int i, j;
+	int rc;
+
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	uint8_t value = 0;
+	if (!kstrtou8(buf, 10, &value) && value) {
+		mutex_lock(&glasshub->device_lock);
+		boot_device_l(glasshub);
+
+		/* test all 7 LED levels */
+		for (i = 0; i < 8; i++) {
+
+			/* set LED drive level */
+			_i2c_write_reg(glasshub, REG_LED_DRIVE, i);
+
+			/* read multiple values and take the mean */
+			sum = 0;
+			for (j = 0; j < NUM_CALIBRATION_SAMPLES; j++) {
+
+				/* read raw prox value */
+				rc = readProxRaw(glasshub, &temp);
+				if (rc) break;
+
+				/* read raw prox value and add to running sum */
+				sum += temp;
+
+				/* allow charge pump to re-charge */
+				msleep(50);
+			}
+
+			/* break on error */
+			if (rc) break;
+
+			/* save mean value */
+			proxValues[i] = sum / NUM_CALIBRATION_SAMPLES;
+		}
+
+		/* write calibration values to flash */
+		if (rc == 0) {
+			_i2c_write_reg(glasshub, REG_ADDR_HI, CALIB_ADDR_HI);
+			for (i = 0; i < 8; i++) {
+
+				/* store calibration data */
+				_i2c_write_reg(glasshub, REG_ADDR_LO, CALIB_ADDR_LO + i * 2);
+				_i2c_write_reg(glasshub, REG_FLASH_DATA, (uint8_t) proxValues[i]);
+				_i2c_write_reg(glasshub, REG_ADDR_LO, CALIB_ADDR_LO + i * 2 + 1);
+				_i2c_write_reg(glasshub, REG_FLASH_DATA,
+						(uint8_t) (proxValues[i] >> 8));
+			}
+		}
+
+		mutex_unlock(&glasshub->device_lock);
+	}
+	return count;
+}
+
+/* read calibration values */
+static ssize_t calibration_values_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	uint16_t proxValues[8];
+	int i;
+	uint8_t temp;
+
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	mutex_lock(&glasshub->device_lock);
+	boot_device_l(glasshub);
+
+	/* read calibration values from flash */
+	_i2c_write_reg(glasshub, REG_ADDR_HI, CALIB_ADDR_HI);
+	for (i = 0; i < 8; i++) {
+
+		/* store calibration data */
+		_i2c_write_reg(glasshub, REG_ADDR_LO, CALIB_ADDR_LO + i * 2);
+		_i2c_read_one(glasshub, REG_FLASH_DATA, &temp);
+		proxValues[i] = temp;
+		_i2c_write_reg(glasshub, REG_ADDR_LO, CALIB_ADDR_LO + i * 2 + 1);
+		_i2c_read_one(glasshub, REG_FLASH_DATA, &temp);
+		proxValues[i] |= (uint16_t) temp << 8;
+	}
+
+	mutex_unlock(&glasshub->device_lock);
+
+	return sprintf(buf, "%u %u %u %u %u %u %u %u\n",
+			proxValues[0], proxValues[1],
+			proxValues[2], proxValues[3],
+			proxValues[4], proxValues[5],
+			proxValues[6], proxValues[7]);
+}
+
 /* show last error code from device */
 static ssize_t error_code_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -754,7 +892,8 @@ static ssize_t error_code_show(struct device *dev, struct device_attribute *attr
 }
 
 /* sysfs node for updating device firmware */
-static ssize_t update_fw_data_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
+static ssize_t update_fw_data_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count);
 
 static DEVICE_ATTR(update_fw_data, DEV_MODE_WO, NULL, update_fw_data_store);
 
@@ -778,13 +917,14 @@ static void exit_flash_mode_l(struct glasshub_data *glasshub)
 }
 
 /* sysfs node to download device firmware to be flashed */
-static ssize_t update_fw_data_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+static ssize_t update_fw_data_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
 {
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 	int i;
 
 #if DEBUG_FLASH_MODE
-	dev_info(&glasshub->i2c_client->dev, "%s Rx S-Record %u bytes\n", __FUNCTION__, count);
+	dev_info(&glasshub->i2c_client->dev, "%s Rx SREC %u bytes\n", __FUNCTION__, count);
 #endif
 
 	mutex_lock(&glasshub->device_lock);
@@ -792,7 +932,8 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 	for (i = 0; i < count; i++) {
 
 #if DEBUG_FLASH_MODE
-		dev_dbg(&glasshub->i2c_client->dev, "%s S-Record state = %d count = %d input = %c\n",
+		dev_dbg(&glasshub->i2c_client->dev,
+				"%s SREC state = %d count = %d input = %c\n",
 				__FUNCTION__, glasshub->fw_state, glasshub->fw_count, buf[i]);
 #endif
 
@@ -801,7 +942,8 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 				if (buf[i] == 'S') {
 					glasshub->fw_state = FW_STATE_TYPE;
 #if DEBUG_FLASH_MODE
-					dev_dbg(&glasshub->i2c_client->dev, "%s Start of S-Record\n", __FUNCTION__);
+					dev_dbg(&glasshub->i2c_client->dev,
+							"%s Start of SREC\n", __FUNCTION__);
 #endif
 				}
 				break;
@@ -812,7 +954,8 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 				/* process only S1-S3 records */
 				if (buf[i] >= '1' && buf[i] <= '3') {
 #if DEBUG_FLASH_MODE
-					dev_dbg(&glasshub->i2c_client->dev, "%s S-Record type %c\n", __FUNCTION__, buf[i]);
+					dev_dbg(&glasshub->i2c_client->dev,
+							"%s SREC type %c\n", __FUNCTION__, buf[i]);
 #endif
 					glasshub->fw_rec_type = buf[i];
 					glasshub->fw_value = 0;
@@ -850,20 +993,23 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 				if (convert_hex(buf[i], &glasshub->fw_value)) goto err_out;
 				glasshub->fw_checksum += glasshub->fw_value & 0xff;
 #if DEBUG_FLASH_MODE
-				dev_dbg(&glasshub->i2c_client->dev, "%s S-Record byte count %u\n", __FUNCTION__, glasshub->fw_value);
+				dev_dbg(&glasshub->i2c_client->dev, "%s SREC byte count %u\n",
+						__FUNCTION__, glasshub->fw_value);
 #endif
 
 				/* adjust count for address and checksum bytes */
 				glasshub->fw_count = glasshub->fw_value;
 				glasshub->fw_value = 0;
-				glasshub->fw_state = FW_STATE_ADDR_7 + 2 * ('3' - glasshub->fw_rec_type);
+				glasshub->fw_state = FW_STATE_ADDR_7 + 2 *
+					('3' - glasshub->fw_rec_type);
 				break;
 
 			case FW_STATE_ADDR_0:
 				if (convert_hex(buf[i], &glasshub->fw_value)) goto err_out;
 				glasshub->fw_checksum += glasshub->fw_value & 0xff;
 #if DEBUG_FLASH_MODE
-				dev_dbg(&glasshub->i2c_client->dev, "%s S-Record address %04xh\n", __FUNCTION__, glasshub->fw_value);
+				dev_dbg(&glasshub->i2c_client->dev, "%s SREC address %04xh\n",
+						__FUNCTION__, glasshub->fw_value);
 #endif
 				glasshub->fw_index = glasshub->fw_value - FIRMWARE_BASE_ADDRESS;
 				glasshub->fw_count--;
@@ -876,23 +1022,29 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 				glasshub->fw_checksum += glasshub->fw_value & 0xff;
 
 				/* validate address */
-				if (glasshub->fw_index < 0 || glasshub->fw_index > FIRMWARE_TOTAL_SIZE) {
-					dev_err(&glasshub->i2c_client->dev, "%s Address out of range: address %u count=%u\n",
-							__FUNCTION__, glasshub->fw_value, glasshub->fw_count);
+				if (glasshub->fw_index < 0 ||
+						glasshub->fw_index > FIRMWARE_TOTAL_SIZE) {
+					dev_err(&glasshub->i2c_client->dev,
+							"%s Address out of range: address %u count=%u\n",
+							__FUNCTION__, glasshub->fw_value,
+							glasshub->fw_count);
 					goto err_out;
 				}
 
 				/* store byte in image buffer */
 				glasshub->fw_image[glasshub->fw_index] = glasshub->fw_value;
 				glasshub->fw_value = 0;
-				glasshub->fw_dirty[glasshub->fw_index / (FIRMWARE_PAGE_SIZE * 32)] |= (1 << (glasshub->fw_index & 31));
+				glasshub->fw_dirty[glasshub->fw_index / (FIRMWARE_PAGE_SIZE * 32)] |=
+					(1 << (glasshub->fw_index & 31));
 				glasshub->fw_index++;
 				glasshub->fw_state = FW_STATE_BYTE_HI;
 
 				/* check for end of data */
 				if (--glasshub->fw_count == 1) {
 #if DEBUG_FLASH_MODE
-					dev_dbg(&glasshub->i2c_client->dev, "%s S-Record all bytes received\n", __FUNCTION__);
+					dev_dbg(&glasshub->i2c_client->dev,
+							"%s SREC all bytes received\n",
+							__FUNCTION__);
 #endif
 					glasshub->fw_state = FW_STATE_CHECKSUM_HI;
 				}
@@ -901,12 +1053,16 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 			case FW_STATE_CHECKSUM_LO:
 				if (convert_hex(buf[i], &glasshub->fw_value)) goto err_out;
 				if (glasshub->fw_value != (~glasshub->fw_checksum & 0xff)) {
-					dev_err(&glasshub->i2c_client->dev, "%s S-Record checksum mismatch %02xh != %02xh\n",
-							__FUNCTION__, (unsigned)~glasshub->fw_checksum & 0xff, (unsigned)glasshub->fw_value);
+					dev_err(&glasshub->i2c_client->dev,
+							"%s SREC checksum mismatch %02xh != %02xh\n",
+							__FUNCTION__,
+							(unsigned)~glasshub->fw_checksum & 0xff,
+							(unsigned)glasshub->fw_value);
 					goto err_out;
 				}
 #if DEBUG_FLASH_MODE
-				dev_dbg(&glasshub->i2c_client->dev, "%s S-Record checksum OK\n", __FUNCTION__);
+				dev_dbg(&glasshub->i2c_client->dev, "%s SREC checksum OK\n",
+						__FUNCTION__);
 #endif
 				glasshub->fw_state = FW_STATE_START;
 				break;
@@ -919,12 +1075,13 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 err_out:
 	exit_flash_mode_l(glasshub);
 	mutex_unlock(&glasshub->device_lock);
-	dev_err(&glasshub->i2c_client->dev, "%s Not an S-Record\n", __FUNCTION__);
+	dev_err(&glasshub->i2c_client->dev, "%s Not an SREC\n", __FUNCTION__);
 	return -EINVAL;
 }
 
 /* sysfs node to enter/exit flash programming mode */
-static ssize_t update_fw_enable_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+static ssize_t update_fw_enable_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
 {
 	unsigned long value = 0;
 	int rc = 0;
@@ -945,13 +1102,16 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 			if (!glasshub->fw_image) {
 				glasshub->fw_image = kzalloc(FIRMWARE_TOTAL_SIZE, GFP_USER);
 				if (!glasshub->fw_image) {
-					dev_err(&glasshub->i2c_client->dev, "%s failed to allocate memory for firmware image\n", __FUNCTION__);
+					dev_err(&glasshub->i2c_client->dev,
+							"%s failed to allocate memory for firmware image\n",
+							__FUNCTION__);
 					goto unlock;
 				}
 				memset(glasshub->fw_dirty, 0, sizeof(glasshub->fw_dirty));
 			}
 
-			rc = device_create_file(&glasshub->i2c_client->dev, &dev_attr_update_fw_data);
+			rc = device_create_file(&glasshub->i2c_client->dev,
+					&dev_attr_update_fw_data);
 			if (rc) goto unlock;
 
 			glasshub->fw_state = FW_STATE_START;
@@ -967,24 +1127,36 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 				if (glasshub->fw_image) {
 					int page;
 
-					dev_info(&glasshub->i2c_client->dev, "Dirty: %08x %08x %08x %08x\n",
-							glasshub->fw_dirty[0], glasshub->fw_dirty[1], glasshub->fw_dirty[2], glasshub->fw_dirty[3]);
+					dev_info(&glasshub->i2c_client->dev,
+							"Dirty: %08x %08x %08x %08x\n",
+							glasshub->fw_dirty[0],
+							glasshub->fw_dirty[1],
+							glasshub->fw_dirty[2],
+							glasshub->fw_dirty[3]);
 
 					for (page = 0; page < FIRMWARE_TOTAL_PAGES; page++) {
 						/* flash only dirty pages */
-						if (glasshub->fw_dirty[page / 32] & (1 << (page & 31))) {
+						if (glasshub->fw_dirty[page / 32] &
+								(1 << (page & 31))) {
 							uint8_t buffer[66];
 							int i, j;
 							buffer[0] = CMD_FLASH;
 							buffer[1] = page;
-							for (i = 2, j = page * FIRMWARE_PAGE_SIZE; i < FIRMWARE_PAGE_SIZE + 2; i++, j++) {
+							for (i = 2, j = page * FIRMWARE_PAGE_SIZE;
+									i < FIRMWARE_PAGE_SIZE + 2;
+									i++, j++) {
 								buffer[i] = glasshub->fw_image[j];
 							}
 
-							dev_info(&glasshub->i2c_client->dev, "%s Flash page %d\n", __FUNCTION__, page);
-							rc = _i2c_write_mult(glasshub, buffer, sizeof(buffer));
+							dev_info(&glasshub->i2c_client->dev,
+									"%s Flash page %d\n",
+									__FUNCTION__, page);
+							rc = _i2c_write_mult(glasshub, buffer,
+									sizeof(buffer));
 							if (rc) {
-								dev_err(&glasshub->i2c_client->dev, "%s Unable to flash glasshub device\n", __FUNCTION__);
+								dev_err(&glasshub->i2c_client->dev,
+										"%s Unable to flash glasshub device\n",
+										__FUNCTION__);
 							}
 						}
 					}
@@ -1023,6 +1195,8 @@ static DEVICE_ATTR(don_doff, DEV_MODE_RO, don_doff_show, NULL);
 static DEVICE_ATTR(don_doff_threshold, DEV_MODE_RW, don_doff_threshold_show, don_doff_threshold_store);
 static DEVICE_ATTR(don_doff_hysteresis, DEV_MODE_RW, don_doff_hysteresis_show, don_doff_hysteresis_store);
 static DEVICE_ATTR(led_drive, DEV_MODE_RW, led_drive_show, led_drive_store);
+static DEVICE_ATTR(calibrate, DEV_MODE_WO, NULL, calibrate_store);
+static DEVICE_ATTR(calibration_values, DEV_MODE_RO, calibration_values_show, NULL);
 static DEVICE_ATTR(error_code, DEV_MODE_RO, error_code_show, NULL);
 
 /* register prox device */
@@ -1032,7 +1206,8 @@ static int register_ps_device(struct glasshub_data *glasshub)
 
 	glasshub->ps_input_dev = input_allocate_device();
 	if (!glasshub->ps_input_dev) {
-		dev_err(&glasshub->i2c_client->dev, "%s: Failed to allocate prox input device\n", __func__);
+		dev_err(&glasshub->i2c_client->dev, "%s: Failed to allocate prox input device\n",
+				__func__);
 		return -ENOMEM;
 	}
 
@@ -1042,7 +1217,8 @@ static int register_ps_device(struct glasshub_data *glasshub)
 
 	rc = input_register_device(glasshub->ps_input_dev);
 	if (rc < 0) {
-		dev_err(&glasshub->i2c_client->dev, "%s: Failed to register prox input device \n", __func__);
+		dev_err(&glasshub->i2c_client->dev, "%s: Failed to register prox input device \n",
+				__func__);
 		goto free_device;
 	}
 	return rc;
@@ -1060,7 +1236,8 @@ static int register_don_doff_device(struct glasshub_data *glasshub)
 
 	glasshub->don_doff_dev = input_allocate_device();
 	if (!glasshub->don_doff_dev) {
-		dev_err(&glasshub->i2c_client->dev, "%s: Failed to allocate don_doff input device\n", __func__);
+		dev_err(&glasshub->i2c_client->dev, "%s: Failed to allocate don_doff input device\n",
+				__func__);
 		return -ENOMEM;
 	}
 
@@ -1070,7 +1247,8 @@ static int register_don_doff_device(struct glasshub_data *glasshub)
 
 	rc = input_register_device(glasshub->don_doff_dev);
 	if (rc) {
-		dev_err(&glasshub->i2c_client->dev, "%s: Failed to register don_doff input device\n", __func__);
+		dev_err(&glasshub->i2c_client->dev, "%s: Failed to register don_doff input device\n",
+				__func__);
 		goto err_out;
 	}
 
@@ -1082,7 +1260,8 @@ err_out:
 }
 
 /* register sysfs status and control nodes */
-static void sysfs_register_class_input_entry_glasshub(struct glasshub_data *glasshub, struct i2c_client *i2c_client) {
+static void sysfs_register_class_input_entry_glasshub(struct glasshub_data *glasshub,
+		struct i2c_client *i2c_client) {
 	int rc = 0;
 
 	/* store driver data into device private structure */
@@ -1127,6 +1306,14 @@ static void sysfs_register_class_input_entry_glasshub(struct glasshub_data *glas
 
 	if (!rc) {
 		rc = device_create_file(&i2c_client->dev, &dev_attr_led_drive);
+	}
+
+	if (!rc) {
+		rc = device_create_file(&i2c_client->dev, &dev_attr_calibrate);
+	}
+
+	if (!rc) {
+		rc = device_create_file(&i2c_client->dev, &dev_attr_calibration_values);
 	}
 
 	if (!rc) {
@@ -1201,8 +1388,8 @@ static ssize_t glasshub_read(struct file *file, char __user *buf, size_t count, 
 	if (count < sizeof(struct glasshub_data_user))
 		return -EINVAL;
 
-	if (count > GLASSHUB_RD_QUEUE_SZ * sizeof(struct glasshub_data_user))
-		count = GLASSHUB_RD_QUEUE_SZ * sizeof(struct glasshub_data_user);
+	if (count > READ_QUEUE_SZ * sizeof(struct glasshub_data_user))
+		count = READ_QUEUE_SZ * sizeof(struct glasshub_data_user);
 
 	if (mutex_lock_interruptible(&glasshub_user_lock)) {
 			dev_err(&client->dev, "%s: Unable to acquire user read lock\n", __func__);
@@ -1215,14 +1402,16 @@ static ssize_t glasshub_read(struct file *file, char __user *buf, size_t count, 
 			return -EAGAIN;
 		}
 		wait_event_interruptible(glasshub_read_wait,
-								 glasshub_user_rd_ptr != glasshub_user_wr_ptr);
+				glasshub_user_rd_ptr != glasshub_user_wr_ptr);
 		if (mutex_lock_interruptible(&glasshub_user_lock)) {
-			dev_err(&client->dev, "%s: Unable to acquire user read lock after sleep\n", __func__);
+			dev_err(&client->dev, "%s: Unable to acquire user read lock after sleep\n",
+					__func__);
 			return -EAGAIN;
 		}
 	}
 
-	while (glasshub_user_rd_ptr != glasshub_user_wr_ptr && count >= sizeof(struct glasshub_data_user)) {
+	while (glasshub_user_rd_ptr != glasshub_user_wr_ptr && count >=
+			sizeof(struct glasshub_data_user)) {
 		if (copy_to_user(buf, glasshub_user_rd_ptr,
 						 sizeof(struct glasshub_data_user))) {
 			rc = -EFAULT;
@@ -1233,7 +1422,7 @@ static ssize_t glasshub_read(struct file *file, char __user *buf, size_t count, 
 		count -= sizeof(struct glasshub_data_user);
 
 		glasshub_user_rd_ptr++;
-		if (glasshub_user_rd_ptr == (glasshub_fifo_buffer + GLASSHUB_RD_QUEUE_SZ)) {
+		if (glasshub_user_rd_ptr == (glasshub_fifo_buffer + READ_QUEUE_SZ)) {
 			glasshub_user_rd_ptr = glasshub_fifo_buffer;
 		}
 	}
@@ -1264,11 +1453,13 @@ static int glasshub_setup(struct glasshub_data *glasshub) {
 	rc = reset_device_l(glasshub, 1);
 
 	/* get app version number */
-	dev_info(&glasshub->i2c_client->dev, "%s Attempt to get glasshub firmwware version\n", __FUNCTION__);
+	dev_info(&glasshub->i2c_client->dev, "%s Attempt to get glasshub firmwware version\n",
+			__FUNCTION__);
 	buffer[0] = CMD_VERSION;
 	rc = _i2c_read(glasshub, buffer, 1, buffer, sizeof(buffer));
 	if (rc) goto err_out;
-	dev_info(&glasshub->i2c_client->dev, "%s Firmware version: %d.%d\n", __FUNCTION__, buffer[0], buffer[1]);
+	dev_info(&glasshub->i2c_client->dev, "%s Firmware version: %d.%d\n",
+			__FUNCTION__, buffer[0], buffer[1]);
 
 	/* request IRQ */
 	dev_info(&glasshub->i2c_client->dev, "%s call request_threaded_irq\n", __FUNCTION__);
@@ -1276,7 +1467,8 @@ static int glasshub_setup(struct glasshub_data *glasshub) {
 			glasshub_threaded_irq_handler, IRQF_TRIGGER_FALLING | IRQF_SHARED,
 			"glasshub_irq", glasshub);
 	if (rc) {
-		dev_err(&glasshub->i2c_client->dev, "%s request_threaded_irq failed\n", __FUNCTION__);
+		dev_err(&glasshub->i2c_client->dev, "%s request_threaded_irq failed\n",
+				__FUNCTION__);
 	}
 
 	/* Allow this interrupt to wake the system */
@@ -1290,13 +1482,15 @@ err_out:
 	return rc;
 }
 
-static int	__devinit glasshub_probe(struct i2c_client *i2c_client, const struct i2c_device_id *id)
+static int	__devinit glasshub_probe(struct i2c_client *i2c_client,
+		const struct i2c_device_id *id)
 {
 	struct glasshub_data *glasshub = NULL;
 	glasshub = kzalloc(sizeof(struct glasshub_data), GFP_KERNEL);
 	if (!glasshub)
 	{
-		dev_err(&i2c_client->dev, "%s: Unable to allocate memory for driver structure\n", __FUNCTION__);
+		dev_err(&i2c_client->dev, "%s: Unable to allocate memory for driver structure\n",
+				__FUNCTION__);
 		return -ENOMEM;
 	}
 
