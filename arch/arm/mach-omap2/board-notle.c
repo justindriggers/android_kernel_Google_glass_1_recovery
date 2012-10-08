@@ -41,9 +41,6 @@
 #ifdef CONFIG_INPUT_LTR506ALS
 #include <linux/i2c/ltr506als.h>
 #endif
-#ifdef CONFIG_INPUT_SI114X
-#include <linux/i2c/si114x.h>
-#endif
 #include <linux/mpu.h>
 
 #ifdef CONFIG_INPUT_GLASSHUB
@@ -1492,49 +1489,6 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 };
 #endif
 
-
-#ifdef CONFIG_INPUT_SI114X
-// gpio interrupt line is board specific
-static struct si114x_platform_data notle_si114x_data = {
-	/* TODO(cmanton) Interrupts are not built into the driver yet */
-
-	/* Rate of device timer waking itself up.
-	 * 0x00: Never
-	 * 0x84: Every 10ms
-	 * 0x94: Every 20ms
-	 * 0xb9: Every 100ms
-	 * 0xdf: Every 496ms
-	 * 0xff: Every 1984ms
-	 */
-	.pfd_meas_rate = SI114X_MEAS_RATE_10ms,
-
-	/* Rate of ALS taking measurement every time device wakes up.
-	 * 0x00: Never
-	 * 0x08: Every time device awakens.
-	 * 0x32: Every 10 times device awakens.
-	 * 0x69: Every 100 times device awakens.
-	 */
-	.pfd_als_rate = SI114X_ALS_RATE_1x,
-
-	/* Rate of PS taking measurement every time device wakes up.
-	 * 0x00: Never
-	 * 0x08: Every time device awakens.
-	 * 0x32: Every 10 times device awakens.
-	 * 0x69: Every 100 times device awakens.
-	 */
-        .pfd_ps_rate = SI114X_PS_RATE_1x,
-
-	/* LED intensities */
-        .pfd_ps_led1 = SI114X_LED_90,
-        .pfd_ps_led2 = SI114X_LED_90,
-        .pfd_ps_led3 = SI114X_LED_90,
-
-        /* input subsystem poll interval in ms when using polling */
-        .pfd_als_poll_interval = 1000,
-        .pfd_ps_poll_interval = 12,
-};
-#endif  /* CONFIG_INPUT_SI114X */
-
 #ifdef CONFIG_INPUT_GLASSHUB
 static struct glasshub_platform_data notle_glasshub_data;
 #endif  /* CONFIG_INPUT_GLASSHUB */
@@ -1552,12 +1506,6 @@ static struct i2c_board_info __initdata notle_i2c_4_boardinfo[] = {
                 I2C_BOARD_INFO("ltr506als", 0x3a),
                 .flags = I2C_CLIENT_WAKE,
                 .platform_data = &notle_ltr506als_data,
-        },
-#endif
-#ifdef CONFIG_INPUT_SI114X
-        {
-                I2C_BOARD_INFO("si114x", 0x5a),
-                .platform_data = &notle_si114x_data,
         },
 #endif
 
@@ -1624,10 +1572,6 @@ static void __init notle_i2c_irq_fixup(void)
 
 #ifdef CONFIG_INPUT_LTR506ALS
     notle_ltr506als_data.pfd_gpio_int_no = gpio_prox;
-#endif
-
-#ifdef CONFIG_INPUT_SI114X
-    notle_si114x_data.pfd_gpio_int_no = gpio_prox;
 #endif
 
 #ifdef CONFIG_INPUT_GLASSHUB
@@ -1743,6 +1687,8 @@ static struct omap_board_mux evt1_board_mux[] __initdata = {
     OMAP4_MUX(USBB1_ULPITLL_DAT2,   OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // PROX_INT
     OMAP4_MUX(USBB1_ULPITLL_DAT7,   OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),           // MPU9000_INT
     OMAP4_MUX(USBB1_ULPITLL_DAT4,   OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),           // MPU9000_INT_TIMER
+    OMAP4_MUX(USBB1_ULPITLL_STP,    OMAP_MUX_MODE7 ),                   // FPGA_CDONE
+    OMAP4_MUX(USBB1_ULPITLL_DIR,    OMAP_MUX_MODE7 ),                   // FPGA_CRESET_B
 	{ .reg_offset = OMAP_MUX_TERMINATOR },
 };
 // EVT1 WakeUp:
@@ -1750,6 +1696,8 @@ static struct omap_board_mux evt1_board_wkup_mux[] __initdata = {
     OMAP4_MUX(SIM_IO,               OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),  // BCM_WLAN_HOST_WAKE
     OMAP4_MUX(FREF_CLK4_REQ,        OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GREEN_LED
     OMAP4_MUX(FREF_CLK4_OUT,        OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // YELLOW_LED
+    OMAP4_MUX(SIM_CLK,              OMAP_MUX_MODE7 ),                   // FPGA_CBSEL0
+    OMAP4_MUX(SIM_CD,               OMAP_MUX_MODE7 ),                   // FPGA_CBSEL1
 	{ .reg_offset = OMAP_MUX_TERMINATOR },
 };
 
@@ -1770,6 +1718,9 @@ static struct omap_board_mux evt2_board_mux[] __initdata = {
     OMAP4_MUX(C2C_DATA14,           OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // PROX_INT
     OMAP4_MUX(ABE_DMIC_DIN2,        OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN),    // CAMERA, TOP_SW
     OMAP4_MUX(DPM_EMU2,             OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // SOC_INT
+    OMAP4_MUX(USBB1_ULPITLL_STP,    OMAP_MUX_MODE7 ),                   // FPGA_CDONE
+    OMAP4_MUX(USBB1_ULPITLL_NXT,    OMAP_MUX_MODE7 ),                   // FPGA_CRESET_B
+    OMAP4_MUX(USBB1_ULPITLL_DAT7,   OMAP_MUX_MODE7 ),                   // FPGA_CBSEL1
 	{ .reg_offset = OMAP_MUX_TERMINATOR },
 };
 // EVT2 WakeUp:
@@ -1781,6 +1732,7 @@ static struct omap_board_mux evt2_board_wkup_mux[] __initdata = {
     OMAP4_MUX(SIM_PWRCTRL,          OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),           // MPU9000_INT_TIMER
     OMAP4_MUX(SIM_RESET,            OMAP_MUX_MODE3 | OMAP_PIN_INPUT),   // BCM_BT_HOST_WAKE
     OMAP4_MUX(FREF_CLK3_OUT,        OMAP_MUX_MODE3 | OMAP_PIN_INPUT),   // BAT_LOW
+    OMAP4_MUX(SYS_PWRON_RESET_OUT,  OMAP_MUX_MODE7 ),                   // FPGA_CBSEL0
 	{ .reg_offset = OMAP_MUX_TERMINATOR },
 };
 #else
