@@ -1584,6 +1584,13 @@ enum wiphy_flags {
 	WIPHY_FLAG_MESH_AUTH			= BIT(10),
 	WIPHY_FLAG_SUPPORTS_SCHED_SCAN		= BIT(11),
 	WIPHY_FLAG_ENFORCE_COMBINATIONS		= BIT(12),
+        WIPHY_FLAG_SUPPORTS_FW_ROAM             = BIT(13),
+        WIPHY_FLAG_AP_UAPSD                     = BIT(14),
+        WIPHY_FLAG_SUPPORTS_TDLS                = BIT(15),
+        WIPHY_FLAG_TDLS_EXTERNAL_SETUP          = BIT(16),
+        WIPHY_FLAG_HAVE_AP_SME                  = BIT(17),
+        WIPHY_FLAG_REPORTS_OBSS                 = BIT(18),
+
 };
 
 /**

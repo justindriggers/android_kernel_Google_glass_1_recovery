@@ -24,11 +24,12 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd.h 323282 2012-03-23 19:41:57Z $
+ * $Id: dhd.h 344123 2012-07-11 09:33:49Z $
  */
 
-
-
+/****************
+ * Common types *
+ */
 
 #ifndef _dhd_h_
 #define _dhd_h_
@@ -50,6 +51,7 @@
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && defined(CONFIG_HAS_WAKELOCK)
 #include <linux/wakelock.h>
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && defined (CONFIG_HAS_WAKELOCK) */
+
 /* The kernel threading is sdio-specific */
 struct task_struct;
 struct sched_param;
@@ -73,6 +75,7 @@ enum dhd_bus_state {
 	DHD_BUS_DATA		/* Ready for frame transfers */
 };
 
+
 /* Firmware requested operation mode */
 #define STA_MASK			0x0001
 #define HOSTAPD_MASK		0x0002
@@ -82,11 +85,16 @@ enum dhd_bus_state {
 #define P2P_GC_ENABLED		0x0020
 #define CONCURENT_MASK		0x00F0
 
+#define MANUFACTRING_FW 	"WLTEST"
+
 /* max sequential rxcntl timeouts to set HANG event */
 #define MAX_CNTL_TIMEOUT  2
 
 #define DHD_SCAN_ACTIVE_TIME	 40 /* ms : Embedded default Active setting from DHD Driver */
 #define DHD_SCAN_PASSIVE_TIME	130 /* ms: Embedded default Passive setting from DHD Driver */
+
+#define DHD_BEACON_TIMEOUT_NORMAL	4
+#define DHD_BEACON_TIMEOUT_HIGH		10
 
 enum dhd_bus_wake_state {
 	WAKE_LOCK_OFF,
@@ -104,7 +112,6 @@ enum dhd_bus_wake_state {
 	WAKE_LOCK_SOFTAP_THREAD,
 	WAKE_LOCK_MAX
 };
-
 enum dhd_prealloc_index {
 	DHD_PREALLOC_PROT = 0,
 	DHD_PREALLOC_RXBUF,
@@ -119,7 +126,6 @@ typedef enum  {
 	DHD_IF_CHANGE,
 	DHD_IF_DELETING
 } dhd_if_state_t;
-
 
 #if defined(CONFIG_DHD_USE_STATIC_BUF)
 
@@ -207,10 +213,12 @@ typedef struct dhd_pub {
 	char eventmask[WL_EVENTING_MASK_LEN];
 	int	op_mode;				/* STA, HostAPD, WFD, SoftAP */
 
+
 /* Set this to 1 to use a seperate interface (p2p0) for p2p operations.
  *  For ICS MR1 releases it should be disable to be compatable with ICS MR1 Framework
  *  see target dhd-cdc-sdmmc-panda-cfg80211-icsmr1-gpl-debug in Makefile
  */
+/* #define WL_ENABLE_P2P_IF		1 */
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) && 1
 	struct mutex 	wl_start_stop_lock; /* lock/unlock for Android start/stop */
@@ -322,7 +330,6 @@ inline static void MUTEX_UNLOCK_SOFTAP_SET(dhd_pub_t * dhdp)
 #define DHD_OS_WAKE_LOCK_TIMEOUT(pub)		dhd_os_wake_lock_timeout(pub)
 #define DHD_OS_WAKE_LOCK_RX_TIMEOUT_ENABLE(pub, val)	dhd_os_wake_lock_rx_timeout_enable(pub, val)
 #define DHD_OS_WAKE_LOCK_CTRL_TIMEOUT_ENABLE(pub, val)	dhd_os_wake_lock_ctrl_timeout_enable(pub, val)
-
 #define DHD_PACKET_TIMEOUT_MS	1000
 #define DHD_EVENT_TIMEOUT_MS	1500
 
@@ -426,16 +433,21 @@ extern void dhd_os_sdunlock_sndup_rxq(dhd_pub_t * pub);
 extern void dhd_os_sdlock_eventq(dhd_pub_t * pub);
 extern void dhd_os_sdunlock_eventq(dhd_pub_t * pub);
 extern bool dhd_os_check_hang(dhd_pub_t *dhdp, int ifidx, int ret);
+extern int net_os_send_hang_message(struct net_device *dev);
 
 #ifdef PNO_SUPPORT
 extern int dhd_pno_enable(dhd_pub_t *dhd, int pfn_enabled);
 extern int dhd_pno_clean(dhd_pub_t *dhd);
 extern int dhd_pno_set(dhd_pub_t *dhd, wlc_ssid_t* ssids_local, int nssid,
                        ushort  scan_fr, int pno_repeat, int pno_freq_expo_max);
+extern int dhd_pno_set_ex(dhd_pub_t *dhd, wl_pfn_t* ssidnet, int nssid,
+				ushort pno_interval, int pno_repeat, int pno_expo_max, int pno_lost_time);
 extern int dhd_pno_get_status(dhd_pub_t *dhd);
 extern int dhd_dev_pno_reset(struct net_device *dev);
 extern int dhd_dev_pno_set(struct net_device *dev, wlc_ssid_t* ssids_local,
                            int nssid, ushort  scan_fr, int pno_repeat, int pno_freq_expo_max);
+extern int dhd_dev_pno_set_ex(struct net_device *dev, wl_pfn_t* ssidnet, int nssid,
+				ushort	pno_interval, int pno_repeat, int pno_expo_max, int pno_lost_time);
 extern int dhd_dev_pno_enable(struct net_device *dev,  int pfn_enabled);
 extern int dhd_dev_get_pno_status(struct net_device *dev);
 #endif /* PNO_SUPPORT */
@@ -445,11 +457,13 @@ extern int dhd_dev_get_pno_status(struct net_device *dev);
 #define DHD_MULTICAST4_FILTER_NUM	2
 #define DHD_MULTICAST6_FILTER_NUM	3
 #define DHD_MDNS_FILTER_NUM		4
+extern int dhd_os_set_packet_filter(dhd_pub_t *dhdp, int val);
 extern int net_os_set_packet_filter(struct net_device *dev, int val);
 extern int net_os_rxfilter_add_remove(struct net_device *dev, int val, int num);
 
 extern int dhd_get_dtim_skip(dhd_pub_t *dhd);
 extern bool dhd_check_ap_wfd_mode_set(dhd_pub_t *dhd);
+
 
 #ifdef DHD_DEBUG
 extern int write_to_file(dhd_pub_t *dhd, uint8 *buf, int size);
@@ -598,6 +612,11 @@ extern uint dhd_pktgen_len;
 extern char fw_path[MOD_PARAM_PATHLEN];
 extern char nv_path[MOD_PARAM_PATHLEN];
 
+#ifdef DHD_BCM_WIFI_HDMI
+#define MOD_PARAM_TYPELEN 64
+extern char wifi_type[MOD_PARAM_TYPELEN];
+#endif /* DHD_BCM_WIFI_HDMI */
+
 #ifdef SOFTAP
 extern char fw_path2[MOD_PARAM_PATHLEN];
 #endif
@@ -744,5 +763,16 @@ void dhd_aoe_arp_clr(dhd_pub_t *dhd);
 int dhd_arp_get_arp_hostip_table(dhd_pub_t *dhd, void *buf, int buflen);
 void dhd_arp_offload_add_ip(dhd_pub_t *dhd, uint32 ipaddr);
 #endif /* ARP_OFFLOAD_SUPPORT */
+
+#ifdef DHD_BCM_WIFI_HDMI
+/* Wireless HDMI run-time enable flag */
+extern bool dhd_bcm_whdmi_enable;
+
+/* Network interface created for the Wireless HDMI soft AP */
+#define DHD_WHDMI_SOFTAP_IF_NAME	"wl0.2"
+#define DHD_WHDMI_SOFTAP_IF_NAME_LEN	5
+#define DHD_WHDMI_SOFTAP_IF_NUM		2
+
+#endif /* DHD_BCM_WIFI_HDMI */
 
 #endif /* _dhd_h_ */

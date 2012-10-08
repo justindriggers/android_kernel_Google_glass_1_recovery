@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: bcmsdh_sdmmc.c 314904 2012-02-14 21:36:04Z $
+ * $Id: bcmsdh_sdmmc.c 353520 2012-08-27 22:55:07Z $
  */
 #include <typedefs.h>
 
@@ -63,7 +63,11 @@ extern int sdio_reset_comm(struct mmc_card *card);
 extern PBCMSDH_SDMMC_INSTANCE gInstance;
 
 uint sd_sdmode = SDIOH_MODE_SD4;	/* Use SD4 mode by default */
+#if defined(SDIO_F2_BLKSIZE)
+uint sd_f2_blocksize = SDIO_F2_BLKSIZE;
+#else
 uint sd_f2_blocksize = 512;		/* Default blocksize */
+#endif
 
 uint sd_divisor = 2;			/* Default 48MHz/2 = 24MHz */
 
@@ -509,7 +513,6 @@ sdioh_iovar_op(sdioh_info_t *si, const char *name,
 
 		/* Now set it */
 		si->client_block_size[func] = blksize;
-
 		break;
 	}
 
@@ -683,7 +686,7 @@ sdioh_enable_hw_oob_intr(sdioh_info_t *sd, bool enable)
 	if (enable)
 		data = SDIO_SEPINT_MASK | SDIO_SEPINT_OE | SDIO_SEPINT_ACT_HI;
 	else
-		data = SDIO_SEPINT_ACT_HI;
+		data = SDIO_SEPINT_ACT_HI;	/* disable hw oob interrupt */
 
 	status = sdioh_request_byte(sd, SDIOH_WRITE, 0, SDIOD_CCCR_BRCM_SEPINT, &data);
 	return status;
@@ -799,41 +802,49 @@ sdioh_request_byte(sdioh_info_t *sd, uint rw, uint func, uint regaddr, uint8 *by
 #if defined(MMC_SDIO_ABORT)
 			/* to allow abort command through F1 */
 			else if (regaddr == SDIOD_CCCR_IOABORT) {
-				sdio_claim_host(gInstance->func[func]);
-				/*
-				* this sdio_f0_writeb() can be replaced with another api
-				* depending upon MMC driver change.
-				* As of this time, this is temporaray one
-				*/
-				sdio_writeb(gInstance->func[func], *byte, regaddr, &err_ret);
-				sdio_release_host(gInstance->func[func]);
+				if (gInstance->func[func]) {
+					sdio_claim_host(gInstance->func[func]);
+					/*
+					* this sdio_f0_writeb() can be replaced with another api
+					* depending upon MMC driver change.
+					* As of this time, this is temporaray one
+					*/
+					sdio_writeb(gInstance->func[func],
+						*byte, regaddr, &err_ret);
+					sdio_release_host(gInstance->func[func]);
+				}
 			}
 #endif /* MMC_SDIO_ABORT */
 			else if (regaddr < 0xF0) {
 				sd_err(("bcmsdh_sdmmc: F0 Wr:0x%02x: write disallowed\n", regaddr));
 			} else {
 				/* Claim host controller, perform F0 write, and release */
-				sdio_claim_host(gInstance->func[func]);
-				sdio_f0_writeb(gInstance->func[func], *byte, regaddr, &err_ret);
-				sdio_release_host(gInstance->func[func]);
+				if (gInstance->func[func]) {
+					sdio_claim_host(gInstance->func[func]);
+					sdio_f0_writeb(gInstance->func[func],
+						*byte, regaddr, &err_ret);
+					sdio_release_host(gInstance->func[func]);
+				}
 			}
 		} else {
 			/* Claim host controller, perform Fn write, and release */
-			sdio_claim_host(gInstance->func[func]);
-			sdio_writeb(gInstance->func[func], *byte, regaddr, &err_ret);
-			sdio_release_host(gInstance->func[func]);
+			if (gInstance->func[func]) {
+				sdio_claim_host(gInstance->func[func]);
+				sdio_writeb(gInstance->func[func], *byte, regaddr, &err_ret);
+				sdio_release_host(gInstance->func[func]);
+			}
 		}
 	} else { /* CMD52 Read */
 		/* Claim host controller, perform Fn read, and release */
-		sdio_claim_host(gInstance->func[func]);
-
-		if (func == 0) {
-			*byte = sdio_f0_readb(gInstance->func[func], regaddr, &err_ret);
-		} else {
-			*byte = sdio_readb(gInstance->func[func], regaddr, &err_ret);
+		if (gInstance->func[func]) {
+			sdio_claim_host(gInstance->func[func]);
+			if (func == 0) {
+				*byte = sdio_f0_readb(gInstance->func[func], regaddr, &err_ret);
+			} else {
+				*byte = sdio_readb(gInstance->func[func], regaddr, &err_ret);
+			}
+			sdio_release_host(gInstance->func[func]);
 		}
-
-		sdio_release_host(gInstance->func[func]);
 	}
 
 	if (err_ret) {
@@ -1012,7 +1023,12 @@ sdioh_request_packet(sdioh_info_t *sd, uint fix_inc, uint write, uint func,
 				pkt_len -= xfred_len;
 				xfred_len = 0;
 			}
-			pkt_len = (pkt_len + 3) & 0xFFFFFFFC;
+
+			/* Align Patch */
+			if (!write || pkt_len < 32)
+				pkt_len = (pkt_len + 3) & 0xFFFFFFFC;
+			else if (pkt_len % DHD_SDALIGN)
+				pkt_len += DHD_SDALIGN - (pkt_len % DHD_SDALIGN);
 #ifdef CONFIG_MMC_MSM7X00A
 			if ((pkt_len % 64) == 32) {
 				sd_trace(("%s: Rounding up TX packet +=32\n", __FUNCTION__));
@@ -1404,4 +1420,29 @@ int
 sdioh_waitlockfree(sdioh_info_t *sd)
 {
 	return (1);
+}
+
+
+SDIOH_API_RC
+sdioh_gpioouten(sdioh_info_t *sd, uint32 gpio)
+{
+	return SDIOH_API_RC_FAIL;
+}
+
+SDIOH_API_RC
+sdioh_gpioout(sdioh_info_t *sd, uint32 gpio, bool enab)
+{
+	return SDIOH_API_RC_FAIL;
+}
+
+bool
+sdioh_gpioin(sdioh_info_t *sd, uint32 gpio)
+{
+	return FALSE;
+}
+
+SDIOH_API_RC
+sdioh_gpio_init(sdioh_info_t *sd)
+{
+	return SDIOH_API_RC_FAIL;
 }
