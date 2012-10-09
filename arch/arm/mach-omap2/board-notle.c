@@ -133,6 +133,7 @@ static int notle_gpio_board_evt1[GPIO_MAX_INDEX] = {
     [GPIO_CAM_PWDN_INDEX] = GPIO_CAM_PWDN_EVT1,
     [GPIO_TOUCHPAD_INT_N_INDEX] = GPIO_TOUCHPAD_INT_N_EVT1,
     [GPIO_PROX_INT_INDEX] = GPIO_PROX_INT_EVT1,
+    [GPIO_BLINK_INT_INDEX] = GPIO_PROX_INT_EVT1,    // shared in evt1
     [GPIO_BT_RST_N_INDEX] = GPIO_BT_RST_N_EVT1,
     [GPIO_BCM_BT_HOST_WAKE_INDEX] = GPIO_BCM_BT_HOST_WAKE_EVT1,
     [GPIO_BCM_WLAN_HOST_WAKE_INDEX] = GPIO_BCM_WLAN_HOST_WAKE_EVT,
@@ -1554,12 +1555,20 @@ static struct omap_i2c_bus_board_data __initdata notle_i2c_4_bus_pdata;
 static void __init notle_i2c_irq_fixup(void)
 {
     int i;
-    int gpio_mpu, gpio_prox, gpio_touchpad;
+    int gpio_mpu, gpio_prox, gpio_touchpad, gpio_blink;
     struct i2c_board_info *pinfo;
 
     gpio_prox = notle_get_gpio(GPIO_PROX_INT_INDEX);
     gpio_mpu = notle_get_gpio(GPIO_MPU9000_INT_INDEX);
     gpio_touchpad = notle_get_gpio(GPIO_TOUCHPAD_INT_N_INDEX);
+    gpio_blink = notle_get_gpio(GPIO_BLINK_INT_INDEX);
+
+    // XXX TODO(jscarr) REMOVE this when pre EVT2 units are destroyed
+    // first batch of evt2 had prox_int on blink_int
+    if (NOTLE_VERSION == V1_EVT2) {
+        pr_err("Forcing prox_int to %d instead of %d\n", gpio_blink, gpio_prox); 
+        gpio_prox = gpio_blink;
+    }
 
     // Fix up the global device data structures
 #ifdef CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C
@@ -1575,7 +1584,7 @@ static void __init notle_i2c_irq_fixup(void)
 #endif
 
 #ifdef CONFIG_INPUT_GLASSHUB
-notle_glasshub_data.gpio_int_no = gpio_prox;
+    notle_glasshub_data.gpio_int_no = gpio_blink;
 #endif
 
 #ifdef CONFIG_RMI4_BUS
@@ -1588,8 +1597,11 @@ notle_glasshub_data.gpio_int_no = gpio_prox;
         if (!strcmp("mpu9150", pinfo->type)  || !strcmp("ak8975", pinfo->type)) {
             pinfo->irq = OMAP_GPIO_IRQ(gpio_mpu);
         }
-        if (!strcmp("ltr506als", pinfo->type) || !strcmp("glasshub", pinfo->type)) {
+        if (!strcmp("ltr506als", pinfo->type)) {
             pinfo->irq = OMAP_GPIO_IRQ(gpio_prox);
+        }
+        if (!strcmp("glasshub", pinfo->type)) {
+            pinfo->irq = OMAP_GPIO_IRQ(gpio_blink);
         }
         pinfo++;
     }
