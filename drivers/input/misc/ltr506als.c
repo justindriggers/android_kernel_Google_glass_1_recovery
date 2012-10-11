@@ -45,6 +45,12 @@
 
 #define DEVICE_NAME "ltr506als"
 
+/* For a small number of devices we need to share this GPIO interrupt with
+   another device.  This is not necessary should this driver obtains
+   an exclusive interrupt.
+   */
+#define USE_SHARED_IRQ 1
+
 struct ltr506_data {
 	/* Device */
 	struct i2c_client *i2c_client;
@@ -438,17 +444,19 @@ static void ltr506_schedwork(struct work_struct *work)
 
 	if (!interrupt_stat) {
 		/* There was an interrupt with no work to do */
+#ifndef USE_SHARED_IRQ
 		int i;
-		u8 buf[40];
-		dev_info(&ltr506->i2c_client->dev,"%s Unexpected received"
-			 " interrupt with no work to do status:0x%02x\n",
-			 __func__, status);
-		buf[0] = 0x80;
-		I2C_Read(buf, sizeof(buf));
-		for (i = 0; i < sizeof(buf); i++) {
-			dev_info(&ltr506->i2c_client->dev, "%s reg:0x%02x"
-				 " val:0x%02x\n", __func__, 0x80+i, buf[i]);
-		}
+                u8 buf[40];
+                dev_dbg(&ltr506->i2c_client->dev,"%s Unexpected received"
+                        " interrupt with no work to do status:0x%02x\n",
+                        __func__, status);
+                buf[0] = 0x80;
+                I2C_Read(buf, sizeof(buf));
+                for (i = 0; i < sizeof(buf); i++) {
+	                dev_dbg(&ltr506->i2c_client->dev, "%s reg:0x%02x"
+	                        " val:0x%02x\n", __func__, 0x80+i, buf[i]);
+                }
+#endif
 	} else {
 		// TODO(cmanton) Ignore newdata flag since it seems to only
 		// be set occasionally and we miss data.
@@ -463,7 +471,9 @@ static void ltr506_schedwork(struct work_struct *work)
 			report_als_input_event(ltr506);
 		}
 	}
+#ifndef USE_SHARED_IRQ
 	enable_irq(ltr506->irq);
+#endif
 }
 
 
@@ -472,11 +482,12 @@ static DECLARE_WORK(irq_workqueue, ltr506_schedwork);
 /* IRQ Handler */
 static irqreturn_t ltr506_irq_handler(int irq, void *data)
 {
+#ifndef USE_SHARED_IRQ
 	struct ltr506_data *ltr506 = data;
 
 	/* disable an irq without waiting */
 	disable_irq_nosync(ltr506->irq);
-
+#endif
 	schedule_work(&irq_workqueue);
 
 	return IRQ_HANDLED;
@@ -486,6 +497,11 @@ static int ltr506_gpio_irq(struct ltr506_data *ltr506)
 {
 	int rc = 0;
 
+#ifdef USE_SHARED_IRQ
+	dev_info(&ltr506->i2c_client->dev, "%s: Using shared interrupt with wink detector\n", __func__);
+	rc = request_irq(ltr506->irq, ltr506_irq_handler, IRQF_TRIGGER_LOW | IRQF_SHARED,
+	                 DEVICE_NAME, ltr506);
+#else
 	rc = gpio_request(ltr506->gpio_int_no, DEVICE_NAME);
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev,"%s: GPIO %d Request Fail"
@@ -503,6 +519,7 @@ static int ltr506_gpio_irq(struct ltr506_data *ltr506)
 	/* Configure an active low trigger interrupt for the device */
 	rc = request_irq(ltr506->irq, ltr506_irq_handler, IRQF_TRIGGER_LOW,
 	                 DEVICE_NAME, ltr506);
+#endif
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s: Request IRQ (%d) for"
 		        " GPIO %d Fail (%d)\n", __func__, ltr506->irq,
@@ -512,8 +529,9 @@ static int ltr506_gpio_irq(struct ltr506_data *ltr506)
 
 	return rc;
 out1:
+#ifndef USE_SHARED_IRQ
 	gpio_free(ltr506->gpio_int_no);
-
+#endif
 	return rc;
 }
 
