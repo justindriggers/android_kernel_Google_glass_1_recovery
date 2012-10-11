@@ -43,7 +43,7 @@
 #define WRITE_BE32_KEY_TO_MEM(key_addr)  do \
 	{ \
 		out = cpu_to_be32p(&data); \
-		p = (unsigned char *)&out; \
+		p = (u8 *)&out; \
 		result = mem_w_key(key_addr, 4, p); \
 		if (result) \
 			return result; \
@@ -106,8 +106,8 @@ static void inv_setup_reg(struct inv_reg_map_s *reg)
  *       address could be specified in this case. We could have two different
  *       i2c address due to secondary i2c interface.
  */
-int inv_i2c_read_base(struct inv_mpu_iio_s *st, unsigned short i2c_addr,
-	unsigned char reg, unsigned short length, unsigned char *data)
+int inv_i2c_read_base(struct inv_mpu_iio_s *st, u16 i2c_addr,
+	u8 reg, u16 length, u8 *data)
 {
 	struct i2c_msg msgs[2];
 	int res;
@@ -150,9 +150,9 @@ int inv_i2c_read_base(struct inv_mpu_iio_s *st, unsigned short i2c_addr,
  *       i2c address due to secondary i2c interface.
  */
 int inv_i2c_single_write_base(struct inv_mpu_iio_s *st,
-	unsigned short i2c_addr, unsigned char reg, unsigned char data)
+	u16 i2c_addr, u8 reg, u8 data)
 {
-	unsigned char tmp[2];
+	u8 tmp[2];
 	struct i2c_msg msg;
 	int res;
 
@@ -178,10 +178,130 @@ int inv_i2c_single_write_base(struct inv_mpu_iio_s *st,
 	}
 }
 
+static int inv_switch_engine(struct inv_mpu_iio_s *st, bool en, u32 mask)
+{
+	struct inv_reg_map_s *reg;
+	u8 data, mgmt_1;
+	int result;
+	reg = &st->reg;
+	/* switch clock needs to be careful. Only when gyro is on, can
+	   clock source be switched to gyro. Otherwise, it must be set to
+	   internal clock */
+	if (BIT_PWR_GYRO_STBY == mask) {
+		result = inv_i2c_read(st, reg->pwr_mgmt_1, 1, &mgmt_1);
+		if (result)
+			return result;
+
+		mgmt_1 &= ~BIT_CLK_MASK;
+	}
+
+	if ((BIT_PWR_GYRO_STBY == mask) && (!en)) {
+		/* turning off gyro requires switch to internal clock first.
+		   Then turn off gyro engine */
+		mgmt_1 |= INV_CLK_INTERNAL;
+		result = inv_i2c_single_write(st, reg->pwr_mgmt_1,
+						mgmt_1);
+		if (result)
+			return result;
+		st->chip_config.clk_src = INV_CLK_INTERNAL;
+	}
+
+	result = inv_i2c_read(st, reg->pwr_mgmt_2, 1, &data);
+	if (result)
+		return result;
+	if (en)
+		data &= (~mask);
+	else
+		data |= mask;
+	result = inv_i2c_single_write(st, reg->pwr_mgmt_2, data);
+	if (result)
+		return result;
+
+	if ((BIT_PWR_GYRO_STBY == mask) && en) {
+		/* only gyro on needs sensor up time */
+		msleep(SENSOR_UP_TIME);
+		/* after gyro is on & stable, switch internal clock to PLL */
+		mgmt_1 |= INV_CLK_PLL;
+		result = inv_i2c_single_write(st, reg->pwr_mgmt_1,
+						mgmt_1);
+		if (result)
+			return result;
+		st->chip_config.clk_src = INV_CLK_PLL;
+	}
+
+	return 0;
+}
+
+/**
+ *  inv_lpa_freq() - store current low power frequency setting.
+ */
+static int inv_lpa_freq(struct inv_mpu_iio_s *st, int lpa_freq)
+{
+	unsigned long result;
+	u8 d;
+	struct inv_reg_map_s *reg;
+
+	if (INV_MPU6500 == st->chip_type) {
+		if (lpa_freq > MAX_6500_LPA_FREQ_PARAM)
+			return -EINVAL;
+		result = inv_i2c_single_write(st, REG_6500_LP_ACCEL_ODR,
+					      lpa_freq);
+		if (result)
+			return result;
+	} else {
+		if (lpa_freq > MAX_LPA_FREQ_PARAM)
+			return -EINVAL;
+		reg = &st->reg;
+		result = inv_i2c_read(st, reg->pwr_mgmt_2, 1, &d);
+		if (result)
+			return result;
+		d &= ~BIT_LPA_FREQ;
+		d |= (u8)(lpa_freq << LPA_FREQ_SHIFT);
+		result = inv_i2c_single_write(st, reg->pwr_mgmt_2, d);
+		if (result)
+			return result;
+	}
+	st->chip_config.lpa_freq = lpa_freq;
+
+	return 0;
+}
+
+/**
+ *  inv_lpa_mode() - store current low power mode settings
+ */
+static int inv_lpa_mode(struct inv_mpu_iio_s *st, int lpa_mode)
+{
+	unsigned long result;
+	u8 d;
+	struct inv_reg_map_s *reg;
+
+	reg = &st->reg;
+	result = inv_i2c_read(st, reg->pwr_mgmt_1, 1, &d);
+	if (result)
+		return result;
+	if (lpa_mode)
+		d |= BIT_CYCLE;
+	else
+		d &= ~BIT_CYCLE;
+
+	result = inv_i2c_single_write(st, reg->pwr_mgmt_1, d);
+	if (result)
+		return result;
+	if (INV_MPU6500 == st->chip_type) {
+		result = inv_i2c_single_write(st, REG_6500_ACCEL_CONFIG2,
+					      BIT_ACCEL_FCHOCIE_B);
+		if (result)
+			return result;
+	}
+	st->chip_config.lpa_mode = !!lpa_mode;
+
+	return 0;
+}
+
 static int set_power_itg(struct inv_mpu_iio_s *st, bool power_on)
 {
 	struct inv_reg_map_s *reg;
-	unsigned char data;
+	u8 data;
 	int result;
 
 	reg = &st->reg;
@@ -189,38 +309,26 @@ static int set_power_itg(struct inv_mpu_iio_s *st, bool power_on)
 		data = 0;
 	else
 		data = BIT_SLEEP;
-	if (st->chip_config.lpa_mode)
-		data |= BIT_CYCLE;
-	if (st->chip_config.gyro_enable) {
-		result = inv_i2c_single_write(st,
-			reg->pwr_mgmt_1, data | INV_CLK_PLL);
-		if (result)
-			return result;
-		st->chip_config.clk_src = INV_CLK_PLL;
-	} else {
-		result = inv_i2c_single_write(st,
-			reg->pwr_mgmt_1, data | INV_CLK_INTERNAL);
-		if (result)
-			return result;
-		st->chip_config.clk_src = INV_CLK_INTERNAL;
-	}
+	result = inv_i2c_single_write(st, reg->pwr_mgmt_1, data);
+	if (result)
+		return result;
 
 	if (power_on) {
 		msleep(POWER_UP_TIME);
-		data = 0;
-		if (!st->chip_config.accl_enable)
-			data |= BIT_PWR_ACCL_STBY;
-		if (!st->chip_config.gyro_enable)
-			data |= BIT_PWR_GYRO_STBY;
-		if (INV_MPU6500 != st->chip_type)
-			data |= (st->chip_config.lpa_freq << LPA_FREQ_SHIFT);
-
-		result = inv_i2c_single_write(st, reg->pwr_mgmt_2, data);
-		if (result) {
-			inv_i2c_single_write(st, reg->pwr_mgmt_1, BIT_SLEEP);
+		result = inv_switch_engine(st, st->chip_config.gyro_enable,
+					BIT_PWR_GYRO_STBY);
+		if (result)
 			return result;
-		}
-		msleep(SENSOR_UP_TIME);
+		result = inv_switch_engine(st, st->chip_config.accl_enable,
+					BIT_PWR_ACCL_STBY);
+		if (result)
+			return result;
+		result = inv_lpa_freq(st, st->chip_config.lpa_freq);
+		if (result)
+			return result;
+		result = inv_lpa_mode(st, st->chip_config.lpa_mode);
+		if (result)
+			return result;
 	}
 	st->chip_config.is_asleep = !power_on;
 
@@ -607,7 +715,7 @@ static ssize_t inv_fifo_rate_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
 	unsigned long fifo_rate;
-	unsigned char data;
+	u8 data;
 	int result;
 	struct inv_mpu_iio_s *st = iio_priv(dev_get_drvdata(dev));
 	struct inv_reg_map_s *reg;
@@ -705,7 +813,7 @@ static ssize_t inv_dmp_attr_store(struct device *dev,
 	struct iio_dev_attr *this_attr = to_iio_dev_attr(attr);
 	int result, data, out;
 	long val;
-	unsigned char *p;
+	u8 *p;
 	if ((st->chip_config.is_asleep) || (!st->chip_config.firmware_loaded))
 			return -EPERM;
 	result = kstrtol(buf, 10, &val);
@@ -1016,7 +1124,7 @@ static ssize_t inv_temperature_show(struct device *dev,
 	int result;
 	short temp;
 	long scale_t;
-	unsigned char data[2];
+	u8 data[2];
 	reg = &st->reg;
 
 	if (st->chip_config.is_asleep)
@@ -1061,7 +1169,7 @@ static int inv_firmware_loaded(struct inv_mpu_iio_s *st, int data)
 static int inv_quaternion_on(struct inv_mpu_iio_s *st,
 				 struct iio_buffer *ring, bool en)
 {
-	unsigned int result;
+	u32 result;
 	result = inv_send_quaternion(st, en);
 	if (result)
 		return result;
@@ -1076,94 +1184,6 @@ static int inv_quaternion_on(struct inv_mpu_iio_s *st,
 	return 0;
 }
 
-/**
- *  inv_lpa_mode() - store current low power mode settings
- */
-static int inv_lpa_mode(struct inv_mpu_iio_s *st, int lpa_mode)
-{
-	unsigned long result;
-	u8 d;
-	struct inv_reg_map_s *reg;
-
-	reg = &st->reg;
-	result = inv_i2c_read(st, reg->pwr_mgmt_1, 1, &d);
-	if (result)
-		return result;
-	if (lpa_mode)
-		d |= BIT_CYCLE;
-	else
-		d &= ~BIT_CYCLE;
-
-	result = inv_i2c_single_write(st, reg->pwr_mgmt_1, d);
-	if (result)
-		return result;
-	if (INV_MPU6500 == st->chip_type) {
-		result = inv_i2c_single_write(st, REG_6500_ACCEL_CONFIG2,
-					      BIT_ACCEL_FCHOCIE_B);
-		if (result)
-			return result;
-	}
-	st->chip_config.lpa_mode = !!lpa_mode;
-
-	return 0;
-}
-
-/**
- *  inv_lpa_freq() - store current low power frequency setting.
- */
-static int inv_lpa_freq(struct inv_mpu_iio_s *st, int lpa_freq)
-{
-	unsigned long result;
-	u8 d;
-	struct inv_reg_map_s *reg;
-
-	if (INV_MPU6500 == st->chip_type) {
-		if (lpa_freq > MAX_6500_LPA_FREQ_PARAM)
-			return -EINVAL;
-		result = inv_i2c_single_write(st, REG_6500_LP_ACCEL_ODR,
-					      lpa_freq);
-		if (result)
-			return result;
-	} else {
-		if (lpa_freq > MAX_LPA_FREQ_PARAM)
-			return -EINVAL;
-		reg = &st->reg;
-		result = inv_i2c_read(st, reg->pwr_mgmt_2, 1, &d);
-		if (result)
-			return result;
-		d &= ~BIT_LPA_FREQ;
-		d |= (u8)(lpa_freq << LPA_FREQ_SHIFT);
-		result = inv_i2c_single_write(st, reg->pwr_mgmt_2, d);
-		if (result)
-			return result;
-	}
-	st->chip_config.lpa_freq = lpa_freq;
-
-	return 0;
-}
-
-static int inv_switch_engine(struct inv_mpu_iio_s *st, bool en, u32 mask)
-{
-	struct inv_reg_map_s *reg;
-	u8 data;
-	int result;
-	reg = &st->reg;
-	result = inv_i2c_read(st, reg->pwr_mgmt_2, 1, &data);
-	if (result)
-		return result;
-	if (en)
-		data &= (~mask);
-	else
-		data |= mask;
-	result = inv_i2c_single_write(st, reg->pwr_mgmt_2, data);
-	if (result)
-		return result;
-	if (en)
-		msleep(SENSOR_UP_TIME);
-
-	return 0;
-
-}
 static int inv_switch_gyro_engine(struct inv_mpu_iio_s *st, bool en)
 {
 	return inv_switch_engine(st, en, BIT_PWR_GYRO_STBY);
@@ -1186,10 +1206,6 @@ static int inv_gyro_enable(struct inv_mpu_iio_s *st,
 	result = st->switch_gyro_engine(st, en);
 	if (result)
 		return result;
-	if (en)
-		st->chip_config.clk_src = INV_CLK_PLL;
-	else
-		st->chip_config.clk_src = INV_CLK_INTERNAL;
 
 	if (!en) {
 		st->chip_config.gyro_fifo_enable = 0;
@@ -1308,8 +1324,8 @@ static ssize_t inv_reg_write_store(struct device *dev,
 {
 	struct iio_dev *indio_dev = dev_get_drvdata(dev);
 	struct inv_mpu_iio_s *st = iio_priv(indio_dev);
-	unsigned int result;
-	unsigned char wreg, wval;
+	u32 result;
+	u8 wreg, wval;
 	int temp;
 	char local_buf[10];
 
@@ -1550,7 +1566,7 @@ static const struct iio_info mpu_info = {
 static int inv_setup_compass(struct inv_mpu_iio_s *st)
 {
 	int result;
-	unsigned char data[4];
+	u8 data[4];
 
 	result = inv_i2c_read(st, REG_YGOFFS_TC, 1, data);
 	if (result)
@@ -1921,6 +1937,29 @@ out_no_free:
 	return -EIO;
 }
 
+static void inv_mpu_shutdown(struct i2c_client *client)
+{
+	struct iio_dev *indio_dev = i2c_get_clientdata(client);
+	struct inv_mpu_iio_s *st = iio_priv(indio_dev);
+	struct inv_reg_map_s *reg;
+	int result;
+
+	reg = &st->reg;
+	dev_dbg(&client->adapter->dev, "Shutting down %s...\n", st->hw->name);
+
+	/* reset to make sure previous state are not there */
+	result = inv_i2c_single_write(st, reg->pwr_mgmt_1, BIT_H_RESET);
+	if (result)
+		dev_err(&client->adapter->dev, "Failed to reset %s\n",
+			st->hw->name);
+	msleep(POWER_UP_TIME);
+	/* turn off power to ensure gyro engine is off */
+	result = st->set_power_state(st, false);
+	if (result)
+		dev_err(&client->adapter->dev, "Failed to turn off %s\n",
+			st->hw->name);
+}
+
 /**
  *  inv_mpu_remove() - remove function.
  */
@@ -1959,7 +1998,7 @@ static const struct dev_pm_ops inv_mpu_pmops = {
 #define INV_MPU_PMOPS NULL
 #endif /* CONFIG_PM */
 
-static const unsigned short normal_i2c[] = { I2C_CLIENT_END };
+static const u16 normal_i2c[] = { I2C_CLIENT_END };
 /* device id table is used to identify what device can be
  * supported by this driver
  */
@@ -1978,6 +2017,7 @@ static struct i2c_driver inv_mpu_driver = {
 	.class = I2C_CLASS_HWMON,
 	.probe		=	inv_mpu_probe,
 	.remove		=	inv_mpu_remove,
+	.shutdown	=	inv_mpu_shutdown,
 	.id_table	=	inv_mpu_id,
 	.driver = {
 		.owner	=	THIS_MODULE,

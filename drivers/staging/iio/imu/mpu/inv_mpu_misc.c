@@ -118,57 +118,57 @@ static const struct prod_rev_map_t prod_rev_map[] = {
 	{MPL_PROD_KEY(0,   3), MPU_SILICON_REV_A2, 131, 16384},
 	{MPL_PROD_KEY(0,   4), MPU_SILICON_REV_A2, 131, 16384},
 	{MPL_PROD_KEY(0,   5), MPU_SILICON_REV_A2, 131, 16384},
-	{MPL_PROD_KEY(0,   6), MPU_SILICON_REV_A2, 131, 16384},	/* (A2/C2-1) */
+	{MPL_PROD_KEY(0,   6), MPU_SILICON_REV_A2, 131, 16384},
 	/* prod_ver = 1, forced to 0 for MPU6050 A2 */
 	{MPL_PROD_KEY(0,   7), MPU_SILICON_REV_A2, 131, 16384},
 	{MPL_PROD_KEY(0,   8), MPU_SILICON_REV_A2, 131, 16384},
 	{MPL_PROD_KEY(0,   9), MPU_SILICON_REV_A2, 131, 16384},
 	{MPL_PROD_KEY(0,  10), MPU_SILICON_REV_A2, 131, 16384},
-	{MPL_PROD_KEY(0,  11), MPU_SILICON_REV_A2, 131, 16384},	/* (A2/D2-1) */
+	{MPL_PROD_KEY(0,  11), MPU_SILICON_REV_A2, 131, 16384},
 	{MPL_PROD_KEY(0,  12), MPU_SILICON_REV_A2, 131, 16384},
 	{MPL_PROD_KEY(0,  13), MPU_SILICON_REV_A2, 131, 16384},
 	{MPL_PROD_KEY(0,  14), MPU_SILICON_REV_A2, 131, 16384},
 	{MPL_PROD_KEY(0,  15), MPU_SILICON_REV_A2, 131, 16384},
-	{MPL_PROD_KEY(0,  27), MPU_SILICON_REV_A2, 131, 16384},	/* (A2/D4)   */
+	{MPL_PROD_KEY(0,  27), MPU_SILICON_REV_A2, 131, 16384},
 	/* prod_ver = 1 */
-	{MPL_PROD_KEY(1,  16), MPU_SILICON_REV_B1, 131, 16384},	/* (B1/D2-1) */
-	{MPL_PROD_KEY(1,  17), MPU_SILICON_REV_B1, 131, 16384},	/* (B1/D2-2) */
-	{MPL_PROD_KEY(1,  18), MPU_SILICON_REV_B1, 131, 16384},	/* (B1/D2-3) */
-	{MPL_PROD_KEY(1,  19), MPU_SILICON_REV_B1, 131, 16384},	/* (B1/D2-4) */
-	{MPL_PROD_KEY(1,  20), MPU_SILICON_REV_B1, 131, 16384},	/* (B1/D2-5) */
-	{MPL_PROD_KEY(1,  28), MPU_SILICON_REV_B1, 131, 16384},	/* (B1/D4)   */
-	{MPL_PROD_KEY(1,   1), MPU_SILICON_REV_B1, 131, 16384},	/* (B1/E1-1) */
-	{MPL_PROD_KEY(1,   2), MPU_SILICON_REV_B1, 131, 16384},	/* (B1/E1-2) */
-	{MPL_PROD_KEY(1,   3), MPU_SILICON_REV_B1, 131, 16384},	/* (B1/E1-3) */
-	{MPL_PROD_KEY(1,   4), MPU_SILICON_REV_B1, 131, 16384},	/* (B1/E1-4) */
-	{MPL_PROD_KEY(1,   5), MPU_SILICON_REV_B1, 131, 16384},	/* (B1/E1-5) */
-	{MPL_PROD_KEY(1,   6), MPU_SILICON_REV_B1, 131, 16384},	/* (B1/E1-6) */
+	{MPL_PROD_KEY(1,  16), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(1,  17), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(1,  18), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(1,  19), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(1,  20), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(1,  28), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(1,   1), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(1,   2), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(1,   3), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(1,   4), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(1,   5), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(1,   6), MPU_SILICON_REV_B1, 131, 16384},
 	/* prod_ver = 2 */
-	{MPL_PROD_KEY(2,   7), MPU_SILICON_REV_B1, 131, 16384},	/* (B2/E1-1) */
-	{MPL_PROD_KEY(2,   8), MPU_SILICON_REV_B1, 131, 16384},	/* (B2/E1-2) */
-	{MPL_PROD_KEY(2,   9), MPU_SILICON_REV_B1, 131, 16384},	/* (B2/E1-3) */
-	{MPL_PROD_KEY(2,  10), MPU_SILICON_REV_B1, 131, 16384},	/* (B2/E1-4) */
-	{MPL_PROD_KEY(2,  11), MPU_SILICON_REV_B1, 131, 16384},	/* (B2/E1-5) */
-	{MPL_PROD_KEY(2,  12), MPU_SILICON_REV_B1, 131, 16384},	/* (B2/E1-6) */
-	{MPL_PROD_KEY(2,  29), MPU_SILICON_REV_B1, 131, 16384},	/* (B2/D4)   */
+	{MPL_PROD_KEY(2,   7), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(2,   8), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(2,   9), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(2,  10), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(2,  11), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(2,  12), MPU_SILICON_REV_B1, 131, 16384},
+	{MPL_PROD_KEY(2,  29), MPU_SILICON_REV_B1, 131, 16384},
 	/* prod_ver = 3 */
-	{MPL_PROD_KEY(3,  30), MPU_SILICON_REV_B1, 131, 16384},	/* (B2/E2)   */
+	{MPL_PROD_KEY(3,  30), MPU_SILICON_REV_B1, 131, 16384},
 	/* prod_ver = 4 */
-	{MPL_PROD_KEY(4,  31), MPU_SILICON_REV_B1, 131,  8192},	/* (B2/F1)   */
-	{MPL_PROD_KEY(4,   1), MPU_SILICON_REV_B1, 131,  8192},	/* (B3/F1)   */
-	{MPL_PROD_KEY(4,   3), MPU_SILICON_REV_B1, 131,  8192},	/* (B4/F1)   */
+	{MPL_PROD_KEY(4,  31), MPU_SILICON_REV_B1, 131,  8192},
+	{MPL_PROD_KEY(4,   1), MPU_SILICON_REV_B1, 131,  8192},
+	{MPL_PROD_KEY(4,   3), MPU_SILICON_REV_B1, 131,  8192},
 	/* prod_ver = 5 */
-	{MPL_PROD_KEY(5,   3), MPU_SILICON_REV_B1, 131, 16384},	/* (B4/F1)   */
+	{MPL_PROD_KEY(5,   3), MPU_SILICON_REV_B1, 131, 16384},
 	/* prod_ver = 6 */
-	{MPL_PROD_KEY(6,  19), MPU_SILICON_REV_B1, 131, 16384},	/* (B5/E2)   */
+	{MPL_PROD_KEY(6,  19), MPU_SILICON_REV_B1, 131, 16384},
 	/* prod_ver = 7 */
-	{MPL_PROD_KEY(7,  19), MPU_SILICON_REV_B1, 131, 16384},	/* (B5/E2)   */
+	{MPL_PROD_KEY(7,  19), MPU_SILICON_REV_B1, 131, 16384},
 	/* prod_ver = 8 */
-	{MPL_PROD_KEY(8,  19), MPU_SILICON_REV_B1, 131, 16384},	/* (B5/E2)   */
+	{MPL_PROD_KEY(8,  19), MPU_SILICON_REV_B1, 131, 16384},
 	/* prod_ver = 9 */
-	{MPL_PROD_KEY(9,  19), MPU_SILICON_REV_B1, 131, 16384},	/* (B5/E2)   */
+	{MPL_PROD_KEY(9,  19), MPU_SILICON_REV_B1, 131, 16384},
 	/* prod_ver = 10 */
-	{MPL_PROD_KEY(10, 19), MPU_SILICON_REV_B1, 131, 16384}	/* (B5/E2)   */
+	{MPL_PROD_KEY(10, 19), MPU_SILICON_REV_B1, 131, 16384}
 };
 
 /*
@@ -230,13 +230,13 @@ static const int gyro_3500_st_tb[255] = {
 	30903, 31212, 31524, 31839, 32157, 32479, 32804};
 
 int mpu_memory_write(struct i2c_adapter *i2c_adap,
-			    unsigned char mpu_addr,
-			    unsigned short mem_addr,
-			    unsigned int len, unsigned char const *data)
+			    u8 mpu_addr,
+			    u16 mem_addr,
+			    u32 len, u8 const *data)
 {
-	unsigned char bank[2];
-	unsigned char addr[2];
-	unsigned char buf[513];
+	u8 bank[2];
+	u8 addr[2];
+	u8 buf[513];
 
 	struct i2c_msg msgs[3];
 	int res;
@@ -269,7 +269,7 @@ int mpu_memory_write(struct i2c_adapter *i2c_adap,
 
 	msgs[2].addr = mpu_addr;
 	msgs[2].flags = 0;
-	msgs[2].buf = (unsigned char *)buf;
+	msgs[2].buf = (u8 *)buf;
 	msgs[2].len = len + 1;
 
 	res = i2c_transfer(i2c_adap, msgs, 3);
@@ -283,13 +283,13 @@ int mpu_memory_write(struct i2c_adapter *i2c_adap,
 }
 
 int mpu_memory_read(struct i2c_adapter *i2c_adap,
-			   unsigned char mpu_addr,
-			   unsigned short mem_addr,
-			   unsigned int len, unsigned char *data)
+			   u8 mpu_addr,
+			   u16 mem_addr,
+			   u32 len, u8 *data)
 {
-	unsigned char bank[2];
-	unsigned char addr[2];
-	unsigned char buf;
+	u8 bank[2];
+	u8 addr[2];
+	u8 buf;
 
 	struct i2c_msg msgs[4];
 	int res;
@@ -343,7 +343,7 @@ int mpu_memory_read(struct i2c_adapter *i2c_adap,
  *              the MPL product indentifier also referred to as 'key'.
  *  @return the index position of the key in the array.
  */
-static short index_of_key(unsigned short key)
+static short index_of_key(u16 key)
 {
 	int i;
 	for (i = 0; i < NUM_OF_PROD_REVS; i++)
@@ -356,14 +356,14 @@ int inv_get_silicon_rev_mpu6050(struct inv_mpu_iio_s *st)
 {
 	int result;
 	struct inv_reg_map_s *reg;
-	unsigned char prod_ver = 0x00, prod_rev = 0x00;
+	u8 prod_ver = 0x00, prod_rev = 0x00;
 	struct prod_rev_map_t *p_rev;
-	unsigned char bank =
+	u8 bank =
 	    (BIT_PRFTCH_EN | BIT_CFG_USER_BANK | MPU_MEM_OTP_BANK_0);
-	unsigned short mem_addr = ((bank << 8) | MEM_ADDR_PROD_REV);
-	unsigned short key;
-	unsigned char regs[5];
-	unsigned short sw_rev;
+	u16 mem_addr = ((bank << 8) | MEM_ADDR_PROD_REV);
+	u16 key;
+	u8 regs[5];
+	u16 sw_rev;
 	short index;
 	struct inv_chip_info_s *chip_info = &st->chip_info;
 	reg = &st->reg;
@@ -439,8 +439,8 @@ int inv_get_silicon_rev_mpu6050(struct inv_mpu_iio_s *st)
 static int read_accel_hw_self_test_prod_shift(struct inv_mpu_iio_s *st,
 					int *st_prod)
 {
-	unsigned char regs[4];
-	unsigned char shift_code[3];
+	u8 regs[4];
+	u8 shift_code[3];
 	int result, i;
 	st_prod[0] = 0;
 	st_prod[1] = 0;
@@ -482,11 +482,11 @@ static int inv_check_accl_self_test(struct inv_mpu_iio_s *st,
 	fs = DEF_ST_ACCL_FULL_SCALE;    /* assume +/- 2 mg as typical */
 	g_z_sign = 1;
 	ret_val = 0;
-	test_setup.accl_sens[X] = (unsigned int)(DEF_ST_SCALE *
+	test_setup.accl_sens[X] = (u32)(DEF_ST_SCALE *
 						OFFSET_PRECISION / fs);
-	test_setup.accl_sens[Y] = (unsigned int)(DEF_ST_SCALE *
+	test_setup.accl_sens[Y] = (u32)(DEF_ST_SCALE *
 						OFFSET_PRECISION / fs);
-	test_setup.accl_sens[Z] = (unsigned int)(DEF_ST_SCALE *
+	test_setup.accl_sens[Z] = (u32)(DEF_ST_SCALE *
 						OFFSET_PRECISION / fs);
 
 	if (MPL_PROD_KEY(st->chip_info.product_id,
@@ -539,7 +539,7 @@ static int inv_check_3500_gyro_self_test(struct inv_mpu_iio_s *st,
 	int result;
 	int gst[3], ret_val;
 	int gst_otp[3], i;
-	unsigned char st_code[THREE_AXIS];
+	u8 st_code[THREE_AXIS];
 	ret_val = 0;
 
 	for (i = 0; i < 3; i++)
@@ -587,7 +587,7 @@ static int inv_check_6050_gyro_self_test(struct inv_mpu_iio_s *st,
 	int result;
 	int ret_val;
 	int ct_shift_prod[3], st_shift_cust[3], st_shift_ratio[3], i;
-	unsigned char regs[3];
+	u8 regs[3];
 	if (st->chip_info.software_revision < DEF_OLDEST_SUPP_SW_REV &&
 	    st->chip_info.product_revision < DEF_OLDEST_SUPP_PROD_REV)
 		return 0;
@@ -641,7 +641,7 @@ int inv_do_test(struct inv_mpu_iio_s *st, int self_test_flag,
 {
 	struct inv_reg_map_s *reg;
 	int result, i, j, packet_size;
-	unsigned char data[BYTES_PER_SENSOR * 2], has_accl;
+	u8 data[BYTES_PER_SENSOR * 2], has_accl;
 	int fifo_count, packet_count, ind;
 
 	reg = &st->reg;
@@ -773,10 +773,10 @@ static void   inv_recover_setting(struct inv_mpu_iio_s *st)
 static int inv_check_compass_self_test(struct inv_mpu_iio_s *st)
 {
 	int result;
-	unsigned char data[6];
-	unsigned char counter, cntl;
+	u8 data[6];
+	u8 counter, cntl;
 	short x, y, z;
-	unsigned char *sens;
+	u8 *sens;
 	sens = st->chip_info.compass_sens;
 
 	/*set to bypass mode */
@@ -930,11 +930,11 @@ test_fail:
 }
 
 static int inv_load_firmware(struct inv_mpu_iio_s *st,
-	unsigned char *data, int size)
+	u8 *data, int size)
 {
 	int bank, write_size;
 	int result;
-	unsigned short memaddr;
+	u16 memaddr;
 
 	/* Write and verify memory */
 	for (bank = 0; size > 0; bank++,
@@ -955,12 +955,12 @@ static int inv_load_firmware(struct inv_mpu_iio_s *st,
 }
 
 static int inv_verify_firmware(struct inv_mpu_iio_s *st,
-	unsigned char *data, int size)
+	u8 *data, int size)
 {
 	int bank, write_size;
 	int result;
-	unsigned short memaddr;
-	unsigned char firmware[MPU_MEM_BANK_SIZE];
+	u16 memaddr;
+	u8 firmware[MPU_MEM_BANK_SIZE];
 
 	/* Write and verify memory */
 	for (bank = 0; size > 0; bank++,
@@ -983,17 +983,17 @@ static int inv_verify_firmware(struct inv_mpu_iio_s *st,
 }
 
 static int inv_set_fifo_div(struct inv_mpu_iio_s *st,
-		unsigned short fifoRate)
+		u16 fifoRate)
 {
-	unsigned char regs[2];
+	u8 regs[2];
 	int result = 0;
 	/*For some reason DINAC4 is defined as 0xb8, but DINBC4 is not*/
-	const unsigned char regs_end[12] = {DINAFE, DINAF2, DINAAB, 0xc4,
+	const u8 regs_end[12] = {DINAFE, DINAF2, DINAAB, 0xc4,
 					DINAAA, DINAF1, DINADF, DINADF,
 					0xbb, 0xaf, DINADF, DINADF};
 
-	regs[0] = (unsigned char)((fifoRate >> 8) & 0xff);
-	regs[1] = (unsigned char)(fifoRate & 0xff);
+	regs[0] = (u8)((fifoRate >> 8) & 0xff);
+	regs[1] = (u8)(fifoRate & 0xff);
 	result = mem_w_key(KEY_D_0_22, ARRAY_SIZE(regs), regs);
 	if (result)
 		return result;
@@ -1007,12 +1007,12 @@ static int inv_set_fifo_div(struct inv_mpu_iio_s *st,
 
 int inv_send_quaternion(struct inv_mpu_iio_s *st, bool on)
 {
-	const unsigned char regs_on[] = {DINBC0, DINBC2,
+	const u8 regs_on[] = {DINBC0, DINBC2,
 					 DINBC4, DINBC6};
-	const unsigned char regs_off[] = {DINA80, DINA80,
+	const u8 regs_off[] = {DINA80, DINA80,
 					  DINA80, DINA80};
-	const unsigned char *regs;
-	unsigned char result;
+	const u8 *regs;
+	u8 result;
 	if (on)
 		regs = regs_on;
 	else
@@ -1026,7 +1026,7 @@ int inv_set_display_orient_interrupt_dmp(struct inv_mpu_iio_s *st,
 {
 	/*Turn on the display orientation interrupt in the DMP*/
 	int result;
-	unsigned char  regs[] = {0xd8};
+	u8  regs[] = {0xd8};
 
 	if (on)
 		regs[0] = 0xd9;
@@ -1034,30 +1034,31 @@ int inv_set_display_orient_interrupt_dmp(struct inv_mpu_iio_s *st,
 	return result;
 }
 
-int inv_set_fifo_rate(struct inv_mpu_iio_s *st, unsigned short fifo_rate)
+int inv_set_fifo_rate(struct inv_mpu_iio_s *st, u16 fifo_rate)
 {
-	unsigned char divider;
+	u8 divider;
 	int result;
 
-	divider = (unsigned char)(ONE_K_HZ / fifo_rate) - 1;
+	divider = (u8)(ONE_K_HZ / fifo_rate) - 1;
 	if (divider > DMP_MAX_DIVIDER) {
 		st->sample_divider = DMP_MAX_DIVIDER;
 		st->fifo_divider =
-			(unsigned char)(DMP_DEFAULT_FIFO_RATE / fifo_rate) - 1;
+			(u8)(DMP_DEFAULT_FIFO_RATE / fifo_rate) - 1;
 	} else {
 		st->sample_divider = divider;
 		st->fifo_divider = 0;
 	}
 
 	result = inv_set_fifo_div(st, st->fifo_divider);
+
 	return result;
 }
 
 static int inv_set_tap_interrupt_dmp(struct inv_mpu_iio_s *st,
-	unsigned char on)
+	u8 on)
 {
 	int result;
-	unsigned char  regs[] = {0};
+	u8  regs[] = {0};
 
 	if (on)
 		regs[0] = 0xf8;
@@ -1070,10 +1071,10 @@ static int inv_set_tap_interrupt_dmp(struct inv_mpu_iio_s *st,
 }
 
 static int inv_set_orientation_interrupt_dmp(struct inv_mpu_iio_s *st,
-			unsigned char on)
+			u8 on)
 {
 	int result;
-	unsigned char  regs[2];
+	u8  regs[2];
 	if (on) {
 		regs[0] = DINBF8;
 		regs[1] = DINBF8;
@@ -1088,19 +1089,19 @@ static int inv_set_orientation_interrupt_dmp(struct inv_mpu_iio_s *st,
 }
 
 int inv_set_tap_threshold_dmp(struct inv_mpu_iio_s *st,
-				unsigned int axis, unsigned short threshold)
+				u32 axis, u16 threshold)
 {
 	/* Sets the tap threshold in the dmp
 	Simultaneously sets secondary tap threshold to help correct the tap
 	direction for soft taps */
 	int result;
 	/* DMP Algorithm */
-	unsigned char data[2];
+	u8 data[2];
 	int sampleDivider;
 	int scaledThreshold;
-	unsigned int dmpThreshold;
-	unsigned char sample_div;
-	const unsigned int  accel_sens = (0x20000000 / 0x00010000);
+	u32 dmpThreshold;
+	u8 sample_div;
+	const u32  accel_sens = (0x20000000 / 0x00010000);
 
 	if ((axis & ~(INV_TAP_AXIS_ALL)) || (threshold > (1 << 15)))
 		return -EINVAL;
@@ -1123,7 +1124,7 @@ int inv_set_tap_threshold_dmp(struct inv_mpu_iio_s *st,
 
 	/* Scale to DMP 16 bit value */
 	if (accel_sens != 0)
-		dmpThreshold = (unsigned int)(scaledThreshold * accel_sens);
+		dmpThreshold = (u32)(scaledThreshold * accel_sens);
 	else
 		return -EINVAL;
 	dmpThreshold = dmpThreshold / DMP_PRECISION;
@@ -1171,47 +1172,47 @@ int inv_set_tap_threshold_dmp(struct inv_mpu_iio_s *st,
 }
 
 static int inv_set_tap_axes_dmp(struct inv_mpu_iio_s *st,
-				unsigned int axes)
+				u32 axes)
 {
 	/* Sets a mask in the DMP that indicates what tap events
 	should result in an interrupt */
-	unsigned char regs[4];
-	unsigned char result;
+	u8 regs[4];
+	u8 result;
 
 	/* check if any spurious bit other the ones expected are set */
 	if (axes & (~(INV_TAP_ALL_DIRECTIONS)))
 		return -EINVAL;
 
-	regs[0] = (unsigned char)axes;
+	regs[0] = (u8)axes;
 	result = mem_w_key(KEY_D_1_72, 1, regs);
 
 	return result;
 }
 
 int inv_set_min_taps_dmp(struct inv_mpu_iio_s *st,
-				unsigned short min_taps) {
+				u16 min_taps) {
 	/*Indicates the minimum number of consecutive taps required
 		before the DMP will generate an interrupt */
-	unsigned char regs[1];
-	unsigned char result;
+	u8 regs[1];
+	u8 result;
 	/* check if any spurious bit other the ones expected are set */
 	if ((min_taps > DMP_MAX_MIN_TAPS) || (min_taps < 1))
 		return -EINVAL;
-	regs[0] = (unsigned char)(min_taps-1);
+	regs[0] = (u8)(min_taps-1);
 	result = mem_w_key(KEY_D_1_79, ARRAY_SIZE(regs), regs);
 
 	return result;
 }
 
-int  inv_set_tap_time_dmp(struct inv_mpu_iio_s *st, unsigned short time)
+int  inv_set_tap_time_dmp(struct inv_mpu_iio_s *st, u16 time)
 {
 	/* Determines how long after a tap the DMP requires before
 	  another tap can be registered*/
 	int result;
 	/* DMP Algorithm */
-	unsigned short dmpTime;
-	unsigned char data[2];
-	unsigned char sampleDivider;
+	u16 dmpTime;
+	u8 data[2];
+	u8 sampleDivider;
 
 	sampleDivider = st->sample_divider;
 	sampleDivider++;
@@ -1227,15 +1228,15 @@ int  inv_set_tap_time_dmp(struct inv_mpu_iio_s *st, unsigned short time)
 }
 
 static int inv_set_multiple_tap_time_dmp(struct inv_mpu_iio_s *st,
-					unsigned int time)
+					u32 time)
 {
 	/*Determines how close together consecutive taps must occur
 	to be considered double/triple taps*/
 	int result;
 	/* DMP Algorithm */
-	unsigned short dmpTime;
-	unsigned char data[2];
-	unsigned char sampleDivider;
+	u16 dmpTime;
+	u8 data[2];
+	u8 sampleDivider;
 
 	sampleDivider = st->sample_divider;
 	sampleDivider++;
@@ -1259,9 +1260,9 @@ int inv_q30_mult(int a, int b)
 	return result;
 }
 
-static unsigned short inv_row_2_scale(const signed char *row)
+static u16 inv_row_2_scale(const s8 *row)
 {
-	unsigned short b;
+	u16 b;
 
 	if (row[0] > 0)
 		b = 0;
@@ -1295,10 +1296,10 @@ static unsigned short inv_row_2_scale(const signed char *row)
 * bit number 8 being the sign. In binary the identity matrix would therefor
 * be: 010_001_000 or 0x88 in hex.
 */
-static unsigned short inv_orientation_matrix_to_scaler(const signed char *mtx)
+static u16 inv_orientation_matrix_to_scaler(const s8 *mtx)
 {
 
-	unsigned short scalar;
+	u16 scalar;
 	scalar = inv_row_2_scale(mtx);
 	scalar |= inv_row_2_scale(mtx + 3) << 3;
 	scalar |= inv_row_2_scale(mtx + 6) << 6;
@@ -1309,12 +1310,12 @@ static unsigned short inv_orientation_matrix_to_scaler(const signed char *mtx)
 static int inv_gyro_dmp_cal(struct inv_mpu_iio_s *st)
 {
 	int inv_gyro_orient;
-	unsigned char regs[3];
+	u8 regs[3];
 	int result;
 
-	unsigned char tmpD = DINA4C;
-	unsigned char tmpE = DINACD;
-	unsigned char tmpF = DINA6C;
+	u8 tmpD = DINA4C;
+	u8 tmpE = DINACD;
+	u8 tmpF = DINA6C;
 
 	inv_gyro_orient =
 		inv_orientation_matrix_to_scaler(st->plat_data.orientation);
@@ -1364,8 +1365,8 @@ static int inv_accel_dmp_cal(struct inv_mpu_iio_s *st)
 {
 	int inv_accel_orient;
 	int result;
-	unsigned char regs[3];
-	const unsigned char tmp[3] = { DINA0C, DINAC9, DINA2C };
+	u8 regs[3];
+	const u8 tmp[3] = { DINA0C, DINAC9, DINA2C };
 	inv_accel_orient =
 		inv_orientation_matrix_to_scaler(st->plat_data.orientation);
 
@@ -1395,17 +1396,17 @@ static int inv_set_gyro_sf_dmp(struct inv_mpu_iio_s *st)
 	/*The gyro threshold, in dps, above which taps will be rejected*/
 	int result, out;
 	/* DMP Algorithm */
-	unsigned char sampleDivider;
-	unsigned char *regs;
-	unsigned int gyro_sf;
-	const unsigned int gyro_sens = 0x03e80000;
+	u8 sampleDivider;
+	u8 *regs;
+	u32 gyro_sf;
+	const u32 gyro_sens = 0x03e80000;
 
 	sampleDivider = st->sample_divider;
 	gyro_sf = inv_q30_mult(gyro_sens,
 			(int)(DMP_TAP_SCALE * (sampleDivider + 1)));
 
 	out = cpu_to_be32p(&gyro_sf);
-	regs = (unsigned char *)&out;
+	regs = (u8 *)&out;
 	result = mem_w_key(KEY_D_0_104, sizeof(out), regs);
 
 	return result;
@@ -1417,11 +1418,11 @@ static int inv_set_shake_reject_thresh_dmp(struct inv_mpu_iio_s *st,
 	/*The gyro threshold, in dps, above which taps will be rejected */
 	int result, out;
 	/* DMP Algorithm */
-	unsigned char sampleDivider;
+	u8 sampleDivider;
 	int thresh_scaled;
-	unsigned char *regs;
-	unsigned int gyro_sf;
-	const unsigned int gyro_sens = 0x03e80000;
+	u8 *regs;
+	u32 gyro_sf;
+	const u32 gyro_sens = 0x03e80000;
 	sampleDivider = st->sample_divider;
 	gyro_sf = inv_q30_mult(gyro_sens, (int)(DMP_TAP_SCALE *
 			(sampleDivider + 1)));
@@ -1431,22 +1432,22 @@ static int inv_set_shake_reject_thresh_dmp(struct inv_mpu_iio_s *st,
 	thresh_scaled = thresh_scaled / thresh;
 	thresh_scaled = gyro_sf / thresh_scaled;
 	out = cpu_to_be32p(&thresh_scaled);
-	regs = (unsigned char *)&out;
+	regs = (u8 *)&out;
 
 	result = mem_w_key(KEY_D_1_92, sizeof(out), regs);
 	return result;
 }
 
 static int inv_set_shake_reject_time_dmp(struct inv_mpu_iio_s *st,
-						unsigned int time)
+						u32 time)
 {
 	/* How long a gyro axis must remain above its threshold
 	before taps are rejected */
 	int result;
 	/* DMP Algorithm */
-	unsigned short dmpTime;
-	unsigned char data[2];
-	unsigned char sampleDivider;
+	u16 dmpTime;
+	u8 data[2];
+	u8 sampleDivider;
 
 	sampleDivider = st->sample_divider;
 	sampleDivider++;
@@ -1461,15 +1462,15 @@ static int inv_set_shake_reject_time_dmp(struct inv_mpu_iio_s *st,
 }
 
 static int inv_set_shake_reject_timeout_dmp(struct inv_mpu_iio_s *st,
-						unsigned int time)
+						u32 time)
 {
 	/*How long the gyros must remain below their threshold,
 	after taps have been rejected, before taps can be detected again*/
 	int result;
 	/* DMP Algorithm */
-	unsigned short dmpTime;
-	unsigned char data[2];
-	unsigned char sampleDivider;
+	u16 dmpTime;
+	u8 data[2];
+	u8 sampleDivider;
 
 	sampleDivider = st->sample_divider;
 	sampleDivider++;
@@ -1485,15 +1486,15 @@ static int inv_set_shake_reject_timeout_dmp(struct inv_mpu_iio_s *st,
 
 int inv_set_interrupt_on_gesture_event(struct inv_mpu_iio_s *st, bool on)
 {
-	unsigned char result;
-	const unsigned char regs_on[] = {DINADA, DINADA, DINAB1, DINAB9,
+	u8 result;
+	const u8 regs_on[] = {DINADA, DINADA, DINAB1, DINAB9,
 					 DINAF3, DINA8B, DINAA3, DINA91,
 					 DINAB6, DINADA, DINAB4, DINADA};
-	const unsigned char regs_off[] = {0xd8, 0xd8, 0xb1, 0xb9, 0xf3, 0x8b,
+	const u8 regs_off[] = {0xd8, 0xd8, 0xb1, 0xb9, 0xf3, 0x8b,
 					  0xa3, 0x91, 0xb6, 0x09, 0xb4, 0xd9};
 	/*For some reason DINAC4 is defined as 0xb8,
 	but DINBC4 is not defined.*/
-	const unsigned char regs_end[] = {DINAFE, DINAF2, DINAAB, 0xc4,
+	const u8 regs_end[] = {DINAFE, DINAF2, DINAAB, 0xc4,
 					DINAAA, DINAF1, DINADF, DINADF};
 	if (on)
 		/*Sets the DMP to send an interrupt and put a FIFO packet
@@ -1575,14 +1576,14 @@ static int inv_set_orientation_dmp(struct inv_mpu_iio_s *st,
 {
 	/*Set a mask in the DMP determining what orientations
 			will trigger interrupts*/
-	unsigned char regs[4];
-	unsigned char result;
+	u8 regs[4];
+	u8 result;
 
 	/* check if any spurious bit other the ones expected are set */
 	if (orientation & (~(INV_ORIENTATION_ALL | INV_ORIENTATION_FLIP)))
 		return -EINVAL;
 
-	regs[0] = (unsigned char)orientation;
+	regs[0] = (u8)orientation;
 	result = mem_w_key(KEY_D_1_74, 1, regs);
 	return result;
 }
@@ -1592,11 +1593,11 @@ static int inv_set_orientation_thresh_dmp(struct inv_mpu_iio_s *st,
 {
 	/*Set an angle threshold in the DMP determining
 		when orientations change*/
-	unsigned char *regs;
-	unsigned char result;
-	unsigned int out;
-	unsigned int d;
-	const unsigned int threshold[] = {138952416, 268435455, 379625062,
+	u8 *regs;
+	u8 result;
+	u32 out;
+	u32 d;
+	const u32 threshold[] = {138952416, 268435455, 379625062,
 					  464943848, 518577479, 536870912};
 	/* The real calculation is
 	 * threshold = (long)((1 << 29) * sin((angle * M_PI) / 180.));
@@ -1606,21 +1607,21 @@ static int inv_set_orientation_thresh_dmp(struct inv_mpu_iio_s *st,
 	if (d >= ARRAY_SIZE(threshold))
 		return -EPERM;
 	out = cpu_to_be32p(&threshold[d]);
-	regs = (unsigned char *)&out;
+	regs = (u8 *)&out;
 
 	result = mem_w_key(KEY_D_1_232, sizeof(out), regs);
 	return result;
 }
 
 static int inv_set_orientation_time_dmp(struct inv_mpu_iio_s *st,
-					unsigned int time)
+					u32 time)
 {
 	/*Determines the stability time required before a
 	new orientation can be adopted */
-	unsigned short dmpTime;
-	unsigned char data[2];
-	unsigned char sampleDivider;
-	unsigned char result;
+	u16 dmpTime;
+	u8 data[2];
+	u8 sampleDivider;
+	u8 result;
 	/* First check if we are allowed to call this function here */
 	sampleDivider = st->sample_divider;
 	sampleDivider++;
@@ -1635,7 +1636,7 @@ static int inv_set_orientation_time_dmp(struct inv_mpu_iio_s *st,
 
 int inv_clear_GLU_int_flag(struct inv_mpu_iio_s *st)
 {
-	const unsigned char regs[4] = {0, 0, 0, 0};
+	const u8 regs[4] = {0, 0, 0, 0};
 	return mem_w_key(KEY_D_GLU_INTERRUPT, 4, regs);
 }
 
@@ -1664,10 +1665,10 @@ int inv_enable_orientation_dmp(struct inv_mpu_iio_s *st, bool on)
 }
 
 static int inv_send_sensor_data(struct inv_mpu_iio_s *st,
-				unsigned short elements)
+				u16 elements)
 {
 	int result;
-	unsigned char regs[] = {DINAA0 + 3, DINAA0 + 3, DINAA0 + 3,
+	u8 regs[] = {DINAA0 + 3, DINAA0 + 3, DINAA0 + 3,
 				DINAA0 + 3, DINAA0 + 3, DINAA0 + 3,
 				DINAA0 + 3, DINAA0 + 3, DINAA0 + 3,
 				DINAA0 + 3};
@@ -1692,8 +1693,8 @@ static int inv_send_sensor_data(struct inv_mpu_iio_s *st,
 
 static int inv_send_interrupt_word(struct inv_mpu_iio_s *st)
 {
-	const unsigned char regs[] = { DINA20 };
-	unsigned char result;
+	const u8 regs[] = { DINA20 };
+	u8 result;
 
 	result = mem_w_key(KEY_CFG_27, ARRAY_SIZE(regs), regs);
 	return result;
@@ -1707,7 +1708,7 @@ ssize_t inv_dmp_firmware_write(struct file *fp, struct kobject *kobj,
 	struct bin_attribute *attr,
 	char *buf, loff_t pos, size_t size)
 {
-	unsigned char *firmware;
+	u8 *firmware;
 	int result;
 	struct inv_reg_map_s *reg;
 	struct iio_dev *indio_dev;
@@ -1754,12 +1755,10 @@ ssize_t inv_dmp_firmware_write(struct file *fp, struct kobject *kobj,
 	if (result)
 		goto firmware_write_fail;
 
-	result = inv_verify_firmware(st, firmware, size);
-	if (result)
-		goto firmware_write_fail;
 	result = inv_set_fifo_rate(st, DMP_DEFAULT_FIFO_RATE);
 	if (result)
 		goto firmware_write_fail;
+	st->chip_config.dmp_output_rate = DMP_DEFAULT_FIFO_RATE;
 	result = inv_send_sensor_data(st, INV_GYRO_ACC_MASK);
 	if (result)
 		goto firmware_write_fail;
@@ -1787,7 +1786,7 @@ ssize_t inv_dmp_firmware_read(struct file *filp,
 				char *buf, loff_t off, size_t count)
 {
 	int bank, write_size, size, data, result;
-	unsigned short memaddr;
+	u16 memaddr;
 	struct iio_dev *indio_dev;
 	struct inv_mpu_iio_s *st;
 	size = count;

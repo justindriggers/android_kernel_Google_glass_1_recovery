@@ -139,8 +139,10 @@ static int reset_fifo_mpu3050(struct iio_dev *indio_dev)
 		if (result)
 			return result;
 	}
+	st->chip_config.normal_compass_measure = 0;
 
 	return 0;
+
 reset_fifo_fail:
 	if (st->chip_config.dmp_on)
 		val = BIT_DMP_INT_EN;
@@ -204,8 +206,10 @@ static int reset_fifo_itg(struct iio_dev *indio_dev)
 		if (st->chip_config.compass_enable) {
 			/* I2C_MST_DLY is set according to sample rate,
 			   slow down the power*/
-			data = st->chip_config.fifo_rate /
-				st->chip_config.dmp_output_rate;
+			data = max(COMPASS_RATE_SCALE *
+				st->chip_config.fifo_rate / ONE_K_HZ,
+				st->chip_config.fifo_rate /
+				st->chip_config.dmp_output_rate);
 			if (data > 0)
 				data -= 1;
 			result = inv_i2c_single_write(st, REG_I2C_SLV4_CTRL,
@@ -271,12 +275,26 @@ reset_fifo_fail:
 }
 
 /**
+ *  inv_clear_kfifo() - clear time stamp fifo
+ *  @st:	Device driver instance.
+ */
+void inv_clear_kfifo(struct inv_mpu_iio_s *st)
+{
+	unsigned long flags;
+	spin_lock_irqsave(&st->time_stamp_lock, flags);
+	kfifo_reset(&st->timestamps);
+	spin_unlock_irqrestore(&st->time_stamp_lock, flags);
+}
+
+/**
  *  inv_reset_fifo() - Reset FIFO related registers.
  *  @st:	Device driver instance.
  */
 static int inv_reset_fifo(struct iio_dev *indio_dev)
 {
 	struct inv_mpu_iio_s *st = iio_priv(indio_dev);
+
+	inv_clear_kfifo(st);
 	if (INV_MPU3050 == st->chip_type)
 		return reset_fifo_mpu3050(indio_dev);
 	else
@@ -322,18 +340,6 @@ int set_inv_enable(struct iio_dev *indio_dev,
 	st->chip_config.enable = !!enable;
 
 	return 0;
-}
-
-/**
- *  inv_clear_kfifo() - clear time stamp fifo
- *  @st:	Device driver instance.
- */
-void inv_clear_kfifo(struct inv_mpu_iio_s *st)
-{
-	unsigned long flags;
-	spin_lock_irqsave(&st->time_stamp_lock, flags);
-	kfifo_reset(&st->timestamps);
-	spin_unlock_irqrestore(&st->time_stamp_lock, flags);
 }
 
 /**
@@ -635,6 +641,12 @@ static int inv_report_gyro_accl_compass(struct iio_dev *indio_dev,
 			st->compass_counter = 0;
 		} else if (compass_divider != 0) {
 			st->compass_counter++;
+		}
+		if (!conf->normal_compass_measure) {
+			c[0] = 0;
+			c[1] = 0;
+			c[2] = 0;
+			conf->normal_compass_measure = 1;
 		}
 	}
 
