@@ -307,6 +307,25 @@ static int inv_compass_scale_show(struct inv_mpu_iio_s *st, int *scale)
 	return IIO_VAL_INT;
 }
 
+static int inv_get_offset_regs(struct inv_mpu_iio_s *st, int regs, s16 *off)
+{
+	int result;
+	s16 val;
+	u8 tmp;
+	result = inv_i2c_read(st, regs, 1, &tmp);
+	if (result)
+		return result;
+	val = (s16)(tmp << 8);
+	result = inv_i2c_read(st, regs + 1, 1, &tmp);
+	if (result)
+		return result;
+	val |= tmp;
+	val &= (~1);
+	*off = val;
+
+	return 0;
+}
+
 /**
  *  mpu_read_raw() - read raw method.
  */
@@ -321,21 +340,23 @@ static int mpu_read_raw(struct iio_dev *indio_dev,
 		return -EINVAL;
 	switch (mask) {
 	case 0:
-		if (chan->type == IIO_ANGL_VEL) {
+		switch (chan->type) {
+		case IIO_ANGL_VEL:
 			*val = st->raw_gyro[chan->channel2 - IIO_MOD_X];
 			return IIO_VAL_INT;
-		}
-		if (chan->type == IIO_ACCEL) {
+		case IIO_ACCEL:
 			*val = st->raw_accel[chan->channel2 - IIO_MOD_X];
 			return IIO_VAL_INT;
-		}
-		if (chan->type == IIO_MAGN) {
+		case IIO_MAGN:
 			*val = st->raw_compass[chan->channel2 - IIO_MOD_X];
 			return IIO_VAL_INT;
+		default:
+			return -EINVAL;
 		}
-		return -EINVAL;
 	case IIO_CHAN_INFO_SCALE:
-		if (chan->type == IIO_ANGL_VEL) {
+		switch (chan->type) {
+		case IIO_ANGL_VEL:
+		{
 			const short gyro_scale_6050[] = {250, 500, 1000, 2000};
 			const short gyro_scale_6500[] = {250, 1000, 2000, 4000};
 			if (INV_MPU6500 == st->chip_type)
@@ -344,14 +365,17 @@ static int mpu_read_raw(struct iio_dev *indio_dev,
 				*val = gyro_scale_6050[st->chip_config.fsr];
 			return IIO_VAL_INT;
 		}
-		if (chan->type == IIO_ACCEL) {
+		case IIO_ACCEL:
+		{
 			const short accel_scale[] = {2, 4, 8, 16};
 			*val = accel_scale[st->chip_config.accl_fs];
 			return IIO_VAL_INT;
 		}
-		if (chan->type == IIO_MAGN)
+		case IIO_MAGN:
 			return inv_compass_scale_show(st, val);
-		return -EINVAL;
+		default:
+			return -EINVAL;
+		}
 	case IIO_CHAN_INFO_CALIBBIAS:
 		if (st->chip_config.self_test_run_once == 0) {
 			result = inv_do_test(st, 0,  st->gyro_bias,
@@ -360,16 +384,35 @@ static int mpu_read_raw(struct iio_dev *indio_dev,
 				return result;
 			st->chip_config.self_test_run_once = 1;
 		}
-
-		if (chan->type == IIO_ANGL_VEL) {
+		switch (chan->type) {
+		case IIO_ANGL_VEL:
 			*val = st->gyro_bias[chan->channel2 - IIO_MOD_X];
 			return IIO_VAL_INT;
-		}
-		if (chan->type == IIO_ACCEL) {
+		case IIO_ACCEL:
 			*val = st->accel_bias[chan->channel2 - IIO_MOD_X];
 			return IIO_VAL_INT;
+		default:
+			return -EINVAL;
 		}
-		return -EINVAL;
+	case IIO_CHAN_INFO_OFFSET:
+		switch (chan->type) {
+		case IIO_ACCEL:
+		{
+			const u8 offset_regs[] = {REG_XA_OFFS_H, REG_YA_OFFS_H,
+						REG_ZA_OFFS_H};
+			result = inv_get_offset_regs(st,
+				offset_regs[chan->channel2 - IIO_MOD_X],
+				&st->accel_offset[chan->channel2 - IIO_MOD_X]);
+			if (result)
+				return -EIO;
+
+			*val = st->accel_offset[chan->channel2 - IIO_MOD_X] *
+				OFFSET_PRECISION;
+			return IIO_VAL_INT;
+		}
+		default:
+			return -EINVAL;
+		}
 	default:
 		return -EINVAL;
 	}
@@ -449,6 +492,26 @@ static int inv_write_compass_scale(struct inv_mpu_iio_s  *st, int data)
 	return 0;
 }
 
+static int inv_set_offset_regs(struct inv_mpu_iio_s *st, int regs, int d)
+{
+	int result, val;
+	u8 tmp;
+	val = d / 1000;
+	if ((val > MAX_ACCEL_OFFSET) || (val < MIN_ACCEL_OFFSET))
+		return -EINVAL;
+	val &= (~1);
+	result = inv_i2c_read(st, regs + 1, 1, &tmp);
+	if (result)
+		return result;
+	tmp &= 1;
+	val |= tmp;
+
+	result = inv_i2c_single_write(st, regs, (val >> 8) & 0xff);
+	result |= inv_i2c_single_write(st, regs + 1, val & 0xff);
+
+	return result;
+}
+
 static inline int check_enable(struct inv_mpu_iio_s  *st)
 {
 	return st->chip_config.is_asleep | st->chip_config.enable;
@@ -468,14 +531,33 @@ static int mpu_write_raw(struct iio_dev *indio_dev,
 		return -EPERM;
 	switch (mask) {
 	case IIO_CHAN_INFO_SCALE:
-		result = -EINVAL;
-		if (chan->type == IIO_ANGL_VEL)
-			result = inv_write_fsr(st, val);
-		if (chan->type == IIO_ACCEL)
-			result = inv_write_accel_fs(st, val);
-		if (chan->type == IIO_MAGN)
-			result = inv_write_compass_scale(st, val);
-		return result;
+		switch (chan->type) {
+		case IIO_ANGL_VEL:
+			return inv_write_fsr(st, val);
+		case IIO_ACCEL:
+			return inv_write_accel_fs(st, val);
+		case IIO_MAGN:
+			return inv_write_compass_scale(st, val);
+		default:
+			return -EINVAL;
+		}
+	case IIO_CHAN_INFO_OFFSET:
+		switch (chan->type) {
+		case IIO_ACCEL:
+		{
+			const u8 offset_regs[] = {REG_XA_OFFS_H, REG_YA_OFFS_H,
+						REG_ZA_OFFS_H};
+			result = inv_set_offset_regs(st,
+				offset_regs[chan->channel2 - IIO_MOD_X], val);
+			if (result)
+				return -EIO;
+			st->accel_offset[chan->channel2 - IIO_MOD_X] = val;
+
+			return 0;
+		}
+		default:
+			return -EINVAL;
+		}
 	default:
 		return -EINVAL;
 	}
@@ -730,6 +812,21 @@ static ssize_t inv_dmp_attr_store(struct device *dev,
 	return count;
 }
 
+static int inv_read_dmp(struct inv_mpu_iio_s *st, int key, int *data)
+{
+	s8 d[4];
+	int result;
+
+	if (!st->chip_config.firmware_loaded)
+		return -EPERM;
+	result = mpu_memory_read(st->sl_handle, st->i2c_addr,
+				inv_dmp_get_address(key), 4, d);
+	if (result)
+		return result;
+	*data = be32_to_cpup((int *)d);
+
+	return 0;
+}
 /**
  * inv_attr_show() -  calling this function will show current
  *                        dmp parameters.
@@ -739,20 +836,32 @@ static ssize_t inv_attr_show(struct device *dev,
 {
 	struct inv_mpu_iio_s *st = iio_priv(dev_get_drvdata(dev));
 	struct iio_dev_attr *this_attr = to_iio_dev_attr(attr);
-	int result;
-	signed char *m;
-	unsigned char *key;
+	int result, data;
+	s8 *m;
+	u8 *key;
 	int i;
 
 	switch (this_attr->address) {
 	case ATTR_DMP_GLU_OUTLIER:
-		return sprintf(buf, "%d\n", st->glu.outlier);
+		result = inv_read_dmp(st, KEY_D_GLU_OUTLIER, &data);
+		if (result)
+			return result;
+		return sprintf(buf, "%d\n", data);
 	case ATTR_DMP_GLU_LEVEL:
-		return sprintf(buf, "%d\n", st->glu.level);
+		result = inv_read_dmp(st, KEY_D_GLU_LEVEL_THRESHOLD, &data);
+		if (result)
+			return result;
+		return sprintf(buf, "%d\n", data);
 	case ATTR_DMP_GLU_TRIGGER:
-		return sprintf(buf, "%d\n", st->glu.trigger);
+		result = inv_read_dmp(st, KEY_D_GLU_TRIGGER_THRESHOLD, &data);
+		if (result)
+			return result;
+		return sprintf(buf, "%d\n", data);
 	case ATTR_DMP_GLU_ROLL:
-		return sprintf(buf, "%d\n", st->glu.roll);
+		result = inv_read_dmp(st, KEY_D_GLU_ROLL_THRESHOLD, &data);
+		if (result)
+			return result;
+		return sprintf(buf, "%d\n", data);
 	case ATTR_DMP_TAP_THRESHOLD:
 		return sprintf(buf, "%d\n", st->tap.thresh);
 	case ATTR_DMP_TAP_MIN_COUNT:
@@ -1240,6 +1349,17 @@ static ssize_t inv_reg_write_store(struct device *dev,
 		.scan_index = _index,                                 \
 		.scan_type  = IIO_ST('s', 16, 16, 0)                  \
 	}
+#define INV_ACCL_CHAN(_type, _channel2, _index)                \
+	{                                                         \
+		.type = _type,                                        \
+		.modified = 1,                                        \
+		.channel2 = _channel2,                                \
+		.info_mask =  (IIO_CHAN_INFO_CALIBBIAS_SEPARATE_BIT | \
+				IIO_CHAN_INFO_SCALE_SHARED_BIT |     \
+				IIO_CHAN_INFO_OFFSET_SEPARATE_BIT),  \
+		.scan_index = _index,                                 \
+		.scan_type  = IIO_ST('s', 16, 16, 0)                  \
+	}
 
 #define INV_MPU_QUATERNION_CHAN(_channel2, _index)                    \
 	{                                                             \
@@ -1267,9 +1387,9 @@ static const struct iio_chan_spec inv_mpu_channels[] = {
 	INV_MPU_CHAN(IIO_ANGL_VEL, IIO_MOD_Y, INV_MPU_SCAN_GYRO_Y),
 	INV_MPU_CHAN(IIO_ANGL_VEL, IIO_MOD_Z, INV_MPU_SCAN_GYRO_Z),
 
-	INV_MPU_CHAN(IIO_ACCEL, IIO_MOD_X, INV_MPU_SCAN_ACCL_X),
-	INV_MPU_CHAN(IIO_ACCEL, IIO_MOD_Y, INV_MPU_SCAN_ACCL_Y),
-	INV_MPU_CHAN(IIO_ACCEL, IIO_MOD_Z, INV_MPU_SCAN_ACCL_Z),
+	INV_ACCL_CHAN(IIO_ACCEL, IIO_MOD_X, INV_MPU_SCAN_ACCL_X),
+	INV_ACCL_CHAN(IIO_ACCEL, IIO_MOD_Y, INV_MPU_SCAN_ACCL_Y),
+	INV_ACCL_CHAN(IIO_ACCEL, IIO_MOD_Z, INV_MPU_SCAN_ACCL_Z),
 
 	INV_MPU_QUATERNION_CHAN(IIO_MOD_R, INV_MPU_SCAN_QUAT_R),
 	INV_MPU_QUATERNION_CHAN(IIO_MOD_X, INV_MPU_SCAN_QUAT_X),
@@ -1283,18 +1403,18 @@ static const struct iio_chan_spec inv_mpu_channels[] = {
 
 /*constant IIO attribute */
 static IIO_CONST_ATTR_SAMP_FREQ_AVAIL("10 20 50 100 200 500");
-static IIO_DEV_ATTR_SAMP_FREQ(S_IRUGO | S_IWUSR, inv_fifo_rate_show,
+static IIO_DEV_ATTR_SAMP_FREQ(S_IRUGO | S_IWUGO, inv_fifo_rate_show,
 	inv_fifo_rate_store);
 static DEVICE_ATTR(temperature, S_IRUGO, inv_temperature_show, NULL);
 static IIO_DEVICE_ATTR(clock_source, S_IRUGO, inv_attr_show, NULL,
 	ATTR_CLK_SRC);
-static IIO_DEVICE_ATTR(power_state, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(power_state, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_power_state_store, ATTR_POWER_STATE);
-static IIO_DEVICE_ATTR(firmware_loaded, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(firmware_loaded, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_attr_store, ATTR_FIRMWARE_LOADED);
-static IIO_DEVICE_ATTR(lpa_mode, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(lpa_mode, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_attr_store, ATTR_LPA_MODE);
-static IIO_DEVICE_ATTR(lpa_freq, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(lpa_freq, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_attr_store, ATTR_LPA_FREQ);
 static DEVICE_ATTR(reg_dump, S_IRUGO, inv_reg_dump_show, NULL);
 static IIO_DEVICE_ATTR(self_test, S_IRUGO, inv_attr_show, NULL,
@@ -1306,51 +1426,51 @@ static IIO_DEVICE_ATTR(accl_matrix, S_IRUGO, inv_attr_show, NULL,
 	ATTR_ACCL_MATRIX);
 static IIO_DEVICE_ATTR(compass_matrix, S_IRUGO, inv_attr_show, NULL,
 	ATTR_COMPASS_MATRIX);
-static IIO_DEVICE_ATTR(glu_outlier, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(glu_outlier, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_GLU_OUTLIER);
-static IIO_DEVICE_ATTR(glu_level, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(glu_level, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_GLU_LEVEL);
-static IIO_DEVICE_ATTR(glu_trigger, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(glu_trigger, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_GLU_TRIGGER);
-static IIO_DEVICE_ATTR(glu_roll, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(glu_roll, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_GLU_ROLL);
-static IIO_DEVICE_ATTR(dmp_on, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(dmp_on, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_ON);
-static IIO_DEVICE_ATTR(dmp_int_on, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(dmp_int_on, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_INT_ON);
-static IIO_DEVICE_ATTR(dmp_event_int_on, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(dmp_event_int_on, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_EVENT_INT_ON);
-static IIO_DEVICE_ATTR(dmp_output_rate, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(dmp_output_rate, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_OUTPUT_RATE);
-static IIO_DEVICE_ATTR(orientation_on, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(orientation_on, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_ORIENTATION_ON);
-static IIO_DEVICE_ATTR(quaternion_on, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(quaternion_on, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_attr_store, ATTR_DMP_QUATERNION_ON);
-static IIO_DEVICE_ATTR(display_orientation_on, S_IRUGO | S_IWUSR,
+static IIO_DEVICE_ATTR(display_orientation_on, S_IRUGO | S_IWUGO,
 	inv_attr_show, inv_dmp_attr_store, ATTR_DMP_DISPLAY_ORIENTATION_ON);
-static IIO_DEVICE_ATTR(tap_on, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(tap_on, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_TAP_ON);
-static IIO_DEVICE_ATTR(tap_time, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(tap_time, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_TAP_TIME);
-static IIO_DEVICE_ATTR(tap_min_count, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(tap_min_count, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_TAP_MIN_COUNT);
-static IIO_DEVICE_ATTR(tap_threshold, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(tap_threshold, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_TAP_THRESHOLD);
 static DEVICE_ATTR(event_glu, S_IRUGO, inv_dmp_glu_show, NULL);
 static DEVICE_ATTR(event_orientation, S_IRUGO, inv_dmp_orient_show, NULL);
 static DEVICE_ATTR(event_tap, S_IRUGO, inv_dmp_tap_show, NULL);
 static DEVICE_ATTR(event_display_orientation, S_IRUGO,
 	inv_dmp_display_orient_show, NULL);
-static IIO_DEVICE_ATTR(gyro_enable, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(gyro_enable, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_attr_store, ATTR_GYRO_ENABLE);
-static IIO_DEVICE_ATTR(accl_enable, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(accl_enable, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_attr_store, ATTR_ACCL_ENABLE);
-static IIO_DEVICE_ATTR(compass_enable, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(compass_enable, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_attr_store, ATTR_COMPASS_ENABLE);
 #ifdef CONFIG_INV_TESTING
 static IIO_DEVICE_ATTR(i2c_counters, S_IRUGO, inv_attr_show, NULL,
 	ATTR_I2C_COUNTERS);
-static IIO_DEVICE_ATTR(reg_write, S_IRUGO | S_IWUSR, inv_attr_show,
+static IIO_DEVICE_ATTR(reg_write, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_reg_write_store, ATTR_REG_WRITE);
 #endif
 
@@ -1675,7 +1795,7 @@ static int inv_check_chip_type(struct inv_mpu_iio_s *st,
 static const struct bin_attribute dmp_firmware = {
 	.attr = {
 		.name = "dmp_firmware",
-		.mode = S_IRUGO | S_IWUSR
+		.mode = S_IRUGO | S_IWUGO
 	},
 	.size = 4096,
 	.read = inv_dmp_firmware_read,
@@ -1821,6 +1941,24 @@ static int inv_mpu_remove(struct i2c_client *client)
 	return 0;
 }
 
+#ifdef CONFIG_PM
+static int inv_mpu_resume(struct device *dev)
+{
+	return 0;
+}
+
+static int inv_mpu_suspend(struct device *dev)
+{
+	return 0;
+}
+static const struct dev_pm_ops inv_mpu_pmops = {
+	SET_SYSTEM_SLEEP_PM_OPS(inv_mpu_suspend, inv_mpu_resume)
+};
+#define INV_MPU_PMOPS (&inv_mpu_pmops)
+#else
+#define INV_MPU_PMOPS NULL
+#endif /* CONFIG_PM */
+
 static const unsigned short normal_i2c[] = { I2C_CLIENT_END };
 /* device id table is used to identify what device can be
  * supported by this driver
@@ -1844,6 +1982,7 @@ static struct i2c_driver inv_mpu_driver = {
 	.driver = {
 		.owner	=	THIS_MODULE,
 		.name	=	"inv-mpu-iio",
+		.pm     =       INV_MPU_PMOPS,
 	},
 	.address_list = normal_i2c,
 };

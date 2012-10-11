@@ -256,6 +256,7 @@ struct inv_mpu_slave;
  *  @irq:               irq number store.
  *  @accel_bias:        accel bias store.
  *  @gyro_bias:         gyro bias store.
+ *  @accel_offset:      accel offset register store.
  *  @raw_gyro:          raw gyro data.
  *  @raw_accel:         raw accel data.
  *  @raw_compass:       raw compass.
@@ -299,6 +300,7 @@ struct inv_mpu_iio_s {
 	short irq;
 	int accel_bias[3];
 	int gyro_bias[3];
+	short accel_offset[3];
 	short raw_gyro[3];
 	short raw_accel[3];
 	short raw_compass[3];
@@ -410,7 +412,10 @@ struct inv_mpu_slave {
 #define REG_YGOFFS_TC           0x1
 #define BIT_I2C_MST_VDDIO		0x80
 
+#define REG_XA_OFFS_H           0x6
 #define REG_XA_OFFS_L_TC        0x7
+#define REG_YA_OFFS_H           0x8
+#define REG_ZA_OFFS_H           0xA
 #define REG_PRODUCT_ID          0xC
 #define REG_ST_GCT_X            0xD
 #define REG_SAMPLE_RATE_DIV     0x19
@@ -548,6 +553,9 @@ struct inv_mpu_slave {
 #define MAX_FIFO_RATE                         1000
 #define MIN_FIFO_RATE                         4
 #define ONE_K_HZ                              1000
+#define MAX_ACCEL_OFFSET                      0x3FFF
+#define MIN_ACCEL_OFFSET                      -16384
+#define OFFSET_PRECISION                      1000
 
 /* GLU related defines */
 #define GLU_INT_STATUS                        0x10

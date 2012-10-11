@@ -75,7 +75,6 @@
 #define DEF_GYRO_PACKET_THRESH      DEF_GYRO_WAIT_TIME
 #define DEF_GYRO_THRESH             10
 #define DEF_GYRO_SCALE              131
-#define DEF_ST_PRECISION            1000
 #define DEF_ST_ACCL_FULL_SCALE      8000UL
 #define DEF_ST_SCALE                (1L << 15)
 #define DEF_ST_TRY_TIMES            2
@@ -484,11 +483,11 @@ static int inv_check_accl_self_test(struct inv_mpu_iio_s *st,
 	g_z_sign = 1;
 	ret_val = 0;
 	test_setup.accl_sens[X] = (unsigned int)(DEF_ST_SCALE *
-						DEF_ST_PRECISION / fs);
+						OFFSET_PRECISION / fs);
 	test_setup.accl_sens[Y] = (unsigned int)(DEF_ST_SCALE *
-						DEF_ST_PRECISION / fs);
+						OFFSET_PRECISION / fs);
 	test_setup.accl_sens[Z] = (unsigned int)(DEF_ST_SCALE *
-						DEF_ST_PRECISION / fs);
+						OFFSET_PRECISION / fs);
 
 	if (MPL_PROD_KEY(st->chip_info.product_id,
 			 st->chip_info.product_revision) ==
@@ -502,24 +501,24 @@ static int inv_check_accl_self_test(struct inv_mpu_iio_s *st,
 		test_setup.accl_sens[Z] /= st->chip_info.multi;
 	}
 	gravity = test_setup.accl_sens[Z];
-	reg_z_avg = reg_avg[Z] - g_z_sign * gravity*DEF_ST_PRECISION;
+	reg_z_avg = reg_avg[Z] - g_z_sign * gravity * OFFSET_PRECISION;
 	read_accel_hw_self_test_prod_shift(st, st_shift_prod);
 	for (j = 0; j < 3; j++) {
 		st_shift_cust[j] = abs(reg_avg[j] - st_avg[j]);
 		if (st_shift_prod[j]) {
-			tmp1 = st_shift_prod[j]/DEF_ST_PRECISION;
-			st_shift_ratio[j] = st_shift_cust[j]/tmp1
-				- DEF_ST_PRECISION;
+			tmp1 = st_shift_prod[j] / OFFSET_PRECISION;
+			st_shift_ratio[j] = st_shift_cust[j] / tmp1
+				- OFFSET_PRECISION;
 			if (st_shift_ratio[j] > DEF_ACCEL_ST_SHIFT_DELTA)
 				ret_val |= 1 << j;
 			if (st_shift_ratio[j] < -DEF_ACCEL_ST_SHIFT_DELTA)
 				ret_val |= 1 << j;
 		} else {
 			if (st_shift_cust[j] <
-				DEF_ACCEL_ST_SHIFT_MIN*gravity)
+				DEF_ACCEL_ST_SHIFT_MIN * gravity)
 				ret_val |= 1 << j;
 			if (st_shift_cust[j] >
-				DEF_ACCEL_ST_SHIFT_MAX*gravity)
+				DEF_ACCEL_ST_SHIFT_MAX * gravity)
 				ret_val |= 1 << j;
 		}
 	}
@@ -557,18 +556,18 @@ static int inv_check_3500_gyro_self_test(struct inv_mpu_iio_s *st,
 	}
 	for (i = 0; i < 3; i++) {
 		if (gst_otp[i] == 0) {
-			if (abs(gst[i]) * 4 < 60 * 2 * DEF_ST_PRECISION *
+			if (abs(gst[i]) * 4 < 60 * 2 * OFFSET_PRECISION *
 					DEF_GYRO_SCALE)
 				ret_val |= (1 << i);
 		} else {
-			if (abs(gst[i]/gst_otp[i] - DEF_ST_PRECISION) >
+			if (abs(gst[i]/gst_otp[i] - OFFSET_PRECISION) >
 					DEF_GYRO_CT_SHIFT_DELTA)
 				ret_val |= (1 << i);
 		}
 	}
 	for (i = 0; i < 3; i++) {
 		if (abs(reg_avg[i]) * 4 > 20 * 2 *
-		    DEF_ST_PRECISION*DEF_GYRO_SCALE)
+		    OFFSET_PRECISION * DEF_GYRO_SCALE)
 			ret_val |= (1 << i);
 	}
 
@@ -611,23 +610,23 @@ static int inv_check_6050_gyro_self_test(struct inv_mpu_iio_s *st,
 		st_shift_cust[i] = abs(reg_avg[i] - st_avg[i]);
 		if (ct_shift_prod[i]) {
 			st_shift_ratio[i] = st_shift_cust[i] /
-				ct_shift_prod[i] - DEF_ST_PRECISION;
+				ct_shift_prod[i] - OFFSET_PRECISION;
 			if (st_shift_ratio[i] > DEF_GYRO_CT_SHIFT_DELTA)
 				ret_val |= 1 << i;
 			if (st_shift_ratio[i] < -DEF_GYRO_CT_SHIFT_DELTA)
 				ret_val |= 1 << i;
 		} else {
-			if (st_shift_cust[i] < DEF_ST_PRECISION *
+			if (st_shift_cust[i] < OFFSET_PRECISION *
 				DEF_GYRO_CT_SHIFT_MIN * test_setup.gyro_sens)
 				ret_val |= 1 << i;
-			if (st_shift_cust[i] > DEF_ST_PRECISION *
+			if (st_shift_cust[i] > OFFSET_PRECISION *
 				DEF_GYRO_CT_SHIFT_MAX * test_setup.gyro_sens)
 				ret_val |= 1 << i;
 		}
 	}
 	for (i = 0; i < 3; i++) {
 		if (abs(reg_avg[i]) * 4 > 20 * 2 *
-		    DEF_ST_PRECISION * DEF_GYRO_SCALE)
+		    OFFSET_PRECISION * DEF_GYRO_SCALE)
 			ret_val |= (1 << i);
 	}
 
@@ -731,16 +730,16 @@ int inv_do_test(struct inv_mpu_iio_s *st, int self_test_flag,
 			(short)be16_to_cpup((__be16 *)(&data[ind + 2 * j]));
 	}
 
-	gyro_result[0] = gyro_result[0] * DEF_ST_PRECISION / packet_count;
-	gyro_result[1] = gyro_result[1] * DEF_ST_PRECISION / packet_count;
-	gyro_result[2] = gyro_result[2] * DEF_ST_PRECISION / packet_count;
+	gyro_result[0] = gyro_result[0] * OFFSET_PRECISION / packet_count;
+	gyro_result[1] = gyro_result[1] * OFFSET_PRECISION / packet_count;
+	gyro_result[2] = gyro_result[2] * OFFSET_PRECISION / packet_count;
 	if (has_accl) {
 		accl_result[0] =
-			accl_result[0] * DEF_ST_PRECISION / packet_count;
+			accl_result[0] * OFFSET_PRECISION / packet_count;
 		accl_result[1] =
-			accl_result[1] * DEF_ST_PRECISION / packet_count;
+			accl_result[1] * OFFSET_PRECISION / packet_count;
 		accl_result[2] =
-			accl_result[2] * DEF_ST_PRECISION / packet_count;
+			accl_result[2] * OFFSET_PRECISION / packet_count;
 	}
 
 	return 0;
@@ -1810,7 +1809,7 @@ ssize_t inv_dmp_firmware_read(struct file *filp,
 			return result;
 	}
 
-	return 0;
+	return count;
 }
 /**
  *  @}
