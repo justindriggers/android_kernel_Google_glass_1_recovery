@@ -436,8 +436,14 @@ static void ltr506_schedwork(struct work_struct *work)
 	ret = I2C_Read(buffer, 1);
 	if (ret < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s | 0x%02X", __func__, buffer[0]);
+		/* Re-enable interrupts */
+		enable_irq(ltr506->irq);
 		return;
 	}
+
+	/* Re-enable interrupts after reading */
+	enable_irq(ltr506->irq);
+
 	status = buffer[0];
 	interrupt_stat = status & 0x0a;
 	newdata = status & 0x05;
@@ -471,9 +477,6 @@ static void ltr506_schedwork(struct work_struct *work)
 			report_als_input_event(ltr506);
 		}
 	}
-#ifndef USE_SHARED_IRQ
-	enable_irq(ltr506->irq);
-#endif
 }
 
 
@@ -482,26 +485,68 @@ static DECLARE_WORK(irq_workqueue, ltr506_schedwork);
 /* IRQ Handler */
 static irqreturn_t ltr506_irq_handler(int irq, void *data)
 {
-#ifndef USE_SHARED_IRQ
 	struct ltr506_data *ltr506 = data;
 
-	/* disable an irq without waiting */
+	/* disable an irq without waiting.  We must disable the interrupt 
+	   otherwise the kernel interrupt handler will keep calling this 
+	   routine until it's killed due to spending too much time in interrupt
+	   context */
 	disable_irq_nosync(ltr506->irq);
-#endif
+
 	schedule_work(&irq_workqueue);
 
 	return IRQ_HANDLED;
 }
 
+#ifdef USE_SHARED_IRQ
+/* Logic to obtain a shared interrupt */
 static int ltr506_gpio_irq(struct ltr506_data *ltr506)
 {
 	int rc = 0;
+	unsigned long irq_flags = IRQF_TRIGGER_LOW | IRQF_SHARED;
 
-#ifdef USE_SHARED_IRQ
 	dev_info(&ltr506->i2c_client->dev, "%s: Using shared interrupt with wink detector\n", __func__);
-	rc = request_irq(ltr506->irq, ltr506_irq_handler, IRQF_TRIGGER_LOW | IRQF_SHARED,
+
+	rc = gpio_request(ltr506->gpio_int_no, DEVICE_NAME);
+	if (rc < 0) {
+		if (rc == -EBUSY) {
+			dev_info(&ltr506->i2c_client->dev, "%s: gpio request busy; assuming glasshub already obtained it\n", __func__);
+		} else {
+			dev_err(&ltr506->i2c_client->dev,"%s: GPIO %d Request Fail"
+			        " (%d)\n", __func__, ltr506->gpio_int_no, rc);
+			return rc;
+		}
+	}
+
+	rc = gpio_direction_input(ltr506->gpio_int_no);
+	if (rc < 0) {
+		if (rc == -EBUSY) {
+			dev_info(&ltr506->i2c_client->dev, "%s: gpio input direction request busy; assuming glasshub already obtained it\n", __func__);
+		} else {
+			dev_err(&ltr506->i2c_client->dev, "%s: Set GPIO %d as Input"
+			        " Fail (%d)\n", __func__, ltr506->gpio_int_no, rc);
+			return rc;
+		}
+	}
+
+	/* Configure an active low trigger interrupt for the device */
+	rc = request_irq(ltr506->irq, ltr506_irq_handler, irq_flags,
 	                 DEVICE_NAME, ltr506);
+	if (rc < 0) {
+		dev_err(&ltr506->i2c_client->dev, "%s: Request IRQ (%d) for"
+		        " GPIO %d Fail (%d)\n", __func__, ltr506->irq,
+		        ltr506->gpio_int_no, rc);
+	}
+	return rc;
+}
+
 #else
+/* Logic to obtain an exclusive interrupt */
+static int ltr506_gpio_irq(struct ltr506_data *ltr506)
+{
+	int rc = 0;
+	unsigned long irq_flags = IRQF_TRIGGER_LOW;
+
 	rc = gpio_request(ltr506->gpio_int_no, DEVICE_NAME);
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev,"%s: GPIO %d Request Fail"
@@ -517,23 +562,20 @@ static int ltr506_gpio_irq(struct ltr506_data *ltr506)
 	}
 
 	/* Configure an active low trigger interrupt for the device */
-	rc = request_irq(ltr506->irq, ltr506_irq_handler, IRQF_TRIGGER_LOW,
+	rc = request_irq(ltr506->irq, ltr506_irq_handler, irq_flags,
 	                 DEVICE_NAME, ltr506);
-#endif
 	if (rc < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s: Request IRQ (%d) for"
 		        " GPIO %d Fail (%d)\n", __func__, ltr506->irq,
 		        ltr506->gpio_int_no, rc);
 		goto out1;
 	}
-
 	return rc;
 out1:
-#ifndef USE_SHARED_IRQ
 	gpio_free(ltr506->gpio_int_no);
-#endif
 	return rc;
 }
+#endif  /* USE_SHARED_IRQ */
 
 /* LED Setup */
 static int ps_led_setup(struct ltr506_data *ltr506)
