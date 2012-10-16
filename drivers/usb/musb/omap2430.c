@@ -266,8 +266,7 @@ static void musb_otg_notifier_work(struct work_struct *data_notifier_work)
 	}
 	/* check for incorrect transitions */
 	if ((last_event == USB_EVENT_VBUS && xceiv_event == USB_EVENT_ID) ||
-	    (last_event == USB_EVENT_ID  && xceiv_event == USB_EVENT_VBUS) ||
-	    (last_event == -1  && xceiv_event == USB_EVENT_NONE)) {
+	    (last_event == USB_EVENT_ID  && xceiv_event == USB_EVENT_VBUS)) {
 		WARN(1, "Incorrect transition (%d)->(%d)\n",
 					last_event, xceiv_event);
 		last_event = xceiv_event;
