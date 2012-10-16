@@ -40,22 +40,6 @@
 #include <linux/crc32.h>
 
 #include "inv_mpu_iio.h"
-/* DMP defines */
-#define DMP_ORIENTATION_TIME		500
-#define DMP_ORIENTATION_ANGLE		60
-#define DMP_DEFAULT_FIFO_RATE           200
-#define DMP_TAP_SCALE                   (767603923 / 5)
-#define DMP_MULTI_SHIFT                 30
-#define DMP_MULTI_TAP_TIME              500
-#define DMP_SHAKE_REJECT_THRESH         100
-#define DMP_SHAKE_REJECT_TIME           10
-#define DMP_SHAKE_REJECT_TIMEOUT        10
-#define DMP_ANGLE_SCALE                 15
-#define DMP_PRECISION                   1000
-#define DMP_MAX_DIVIDER                 4
-#define DMP_MAX_MIN_TAPS                4
-#define DMP_IMAGE_CRC_VALUE             0x379c8e27
-#define DMP_IMAGE_SIZE                  2827
 
 /*--- Test parameters defaults --- */
 #define DEF_OLDEST_SUPP_PROD_REV    8
@@ -929,7 +913,7 @@ test_fail:
 		(accel_result<<DEF_ST_ACCEL_RESULT_SHIFT) | gyro_result;
 }
 
-static int inv_load_firmware(struct inv_mpu_iio_s *st,
+int inv_load_firmware(struct inv_mpu_iio_s *st,
 	u8 *data, int size)
 {
 	int bank, write_size;
@@ -1780,19 +1764,12 @@ firmware_write_fail:
 	return result;
 }
 
-ssize_t inv_dmp_firmware_read(struct file *filp,
-				struct kobject *kobj,
-				struct bin_attribute *bin_attr,
-				char *buf, loff_t off, size_t count)
+int inv_read_dmp_image(struct inv_mpu_iio_s *st, char *buf, int count)
 {
 	int bank, write_size, size, data, result;
 	u16 memaddr;
-	struct iio_dev *indio_dev;
-	struct inv_mpu_iio_s *st;
-	size = count;
 
-	indio_dev = dev_get_drvdata(container_of(kobj, struct device, kobj));
-	st = iio_priv(indio_dev);
+	size = count;
 	data = 0;
 	for (bank = 0; size > 0; bank++, size -= write_size,
 					data += write_size) {
@@ -1810,7 +1787,20 @@ ssize_t inv_dmp_firmware_read(struct file *filp,
 
 	return count;
 }
+
+ssize_t inv_dmp_firmware_read(struct file *filp,
+				struct kobject *kobj,
+				struct bin_attribute *bin_attr,
+				char *buf, loff_t off, size_t count)
+{
+	struct iio_dev *indio_dev;
+	struct inv_mpu_iio_s *st;
+
+	indio_dev = dev_get_drvdata(container_of(kobj, struct device, kobj));
+	st = iio_priv(indio_dev);
+
+	return inv_read_dmp_image(st, buf, count);
+}
 /**
  *  @}
  */
-

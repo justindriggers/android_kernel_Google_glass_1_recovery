@@ -56,6 +56,8 @@ s64 get_time_ns(void)
 	return timespec_to_ns(&ts);
 }
 
+static char dmp_save[DMP_IMAGE_SIZE];
+
 static const short AKM8975_ST_Lower[3] = {-100, -100, -1000};
 static const short AKM8975_ST_Upper[3] = {100, 100, -300};
 
@@ -69,8 +71,8 @@ static const struct inv_hw_s hw_info[INV_NUM_PARTS] = {
 	{119, "ITG3500"},
 	{ 63, "MPU3050"},
 	{117, "MPU6050"},
-	{118, "MPU9150"},
-	{119, "MPU6500"},
+	{117, "MPU9150"},
+	{127, "MPU6500"},
 };
 
 static void inv_setup_reg(struct inv_reg_map_s *reg)
@@ -203,7 +205,6 @@ static int inv_switch_engine(struct inv_mpu_iio_s *st, bool en, u32 mask)
 						mgmt_1);
 		if (result)
 			return result;
-		st->chip_config.clk_src = INV_CLK_INTERNAL;
 	}
 
 	result = inv_i2c_read(st, reg->pwr_mgmt_2, 1, &data);
@@ -226,7 +227,6 @@ static int inv_switch_engine(struct inv_mpu_iio_s *st, bool en, u32 mask)
 						mgmt_1);
 		if (result)
 			return result;
-		st->chip_config.clk_src = INV_CLK_PLL;
 	}
 
 	return 0;
@@ -1007,13 +1007,6 @@ static ssize_t inv_attr_show(struct device *dev,
 			return sprintf(buf, "%s\n",
 				       f[st->chip_config.lpa_freq]);
 	}
-	case ATTR_CLK_SRC:
-		if (INV_CLK_INTERNAL == st->chip_config.clk_src)
-			return sprintf(buf, "INTERNAL\n");
-		else if (INV_CLK_PLL == st->chip_config.clk_src)
-			return sprintf(buf, "Gyro PLL\n");
-		else
-			return -EPERM;
 	case ATTR_SELF_TEST:
 		if (INV_MPU3050 == st->chip_type)
 			result = 0;
@@ -1248,6 +1241,8 @@ static ssize_t inv_accl_enable(struct inv_mpu_iio_s *st,
 static ssize_t inv_compass_enable(struct inv_mpu_iio_s *st,
 				 struct iio_buffer *ring, bool en)
 {
+	int result;
+
 	if (en == st->chip_config.compass_enable)
 		return 0;
 	st->chip_config.compass_enable = en;
@@ -1256,7 +1251,13 @@ static ssize_t inv_compass_enable(struct inv_mpu_iio_s *st,
 		clear_bit(INV_MPU_SCAN_MAGN_X, ring->scan_mask);
 		clear_bit(INV_MPU_SCAN_MAGN_Y, ring->scan_mask);
 		clear_bit(INV_MPU_SCAN_MAGN_Z, ring->scan_mask);
+		result = inv_i2c_single_write(st, REG_I2C_MST_CTRL, 0);
+	} else {
+		result = inv_i2c_single_write(st, REG_I2C_MST_CTRL,
+						BIT_WAIT_FOR_ES);
 	}
+	if (result)
+		return result;
 
 	return 0;
 }
@@ -1422,8 +1423,6 @@ static IIO_CONST_ATTR_SAMP_FREQ_AVAIL("10 20 50 100 200 500");
 static IIO_DEV_ATTR_SAMP_FREQ(S_IRUGO | S_IWUGO, inv_fifo_rate_show,
 	inv_fifo_rate_store);
 static DEVICE_ATTR(temperature, S_IRUGO, inv_temperature_show, NULL);
-static IIO_DEVICE_ATTR(clock_source, S_IRUGO, inv_attr_show, NULL,
-	ATTR_CLK_SRC);
 static IIO_DEVICE_ATTR(power_state, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_power_state_store, ATTR_POWER_STATE);
 static IIO_DEVICE_ATTR(firmware_loaded, S_IRUGO | S_IWUGO, inv_attr_show,
@@ -1493,7 +1492,6 @@ static IIO_DEVICE_ATTR(reg_write, S_IRUGO | S_IWUGO, inv_attr_show,
 static const struct attribute *inv_gyro_attributes[] = {
 	&iio_dev_attr_gyro_enable.dev_attr.attr,
 	&dev_attr_temperature.attr,
-	&iio_dev_attr_clock_source.dev_attr.attr,
 	&iio_dev_attr_power_state.dev_attr.attr,
 	&dev_attr_reg_dump.attr,
 	&iio_dev_attr_self_test.dev_attr.attr,
@@ -1986,10 +1984,55 @@ static int inv_mpu_resume(struct device *dev)
 	return 0;
 }
 
-static int inv_mpu_suspend(struct device *dev)
+static int inv_mpu_setup_suspend(struct inv_mpu_iio_s *st)
 {
+	struct inv_reg_map_s *reg;
+	char regs[REG_FIFO_COUNT_H];
+	int res;
+	int ii;
+
+	reg = &st->reg;
+	for (ii = 0; ii < REG_FIFO_COUNT_H; ii++) {
+		/* don't read fifo r/w register */
+		if (ii != st->reg.fifo_r_w)
+			inv_i2c_read(st, ii, 1, &regs[ii]);
+	}
+	res = inv_i2c_single_write(st, reg->pwr_mgmt_1, BIT_H_RESET);
+	if (res)
+		return res;
+	msleep(POWER_UP_TIME);
+
+	for (ii = 0; ii < REG_FIFO_COUNT_H; ii++) {
+		if ((ii != reg->fifo_r_w) && (ii != reg->int_enable))
+			inv_i2c_single_write(st, ii, regs[ii]);
+	}
+
 	return 0;
 }
+
+static int inv_mpu_suspend(struct device *dev)
+{
+	struct iio_dev *indio_dev = i2c_get_clientdata(to_i2c_client(dev));
+	struct inv_mpu_iio_s *st = iio_priv(indio_dev);
+	int res;
+
+	if (INV_MPU3050 == st->chip_type)
+		return 0;
+
+	inv_read_dmp_image(st, dmp_save, DMP_IMAGE_SIZE);
+	/* reset chip and reload register values */
+	res = inv_mpu_setup_suspend(st);
+	if (res)
+		return res;
+
+	res = inv_load_firmware(st, dmp_save, DMP_IMAGE_SIZE);
+	if (res)
+		return res;
+	res = set_inv_enable(indio_dev, true);
+
+	return res;
+}
+
 static const struct dev_pm_ops inv_mpu_pmops = {
 	SET_SYSTEM_SLEEP_PM_OPS(inv_mpu_suspend, inv_mpu_resume)
 };

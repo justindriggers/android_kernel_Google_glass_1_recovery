@@ -118,7 +118,6 @@ struct inv_hw_s {
  *  struct inv_chip_config_s - Cached chip configuration data.
  *  @fsr:		Full scale range.
  *  @lpf:		Digital low pass filter frequency.
- *  @clk_src:		Clock source.
  *  @accl_fs:		accel full scale range.
  *  @self_test_run_once flag for self test run ever.
  *  @has_footer:	MPU3050 specific work around.
@@ -149,7 +148,6 @@ struct inv_hw_s {
 struct inv_chip_config_s {
 	u32 fsr:2;
 	u32 lpf:3;
-	u32 clk_src:1;
 	u32 accl_fs:2;
 	u32 self_test_run_once:1;
 	u32 has_footer:1;
@@ -504,6 +502,22 @@ struct inv_mpu_slave {
 #define DMP_MASK_DIS_ORIEN       0xC0
 #define DMP_DIS_ORIEN_SHIFT      6
 
+#define DMP_ORIENTATION_TIME		500
+#define DMP_ORIENTATION_ANGLE		60
+#define DMP_DEFAULT_FIFO_RATE           200
+#define DMP_TAP_SCALE                   (767603923 / 5)
+#define DMP_MULTI_SHIFT                 30
+#define DMP_MULTI_TAP_TIME              500
+#define DMP_SHAKE_REJECT_THRESH         100
+#define DMP_SHAKE_REJECT_TIME           10
+#define DMP_SHAKE_REJECT_TIMEOUT        10
+#define DMP_ANGLE_SCALE                 15
+#define DMP_PRECISION                   1000
+#define DMP_MAX_DIVIDER                 4
+#define DMP_MAX_MIN_TAPS                4
+#define DMP_IMAGE_CRC_VALUE             0x379c8e27
+#define DMP_IMAGE_SIZE                  2827
+
 #define BYTES_FOR_DMP            16
 #define QUATERNION_BYTES         16
 #define BYTES_PER_SENSOR         6
@@ -588,7 +602,6 @@ struct inv_mpu_slave {
 #define INT_SRC_ORIENT 0x02
 #define INT_SRC_DISPLAY_ORIENT  0x08
 #define INT_SRC_SHAKE           0x10
-
 
 /*orientation related */
 #define INV_X_UP                          0x01
@@ -687,7 +700,6 @@ enum MPU_IIO_ATTR_ADDR {
 	ATTR_DMP_DISPLAY_ORIENTATION_ON,
 	ATTR_LPA_MODE,
 	ATTR_LPA_FREQ,
-	ATTR_CLK_SRC,
 	ATTR_SELF_TEST,
 	ATTR_KEY,
 	ATTR_GYRO_MATRIX,
@@ -774,6 +786,9 @@ int mpu_memory_read(struct i2c_adapter *i2c_adap,
 			   u32 len, u8 *data);
 int inv_hw_self_test(struct inv_mpu_iio_s *st);
 int inv_clear_GLU_int_flag(struct inv_mpu_iio_s *st);
+int inv_read_dmp_image(struct inv_mpu_iio_s *st, char *buf, int count);
+int inv_load_firmware(struct inv_mpu_iio_s *st, u8 *data, int size);
+
 s64 get_time_ns(void);
 #define mem_w(a, b, c) mpu_memory_write(st->sl_handle,\
 			st->i2c_addr, a, b, c)

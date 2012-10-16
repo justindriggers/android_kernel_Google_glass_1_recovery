@@ -266,14 +266,11 @@ int set_power_mpu3050(struct inv_mpu_iio_s *st, bool power_on)
 		result = inv_i2c_single_write(st, reg->pwr_mgmt_1, data | p);
 		if (result)
 			return result;
-
-		st->chip_config.clk_src = INV_CLK_PLL;
 	} else {
 		data |= (BITS_3050_GYRO_STANDBY | INV_CLK_INTERNAL);
 		result = inv_i2c_single_write(st, reg->pwr_mgmt_1, data);
 		if (result)
 			return result;
-		st->chip_config.clk_src = INV_CLK_INTERNAL;
 	}
 	if (power_on) {
 		msleep(POWER_UP_TIME);
