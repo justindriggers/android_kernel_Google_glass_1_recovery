@@ -191,9 +191,10 @@ static int inv_switch_engine(struct inv_mpu_iio_s *st, bool en, u32 mask)
 	   internal clock */
 	if (BIT_PWR_GYRO_STBY == mask) {
 		result = inv_i2c_read(st, reg->pwr_mgmt_1, 1, &mgmt_1);
-		if (result)
+		if (result) {
+			pr_err("DEBUGINVEN: 1111 result=%d\n", result);
 			return result;
-
+		}
 		mgmt_1 &= ~BIT_CLK_MASK;
 	}
 
@@ -203,20 +204,26 @@ static int inv_switch_engine(struct inv_mpu_iio_s *st, bool en, u32 mask)
 		mgmt_1 |= INV_CLK_INTERNAL;
 		result = inv_i2c_single_write(st, reg->pwr_mgmt_1,
 						mgmt_1);
-		if (result)
+		if (result) {
+			pr_err("DEBUGINVEN: 2222 result=%d\n", result);
 			return result;
+		}
 	}
 
 	result = inv_i2c_read(st, reg->pwr_mgmt_2, 1, &data);
-	if (result)
+	if (result) {
+		pr_err("DEBUGINVEN: 3333 result=%d\n", result);
 		return result;
+	}
 	if (en)
 		data &= (~mask);
 	else
 		data |= mask;
 	result = inv_i2c_single_write(st, reg->pwr_mgmt_2, data);
-	if (result)
+	if (result) {
+		pr_err("DEBUGINVEN: 4444 result=%d\n", result);
 		return result;
+	}
 
 	if ((BIT_PWR_GYRO_STBY == mask) && en) {
 		/* only gyro on needs sensor up time */
@@ -225,8 +232,10 @@ static int inv_switch_engine(struct inv_mpu_iio_s *st, bool en, u32 mask)
 		mgmt_1 |= INV_CLK_PLL;
 		result = inv_i2c_single_write(st, reg->pwr_mgmt_1,
 						mgmt_1);
-		if (result)
+		if (result) {
+			pr_err("DEBUGINVEN: 5555 result=%d\n", result);
 			return result;
+		}
 	}
 
 	return 0;
@@ -1194,11 +1203,15 @@ static int inv_gyro_enable(struct inv_mpu_iio_s *st,
 				 struct iio_buffer *ring, bool en)
 {
 	int result;
-	if (en == st->chip_config.gyro_enable)
+	if (en == st->chip_config.gyro_enable) {
+		pr_err("DEBUGINVEN: gyro_enable same\n");
 		return 0;
+	}
 	result = st->switch_gyro_engine(st, en);
-	if (result)
+	if (result) {
+		pr_err("DEBUGINVEN: gen result=%d\n", result);
 		return result;
+	}
 
 	if (!en) {
 		st->chip_config.gyro_fifo_enable = 0;
@@ -1979,12 +1992,7 @@ static int inv_mpu_remove(struct i2c_client *client)
 }
 
 #ifdef CONFIG_PM
-static int inv_mpu_resume(struct device *dev)
-{
-	return 0;
-}
-
-static int inv_mpu_setup_suspend(struct inv_mpu_iio_s *st)
+static int inv_mpu_setup_resume(struct inv_mpu_iio_s *st)
 {
 	struct inv_reg_map_s *reg;
 	char regs[REG_FIFO_COUNT_H];
@@ -1992,6 +2000,7 @@ static int inv_mpu_setup_suspend(struct inv_mpu_iio_s *st)
 	int ii;
 
 	reg = &st->reg;
+	pr_err("DEBUGINVEN: resume enter\n");
 	for (ii = 0; ii < REG_FIFO_COUNT_H; ii++) {
 		/* don't read fifo r/w register */
 		if (ii != st->reg.fifo_r_w)
@@ -2000,7 +2009,7 @@ static int inv_mpu_setup_suspend(struct inv_mpu_iio_s *st)
 	res = inv_i2c_single_write(st, reg->pwr_mgmt_1, BIT_H_RESET);
 	if (res)
 		return res;
-	msleep(POWER_UP_TIME);
+	msleep(SENSOR_UP_TIME);
 
 	for (ii = 0; ii < REG_FIFO_COUNT_H; ii++) {
 		if ((ii != reg->fifo_r_w) && (ii != reg->int_enable))
@@ -2010,7 +2019,7 @@ static int inv_mpu_setup_suspend(struct inv_mpu_iio_s *st)
 	return 0;
 }
 
-static int inv_mpu_suspend(struct device *dev)
+static int inv_mpu_resume(struct device *dev)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(to_i2c_client(dev));
 	struct inv_mpu_iio_s *st = iio_priv(indio_dev);
@@ -2018,10 +2027,10 @@ static int inv_mpu_suspend(struct device *dev)
 
 	if (INV_MPU3050 == st->chip_type)
 		return 0;
-
+	msleep(POWER_UP_TIME);
 	inv_read_dmp_image(st, dmp_save, DMP_IMAGE_SIZE);
 	/* reset chip and reload register values */
-	res = inv_mpu_setup_suspend(st);
+	res = inv_mpu_setup_resume(st);
 	if (res)
 		return res;
 
@@ -2029,8 +2038,14 @@ static int inv_mpu_suspend(struct device *dev)
 	if (res)
 		return res;
 	res = set_inv_enable(indio_dev, true);
+	pr_info("DEBUGINVEN: resume exit=%d\n", res);
 
 	return res;
+}
+
+static int inv_mpu_suspend(struct device *dev)
+{
+	return 0;
 }
 
 static const struct dev_pm_ops inv_mpu_pmops = {
