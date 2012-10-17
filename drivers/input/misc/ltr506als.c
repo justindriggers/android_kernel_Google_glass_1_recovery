@@ -49,7 +49,7 @@
    another device.  This is not necessary should this driver obtains
    an exclusive interrupt.
    */
-#define USE_SHARED_IRQ 1
+//#define USE_SHARED_IRQ 1
 
 struct ltr506_data {
 	/* Device */
@@ -1826,6 +1826,13 @@ static int  __devinit ltr506_probe(struct i2c_client *client, const struct i2c_d
 		goto err_out;
 	}
 
+	/* Setup and configure both the ALS and PS on the ltr506 device */
+	ret = ltr506_setup(ltr506);
+	if (ret < 0) {
+		dev_err(&ltr506->i2c_client->dev, "%s: Setup Fail...\n", __func__);
+		goto err_out;
+	}
+
 	/* Setup the input subsystem for the ALS */
 	ret = als_setup_input_device(ltr506);
 	if (ret < 0) {
@@ -1850,13 +1857,6 @@ static int  __devinit ltr506_probe(struct i2c_client *client, const struct i2c_d
 
 	/* Wake lock option for promity sensor */
 	wake_lock_init(&(ltr506->ps_wake_lock), WAKE_LOCK_SUSPEND, "proximity");
-
-	/* Setup and configure both the ALS and PS on the ltr506 device */
-	ret = ltr506_setup(ltr506);
-	if (ret < 0) {
-		dev_err(&ltr506->i2c_client->dev, "%s: Setup Fail...\n", __func__);
-		goto err_ltr506_setup;
-	}
 
 	/* Setup the suspend and resume functionality */
 	INIT_LIST_HEAD(&ltr506->early_suspend.link);
