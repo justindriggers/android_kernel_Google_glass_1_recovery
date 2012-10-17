@@ -994,6 +994,24 @@ static struct platform_device notle_pcb_temp_sensor = {
 	.name = "notle_pcb_sensor",
 };
 
+static char *notle_charger_supplicants_evt1[] = {
+	"twl6030_battery",
+};
+
+static char *notle_charger_supplicants_evt2[] = {
+	"bq27520-0",
+};
+
+static struct twl4030_charger_platform_data notle_charger_data = {
+	.monitor_interval_seconds = 15,
+	.max_charger_current_mA   = 1500,
+	.max_charger_voltage_mV   = 4560,
+	.max_bat_voltage_mV       = 4200,
+	.low_bat_voltage_mV       = 3300,
+	
+	/* Fill in supplied_to/num_supplicants based on board revisions */
+};
+
 static int notle_batt_table[] = {
         /* adc code for temperature in degree C */
         929, 925, /* -2 ,-1 */
@@ -1006,12 +1024,10 @@ static int notle_batt_table[] = {
         511, 504, 496 /* 60 - 62 */
 };
 
-static struct twl4030_bci_platform_data notle_bci_data = {
-        .monitoring_interval            = 10,
-        .max_charger_currentmA          = 1500,
-        .max_charger_voltagemV          = 4560,
-        .max_bat_voltagemV              = 4200,
-        .low_bat_voltagemV              = 3300,
+static struct twl4030_battery_platform_data notle_battery_data = {
+	.monitoring_interval_seconds = 15,
+	.battery_tmp_tbl             = notle_batt_table,
+	.tblsize                     = ARRAY_SIZE(notle_batt_table),
 };
 
 
@@ -1057,8 +1073,9 @@ static struct twl4030_platform_data notle_twldata = {
 	.usb		= &omap4_usbphy_data,
 
 	/* children */
-        .codec          = &twl6040_codec,
-	.bci            = &notle_bci_data,
+	.charger        = &notle_charger_data,
+	.battery        = NULL, // fill this in conditionally for EVT1
+	.codec          = &twl6040_codec,
 	.madc           = &notle_gpadc_data,
 };
 
@@ -1356,6 +1373,14 @@ static struct rmi_i2c_platformdata __initdata synaptics_platformdata = {
 };
 #endif
 
+static struct i2c_board_info __initdata notle_i2c_1_boardinfo[] = {
+#ifdef CONFIG_BATTERY_BQ27x00
+	{
+		I2C_BOARD_INFO("bq27520", 0x55),
+	},
+#endif
+};
+
 static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
         {
@@ -1617,6 +1642,25 @@ static int __init notle_i2c_init(void)
         omap_register_i2c_bus_board_data(3, &notle_i2c_3_bus_pdata);
         omap_register_i2c_bus_board_data(4, &notle_i2c_4_bus_pdata);
 
+		/* setup the charger/battery platform data based on board revision */
+		switch (NOTLE_VERSION) {
+			case V1_EVT2:
+				notle_charger_data.supplied_to = notle_charger_supplicants_evt2;
+				notle_charger_data.num_supplicants =
+					ARRAY_SIZE(notle_charger_supplicants_evt2);
+				break;
+
+			case V1_EVT1:
+			default:
+				notle_charger_data.supplied_to = notle_charger_supplicants_evt1;
+				notle_charger_data.num_supplicants =
+					ARRAY_SIZE(notle_charger_supplicants_evt1);
+
+				/* EVT1 uses the PMIC gas gauge to poorly monitory the state of charge */
+				notle_twldata.battery = &notle_battery_data;
+				break;
+		}
+
         switch (NOTLE_VERSION) {
           case V1_HOG:
           case V1_EVT1:
@@ -1627,6 +1671,9 @@ static int __init notle_i2c_init(void)
             synaptics_f11_data.swap_axes = false;
             synaptics_sensordata.attn_gpio_number = notle_get_gpio(GPIO_TOUCHPAD_INT_N_INDEX);
 #endif  /* CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C */
+            /* gas gauge is on i2c1, which is registered in the pmic init */
+            i2c_register_board_info(1, notle_i2c_1_boardinfo,
+                            ARRAY_SIZE(notle_i2c_1_boardinfo));
             omap4_pmic_init("twl6030", &notle_twldata);
             notle_i2c_irq_fixup();
             omap_register_i2c_bus(2, 400, NULL, 0);

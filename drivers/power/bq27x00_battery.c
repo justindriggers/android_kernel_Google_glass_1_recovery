@@ -41,6 +41,7 @@
 #define DRIVER_VERSION			"1.2.0"
 
 #define BQ27x00_REG_TEMP		0x06
+#define BQ27x00_REG_INT_TEMP	0x36
 #define BQ27x00_REG_VOLT		0x08
 #define BQ27x00_REG_AI			0x14
 #define BQ27x00_REG_FLAGS		0x0A
@@ -67,6 +68,8 @@
 struct bq27x00_device_info;
 struct bq27x00_access_methods {
 	int (*read)(struct bq27x00_device_info *di, u8 reg, bool single);
+	int (*write)(struct bq27x00_device_info *di, u8 reg, int value,
+			bool single);
 };
 
 enum bq27x00_chip { BQ27000, BQ27500 };
@@ -133,6 +136,12 @@ static inline int bq27x00_read(struct bq27x00_device_info *di, u8 reg,
 		bool single)
 {
 	return di->bus.read(di, reg, single);
+}
+
+static inline int bq27x00_write(struct bq27x00_device_info *di, u8 reg,
+		int value, bool single)
+{
+	return di->bus.write(di, reg, value, single);
 }
 
 /*
@@ -263,7 +272,8 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 	cache.flags = bq27x00_read(di, BQ27x00_REG_FLAGS, is_bq27500);
 	if (cache.flags >= 0) {
 		cache.capacity = bq27x00_battery_read_rsoc(di);
-		cache.temperature = bq27x00_read(di, BQ27x00_REG_TEMP, false);
+		/* TODO(eieio): reenable the battery temp once the device FW is updated */
+		cache.temperature = 2731; //bq27x00_read(di, BQ27x00_REG_TEMP, false);
 		cache.time_to_empty = bq27x00_battery_read_time(di, BQ27x00_REG_TTE);
 		cache.time_to_empty_avg = bq27x00_battery_read_time(di, BQ27x00_REG_TTECP);
 		cache.time_to_full = bq27x00_battery_read_time(di, BQ27x00_REG_TTF);
@@ -336,8 +346,10 @@ static int bq27x00_battery_current(struct bq27x00_device_info *di,
 	else
 	    curr = di->cache.current_now;
 
+#if 0
 	if (curr < 0)
 		return curr;
+#endif
 
 	if (di->chip == BQ27500) {
 		/* bq27500 returns signed value */
@@ -597,6 +609,40 @@ static int bq27x00_read_i2c(struct bq27x00_device_info *di, u8 reg, bool single)
 	return ret;
 }
 
+static int bq27x00_write_i2c(struct bq27x00_device_info *di, u8 reg, int value, bool single)
+{
+	struct i2c_client *client = to_i2c_client(di->dev);
+	struct i2c_msg msg[2];
+	unsigned char data[2];
+	int ret;
+
+	if (!client->adapter)
+		return -ENODEV;
+
+	if (!single)
+		put_unaligned_le16(value, data);
+	else
+		data[0] = value;
+
+	msg[0].addr = client->addr;
+	msg[0].flags = 0;
+	msg[0].buf = &reg;
+	msg[0].len = sizeof(reg);
+	msg[1].addr = client->addr;
+	msg[1].flags = 0;
+	msg[1].buf = data;
+	if (single)
+		msg[1].len = 1;
+	else
+		msg[1].len = 2;
+
+	ret = i2c_transfer(client->adapter, msg, ARRAY_SIZE(msg));
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}
+
 static int bq27x00_battery_probe(struct i2c_client *client,
 				 const struct i2c_device_id *id)
 {
@@ -634,6 +680,7 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	di->chip = id->driver_data;
 	di->bat.name = name;
 	di->bus.read = &bq27x00_read_i2c;
+	di->bus.write = &bq27x00_write_i2c;
 
 	if (bq27x00_powersupply_init(di))
 		goto batt_failed_3;
@@ -674,6 +721,7 @@ static int bq27x00_battery_remove(struct i2c_client *client)
 static const struct i2c_device_id bq27x00_id[] = {
 	{ "bq27200", BQ27000 },	/* bq27200 is same as bq27000, but with i2c */
 	{ "bq27500", BQ27500 },
+	{ "bq27520", BQ27500 },
 	{},
 };
 MODULE_DEVICE_TABLE(i2c, bq27x00_id);

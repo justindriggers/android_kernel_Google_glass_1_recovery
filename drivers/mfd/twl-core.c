@@ -60,6 +60,17 @@
 
 #define DRIVER_NAME			"twl"
 
+#if defined(CONFIG_CHARGER_TWL4030) || \
+	defined(CONFIG_CHARGER_TWL4030_MODULE) || \
+	defined(CONFIG_TWL6030_BCI_BATTERY) || \
+	defined(CONFIG_TWL6030_BCI_BATTERY_MODULE)
+#define twl_has_charger()	true
+#define twl_has_battery()	true
+#else
+#define twl_has_charger()	false
+#define twl_has_battery()	false
+#endif
+
 #if defined(CONFIG_KEYBOARD_TWL4030) || defined(CONFIG_KEYBOARD_TWL4030_MODULE)
 #define twl_has_keypad()	true
 #else
@@ -699,6 +710,17 @@ add_children(struct twl4030_platform_data *pdata, unsigned long features,
 		if (IS_ERR(child))
 			return PTR_ERR(child);
 	}
+
+	/* make sure that bci and charger/battery are not used together */
+	if (twl_has_bci() && pdata->bci && (
+				(twl_has_charger() && pdata->charger) ||
+				(twl_has_battery() && pdata->battery))) {
+		printk(KERN_ERR "%s: cannot use bci AND (charger and/or battery)!!!\n",
+				__func__);
+
+		return -EINVAL;
+	}
+
 	if (twl_has_bci() && pdata->bci) {
 		pdata->bci->features = features;
 		pdata->bci->errata = errata;
@@ -707,6 +729,21 @@ add_children(struct twl4030_platform_data *pdata, unsigned long features,
 				false,
 				pdata->irq_base + CHARGER_INTR_OFFSET,
 				pdata->irq_base + CHARGERFAULT_INTR_OFFSET);
+	}
+
+	if (twl_has_charger() && pdata->charger) {
+		//pdata->charger->features = features;
+		child = add_child(1, "twl6030_charger",
+				pdata->charger, sizeof(*pdata->charger),
+				false,
+				pdata->irq_base + CHARGER_INTR_OFFSET,
+				pdata->irq_base + CHARGERFAULT_INTR_OFFSET);
+	}
+
+	if (twl_has_battery() && pdata->battery) {
+		child = add_child(1, "twl6030_battery",
+				pdata->battery, sizeof(*pdata->battery),
+				false, 0, 0);
 	}
 
 
