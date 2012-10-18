@@ -70,7 +70,6 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
-#include <asm/system.h>
 
 #include <plat/android-display.h>
 #include <plat/board.h>
@@ -96,7 +95,6 @@
 #include "prm-regbits-44xx.h"
 #include "prm44xx.h"
 #include "cm1_44xx.h"
-#include "omap4-sar-layout.h"
 
 static notle_version NOTLE_VERSION = UNVERSIONED;
 
@@ -1938,48 +1936,6 @@ static int __init notle_glasshub_init(void) {
 }
 #endif
 
-#define TWL6030_SW_RESET_BIT_MASK       (1<<6)
-
-static void notle_pm_restart(char str, const char *cmd)
-{
-	bool cold_reset = true;
-	bool valid_reason = false;
-	void __iomem *sar_base;
-
-	sar_base = omap4_get_sar_ram_base();
-	if (!sar_base)
-		printk("Failed to get scratch memory base!\n");
-
-	/* determine reset conditions */
-	if (!cmd || !sar_base) {
-		cold_reset = true;
-		valid_reason = false;
-	} else if (!strcmp(cmd, "bootloader")) {
-		cold_reset = false;
-		valid_reason = true;
-	} else if (!strcmp(cmd, "recovery")) {
-		cold_reset = false;
-		valid_reason = true;
-	} else if (!strcmp(cmd, "charger")) {
-		cold_reset = false;
-		valid_reason = true;
-	} else {
-		cold_reset = true;
-		valid_reason = false;
-	}
-
-	/* record reset reason */
-	if (sar_base && valid_reason)
-		strcpy(sar_base + OMAP_REBOOT_REASON_OFFSET, cmd);
-
-	/* choose reset path */
-	if (cold_reset)
-		twl_i2c_write_u8(TWL_MODULE_PM_MASTER, TWL6030_SW_RESET_BIT_MASK,
-				TWL6030_PHOENIX_DEV_ON);
-	else
-		arm_machine_restart(str, cmd);
-}
-
 /* TODO: This is copied from panda board file.  What size should we use? */
 #define NOTLE_FB_RAM_SIZE               SZ_16M /* 1920x1080*4 * 2 */
 static struct omapfb_platform_data notle_fb_pdata = {
@@ -2071,8 +2027,6 @@ static void __init notle_init(void)
         if (err) {
                 pr_err("Audio initialization failed: %d\n", err);
         }
-
-        arm_pm_restart = notle_pm_restart;
 
 #ifndef CONFIG_MMC_NOTLE
         // Disable support for sd card:
