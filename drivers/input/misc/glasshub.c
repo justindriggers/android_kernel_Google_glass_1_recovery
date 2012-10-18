@@ -792,17 +792,22 @@ static ssize_t led_drive_store(struct device *dev, struct device_attribute *attr
 static ssize_t calibrate_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
+	struct glasshub_data *glasshub;
 	uint32_t sum;
 	uint16_t temp;
 	uint16_t proxValues[8];
 	int i, j;
 	int rc;
-
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	uint8_t led_drive = 0x04;
 	uint8_t value = 0;
+
+	glasshub = dev_get_drvdata(dev);
 	if (!kstrtou8(buf, 10, &value) && value) {
 		mutex_lock(&glasshub->device_lock);
 		boot_device_l(glasshub);
+
+		/* read current drive level */
+		_i2c_read_one(glasshub, REG_LED_DRIVE, &led_drive);
 
 		/* test all 7 LED levels */
 		for (i = 0; i < 8; i++) {
@@ -814,6 +819,9 @@ static ssize_t calibrate_store(struct device *dev,
 			sum = 0;
 			for (j = 0; j < NUM_CALIBRATION_SAMPLES; j++) {
 
+				/* allow charge pump to re-charge */
+				msleep(35);
+
 				/* read raw prox value */
 				rc = readProxRaw(glasshub, &temp);
 				if (rc) break;
@@ -821,8 +829,6 @@ static ssize_t calibrate_store(struct device *dev,
 				/* read raw prox value and add to running sum */
 				sum += temp;
 
-				/* allow charge pump to re-charge */
-				msleep(50);
 			}
 
 			/* break on error */
@@ -845,6 +851,9 @@ static ssize_t calibrate_store(struct device *dev,
 						(uint8_t) (proxValues[i] >> 8));
 			}
 		}
+
+		/* restore LED drive level */
+		_i2c_write_reg(glasshub, REG_LED_DRIVE, led_drive);
 
 		mutex_unlock(&glasshub->device_lock);
 	}
