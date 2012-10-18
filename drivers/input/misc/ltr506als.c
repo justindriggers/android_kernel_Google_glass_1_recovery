@@ -45,6 +45,8 @@
 
 #define DEVICE_NAME "ltr506als"
 
+static const int poll_rate_in_ms = 1000;
+
 /* For a small number of devices we need to share this GPIO interrupt with
    another device.  This is not necessary should this driver obtains
    an exclusive interrupt.
@@ -479,8 +481,23 @@ static void ltr506_schedwork(struct work_struct *work)
 	}
 }
 
+/* Work when polled */
+static void ltr506_schedwork_poll(struct work_struct *work)
+{
+	struct ltr506_data *ltr506 = sensor_info;
+	report_als_input_event(ltr506);
+}
+
+static void ltr506_schedwork_delayed(struct work_struct *work);
 
 static DECLARE_WORK(irq_workqueue, ltr506_schedwork);
+static DECLARE_DELAYED_WORK(irq_workqueue_delayed, ltr506_schedwork_delayed);
+
+static void ltr506_schedwork_delayed(struct work_struct *work)
+{
+	ltr506_schedwork_poll(work);
+	schedule_delayed_work(&irq_workqueue_delayed, msecs_to_jiffies(poll_rate_in_ms));
+}
 
 /* IRQ Handler */
 static irqreturn_t ltr506_irq_handler(int irq, void *data)
@@ -497,6 +514,14 @@ static irqreturn_t ltr506_irq_handler(int irq, void *data)
 
 	return IRQ_HANDLED;
 }
+
+static int ltr506_setup_polling(struct ltr506_data *ltr506)
+{
+	// Setup workqueue
+	schedule_delayed_work(&irq_workqueue_delayed, msecs_to_jiffies(poll_rate_in_ms));
+	return 0;
+}
+
 
 #ifdef USE_SHARED_IRQ
 /* Logic to obtain a shared interrupt */
@@ -1638,8 +1663,12 @@ static int ltr506_setup(struct ltr506_data *ltr506)
 
 	ret = ltr506_gpio_irq(ltr506);
 	if (ret < 0) {
-		dev_err(&ltr506->i2c_client->dev, "%s: GPIO Request Fail...\n", __func__);
-		goto err_out1;
+		dev_warn(&ltr506->i2c_client->dev, "%s: Unable to setup interrupts; retrying with polling...\n", __func__);
+		ret = ltr506_setup_polling(ltr506);
+		if (ret < 0) {
+			dev_err(&ltr506->i2c_client->dev, "%s: GPIO Request Fail...\n", __func__);
+			goto err_out1;
+		}
 	}
 	dev_dbg(&ltr506->i2c_client->dev, "%s Requested interrupt\n", __func__);
 
@@ -1873,8 +1902,6 @@ static int  __devinit ltr506_probe(struct i2c_client *client, const struct i2c_d
 	dev_dbg(&ltr506->i2c_client->dev, "%s: probe complete\n", __func__);
 	return ret;
 
-err_ltr506_setup:
-	destroy_workqueue(ltr506->workqueue);
 err_out:
 	kfree(ltr506);
 	return ret;
