@@ -77,7 +77,10 @@
 #define REG_ADDR_LO			24
 #define REG_ADDR_HI			25
 #define REG_FLASH_DATA			26
-#define REGISTER_FILE_SIZE		27
+#define REG_DETECTOR_GAIN		27
+#define REG_PROX_PART_ID		28
+#define REG_PROX_SEQ_ID			29
+#define REGISTER_FILE_SIZE		30
 
 #define CMD_BOOT			0xFA
 #define CMD_FLASH			0xF9
@@ -629,7 +632,7 @@ static ssize_t passthru_enable_store(struct device *dev, struct device_attribute
 }
 
 /* read prox value */
-static int readProxRaw(struct glasshub_data *glasshub, uint16_t *pProxData)
+static int read_prox_raw(struct glasshub_data *glasshub, uint16_t *pProxData)
 {
 	int rc;
 	uint8_t buffer[1];
@@ -659,7 +662,7 @@ static ssize_t proxraw_show(struct device *dev, struct device_attribute *attr, c
 
 	mutex_lock(&glasshub->device_lock);
 	boot_device_l(glasshub);
-	rc = readProxRaw(glasshub, &data);
+	rc = read_prox_raw(glasshub, &data);
 	mutex_unlock(&glasshub->device_lock);
 
 	if (rc) {
@@ -835,7 +838,7 @@ static ssize_t calibrate_store(struct device *dev,
 				msleep(35);
 
 				/* read raw prox value */
-				rc = readProxRaw(glasshub, &temp);
+				rc = read_prox_raw(glasshub, &temp);
 				if (rc) break;
 
 				/* read raw prox value and add to running sum */
@@ -904,6 +907,21 @@ static ssize_t calibration_values_show(struct device *dev, struct device_attribu
 			proxValues[2], proxValues[3],
 			proxValues[4], proxValues[5],
 			proxValues[6], proxValues[7]);
+}
+
+/* return prox version */
+static ssize_t prox_version_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	uint8_t partId, seqId;
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+
+	mutex_lock(&glasshub->device_lock);
+	boot_device_l(glasshub);
+	_i2c_read_one(glasshub, REG_PROX_PART_ID, &partId);
+	_i2c_read_one(glasshub, REG_PROX_SEQ_ID, &seqId);
+	mutex_unlock(&glasshub->device_lock);
+
+	return sprintf(buf, "0x%02x 0x%02x\n", partId, seqId);
 }
 
 /* show last error code from device */
@@ -1245,6 +1263,7 @@ static DEVICE_ATTR(don_doff_hysteresis, DEV_MODE_RW, don_doff_hysteresis_show, d
 static DEVICE_ATTR(led_drive, DEV_MODE_RW, led_drive_show, led_drive_store);
 static DEVICE_ATTR(calibrate, DEV_MODE_WO, NULL, calibrate_store);
 static DEVICE_ATTR(calibration_values, DEV_MODE_RO, calibration_values_show, NULL);
+static DEVICE_ATTR(prox_version, DEV_MODE_RO, prox_version_show, NULL);
 static DEVICE_ATTR(error_code, DEV_MODE_RO, error_code_show, NULL);
 
 /* register prox device */
@@ -1367,6 +1386,10 @@ static void sysfs_register_class_input_entry_glasshub(struct glasshub_data *glas
 
 	if (!rc) {
 		rc = device_create_file(&i2c_client->dev, &dev_attr_calibration_values);
+	}
+
+	if (!rc) {
+		rc = device_create_file(&i2c_client->dev, &dev_attr_prox_version);
 	}
 
 	if (!rc) {
