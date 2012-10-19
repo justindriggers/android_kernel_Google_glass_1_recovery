@@ -81,7 +81,8 @@
 
 #define CMD_BOOT			0xFA
 #define CMD_FLASH			0xF9
-#define CMD_VERSION			0xF6
+#define CMD_APP_VERSION			0xF6
+#define CMD_BOOTLOADER_VERSION		0xF7
 
 /* interrupt sources */
 #define IRQ_PASSTHRU			0b00000001
@@ -200,6 +201,9 @@ struct glasshub_data {
 	volatile unsigned long flags;
 	uint8_t irq_enable;
 	uint8_t don_doff_state;
+	uint8_t bootloaderVersion;
+	uint8_t appVersionMajor;
+	uint8_t appVersionMinor;
 };
 
 struct glasshub_data *glasshub_private = NULL;
@@ -567,7 +571,15 @@ static uint8_t parse_enable(const char* buf)
 /* show the application version number */
 static ssize_t version_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return show_reg(dev, attr, buf, REG_VERSION);
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	return sprintf(buf, "%d.%d\n", glasshub->appVersionMajor, glasshub->appVersionMinor);
+}
+
+/* show the bootloader version number */
+static ssize_t bootloader_version_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	return sprintf(buf, "%d\n", glasshub->bootloaderVersion);
 }
 
 /* show don/doff status */
@@ -914,6 +926,29 @@ static int convert_hex(const char c, uint32_t *p)
 	return 0;
 }
 
+/* helper function to get app version */
+static int get_app_version_l(struct glasshub_data *glasshub)
+{
+	int rc;
+	uint8_t buffer[2];
+
+	/* get current app version number */
+	dev_info(&glasshub->i2c_client->dev, "%s Attempt to get glasshub firmwware version\n",
+			__FUNCTION__);
+	buffer[0] = CMD_APP_VERSION;
+	rc = _i2c_read(glasshub, buffer, 1, buffer, sizeof(buffer));
+	if (rc) {
+		dev_err(&glasshub->i2c_client->dev, "%s Error getting firmware version: %d\n",
+				__FUNCTION__, rc);
+	} else {
+		dev_info(&glasshub->i2c_client->dev, "%s Firmware version: %d.%d\n",
+				__FUNCTION__, buffer[0], buffer[1]);
+		glasshub->appVersionMajor = buffer[0];
+		glasshub->appVersionMinor = buffer[1];
+	}
+	return rc;
+}
+
 /* helper function to exit flash programming mode */
 static void exit_flash_mode_l(struct glasshub_data *glasshub)
 {
@@ -923,6 +958,9 @@ static void exit_flash_mode_l(struct glasshub_data *glasshub)
 	}
 	device_remove_file(&glasshub->i2c_client->dev, &dev_attr_update_fw_data);
 	clear_bit(FLAG_FLASH_MODE, &glasshub->flags);
+
+	/* get app version number */
+	get_app_version_l(glasshub);
 }
 
 /* sysfs node to download device firmware to be flashed */
@@ -1195,6 +1233,7 @@ static ssize_t update_fw_enable_show(struct device *dev, struct device_attribute
 
 static DEVICE_ATTR(update_fw_enable, DEV_MODE_RW, update_fw_enable_show, update_fw_enable_store);
 static DEVICE_ATTR(version, DEV_MODE_RO, version_show, NULL);
+static DEVICE_ATTR(bootloader_version, DEV_MODE_RO, bootloader_version_show, NULL);
 static DEVICE_ATTR(passthru_enable, DEV_MODE_RW, passthru_enable_show, passthru_enable_store);
 static DEVICE_ATTR(proxraw, DEV_MODE_RO, proxraw_show, NULL);
 static DEVICE_ATTR(vis, DEV_MODE_RO, vis_show, NULL);
@@ -1277,6 +1316,11 @@ static void sysfs_register_class_input_entry_glasshub(struct glasshub_data *glas
 	dev_set_drvdata(&i2c_client->dev, glasshub);
 
 	rc = device_create_file(&i2c_client->dev, &dev_attr_version);
+
+	if (!rc) {
+		rc = device_create_file(&i2c_client->dev, &dev_attr_bootloader_version);
+	}
+
 	if (!rc) {
 		rc = device_create_file(&i2c_client->dev, &dev_attr_passthru_enable);
 	}
@@ -1456,19 +1500,20 @@ struct miscdevice glasshub_misc = {
 
 static int glasshub_setup(struct glasshub_data *glasshub) {
 	int rc = 0;
-	uint8_t buffer[2];
+	uint8_t buffer;
 
 	/* reset glass hub */
 	rc = reset_device_l(glasshub, 1);
 
-	/* get app version number */
-	dev_info(&glasshub->i2c_client->dev, "%s Attempt to get glasshub firmwware version\n",
-			__FUNCTION__);
-	buffer[0] = CMD_VERSION;
-	rc = _i2c_read(glasshub, buffer, 1, buffer, sizeof(buffer));
+	/* get bootloader version */
+	buffer = CMD_BOOTLOADER_VERSION;
+	rc = _i2c_read(glasshub, &buffer, sizeof(buffer), &buffer, sizeof(buffer));
 	if (rc) goto err_out;
-	dev_info(&glasshub->i2c_client->dev, "%s Firmware version: %d.%d\n",
-			__FUNCTION__, buffer[0], buffer[1]);
+	glasshub->bootloaderVersion = buffer;
+
+	/* get app version number */
+	rc = get_app_version_l(glasshub);
+	if (rc) goto err_out;
 
 	/* request IRQ */
 	dev_info(&glasshub->i2c_client->dev, "%s call request_threaded_irq\n", __FUNCTION__);
