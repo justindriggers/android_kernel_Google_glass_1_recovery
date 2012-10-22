@@ -38,6 +38,8 @@
 #include <linux/spi/spi.h>
 #include <plat/mcspi.h>
 
+#include <linux/gps_elton.h>
+
 #ifdef CONFIG_INPUT_LTR506ALS
 #include <linux/i2c/ltr506als.h>
 #endif
@@ -984,10 +986,26 @@ static struct platform_device gpio_keys = {
 	.id   = -1,
 };
 
+/* These gpios get set dynamically when we determine the platform */
+static struct gps_elton_platform_data_s gps_elton_platform_data  = {
+	.gpio_reset = -1,
+	.gpio_on_off = -1,
+	.gpio_awake = -1,
+};
+
+static struct platform_device gps_elton_platform_device = {
+	.name	= "gps_elton",
+	.id	= -1,
+	.dev	= {
+		.platform_data	= &gps_elton_platform_data,
+	},
+};
+
 static struct platform_device *notle_devices[] __initdata = {
         &leds_gpio,
         &gpio_keys,
         &bcm4330_bluetooth_device,
+        &gps_elton_platform_device,
 };
 
 static struct platform_device notle_pcb_temp_sensor = {
@@ -1847,11 +1865,17 @@ error:
 
 static int notle_gps_init(void) {
 	int r;
-    int gpio_gps_reset, gpio_gps_on_off;
+	int gpio_gps_reset, gpio_gps_on_off;
+
+	/* Tell the driver the gpio pins to access the GPS chip */
+	gps_elton_platform_data.gpio_reset = notle_get_gpio(GPIO_GPS_RESET_N_INDEX);
+	gps_elton_platform_data.gpio_on_off = notle_get_gpio(GPIO_GPS_ON_OFF_INDEX);
+	/* An uninialized index returns -1 indicating non existant gpio */
+	gps_elton_platform_data.gpio_awake = notle_get_gpio(GPIO_GPS_AWAKE_INDEX);
 
 	/* Configuration of requested GPIO lines */
-    gpio_gps_reset = notle_get_gpio(GPIO_GPS_RESET_N_INDEX);
-    gpio_gps_on_off = notle_get_gpio(GPIO_GPS_ON_OFF_INDEX);
+	gpio_gps_reset = notle_get_gpio(GPIO_GPS_RESET_N_INDEX);
+	gpio_gps_on_off = notle_get_gpio(GPIO_GPS_ON_OFF_INDEX);
 
         r = gpio_request_one(gpio_gps_reset, GPIOF_OUT_INIT_HIGH,
                 "gps_reset_n");

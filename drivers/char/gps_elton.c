@@ -6,284 +6,488 @@
  *
  * Driver used primarily for handling suspend/resume system events.
  */
+
+#include <linux/gps_elton.h>
+
 #include <linux/device.h>
 #include <linux/earlysuspend.h>
 #include <linux/fs.h>
 #include <linux/gpio.h>
+#include <linux/irq.h>
+#include <linux/irqdesc.h>
+#include <linux/kernel_stat.h>
 #include <linux/slab.h>
+
+#define GPS_ELTON_DRVNAME "gps_elton"
+
+/* EVT 1.x */
+#define OMAP_UART3_NAME "OMAP UART3"
+
+#define GPS_STATE_AWAKE 1
+#define GPS_STATE_HIBERNATE 0
+#define GPS_STATE_UNKNOWN -1
+
+#define GPIO_PIN_UNCONNECTED -1
+
+#define TIME_BETWEEN_AWAKE_PULSES_IN_MS (2000)
+
+struct gps_elton_data_s {
+	struct gps_elton_platform_data_s *platform_data;
+	struct platform_device *pdev;
+	struct device *dev;
+	struct class *class;
+	struct early_suspend early_suspend;
+
+	// The GPS chip can't be pulsed to quickly else states will be lost.
+	// This holds the valid time we can pulse the chip again.
+	unsigned long valid_pulse_in_jiffies;
+
+	/* NOTE(CMM) Only for EVT1.x.
+	 * Tristate flag indicating state driver believes device is in.
+	 *  1: GPS chip is in awake and in active mode.
+	 *  0: GPS chip is asleep and in hibernate mode.
+	 * -1: GPS chip is in an unkown state.
+	 * EVT2 uses a direct line from the GPS chip to indicate awake.
+	 */
+	int is_awake;
+
+	// EVT1.x Workqueue check to poll for uart interrupts.
+	struct delayed_work work_check;
+	// EXT1.x Number of uart interrupts to infer if GPS is awake or not.
+	int uart_int_cnt;
+	// EVT1.x Used to read irq statistics to determine if chip is awake.
+	int irq_num;
+};
 
 /* kernel/timer.c */
 extern void msleep(unsigned int msecs);
 
-#define DRVNAME "gps_elton"
-
-/* NOTE: This is from the notle board default configuration
-  and must be kept in sync. */
-#define GPIO_GPS_ON_OFF                 49
-#define GPIO_GPS_RESET_N                52
-
 /* Time to wait between toggling power pin. */
 static const int wait_between_power_toggle_in_ms = 50;
 
-MODULE_AUTHOR("Chris Manton <cmanton@google.com>");
-MODULE_DESCRIPTION("Elton SiRF4e GPS Driver");
-MODULE_LICENSE("GPL");
+/* Only for EVT1.x */
+/* Time to wait between running workqueue to check for uart interrupts. */
+static const int wait_between_check_uart_ints_in_ms = 5000;
 
-struct gps_elton_data {
-	struct device *dev;
-	struct class *class;
-	struct early_suspend early_suspend;
-	/* Tristate suspend flag indicating state driver believes device is in.
-	 * -1: Driver Device is in unknown mode.
-	 *  0: Device is in active mode.
-	 *  1: Device is in hibernate mode.
-	 */
-	int is_suspended;
-};
-static struct gps_elton_data *gps_elton = NULL;
+/* NOTE(CMM) Not sure if we are supposed to hibernate during early suspend or not. */
+static int hibernate_during_early_suspend = 0;
 
-static ssize_t gps_omap_suspend_show(struct device *dev,
-                                     struct device_attribute *attr, char *buf);
+/* Global structure to hold gps data.  There can only be on driver instance. */
+static struct gps_elton_data_s *gps_elton_data = NULL;
 
-static ssize_t gps_omap_suspend_store(struct device *dev,
-                                      struct device_attribute *attr,
-                                      const char *buf, size_t count);
+// Show the wake state of the GPS chip.
+static ssize_t gps_elton_awake_show(struct device *dev,
+                                    struct device_attribute *attr, char *buf);
 
-static ssize_t gps_omap_set_suspend_store(struct device *dev,
-                                          struct device_attribute *attr,
-                                          const char *buf, size_t count);
-
-static ssize_t gps_omap_toggle_power_store(struct device *dev,
-                                           struct device_attribute *attr,
-                                           const char *buf, size_t count);
-
+// Set the wake state of the GPS chip.
+static ssize_t gps_elton_awake_store(struct device *dev,
+                                     struct device_attribute *attr,
+                                     const char *buf, size_t count);
 
 static struct device_attribute attrs[] = {
-	__ATTR(toggle_power, 0666,
-	       NULL,
-	       gps_omap_toggle_power_store),
-	__ATTR(suspend, 0666,
-	       gps_omap_suspend_show,
-	       gps_omap_suspend_store),
-	__ATTR(set_suspend, 0666,
-	       NULL,
-	       gps_omap_set_suspend_store),
+	__ATTR(awake, 0666,
+	       gps_elton_awake_show,
+	       gps_elton_awake_store),
 };
 
-static void _toggle_power(struct gps_elton_data * gps_elton)
-{
-	gpio_set_value(GPIO_GPS_ON_OFF, 1);
-	msleep(wait_between_power_toggle_in_ms);
-	gpio_set_value(GPIO_GPS_ON_OFF, 0);
+// Determines if device is EVT 1.x or not.
+static int _is_evt_1_x(struct gps_elton_data_s *gps_elton_data) {
+	return gps_elton_data->platform_data->gpio_awake == GPIO_PIN_UNCONNECTED;
 }
 
-/* User manually specifying suspend or resume mode of GPS chip. */
-static ssize_t gps_omap_toggle_power_store(struct device *dev,
-                                           struct device_attribute *attr,
-                                           const char *buf, size_t count)
-{
-	int data;
-	struct gps_elton_data *gps_elton = dev_get_drvdata(dev);
-	sscanf(buf, "%d", &data);
+// EVT 1.x only
+static int _get_irq_num(const char *irq_name) {
+	unsigned int irq;
+	struct irq_desc *desc;
 
-	/* Validate parameters. */
-	if (data != 1) {
-		return -EINVAL;
+	for_each_irq_desc(irq,  desc) {
+		if (desc && desc->action && desc->action->name && !strcmp(desc->action->name, irq_name)) {
+			return (int)irq;
+		}
+	}
+	return -1;
+}
+
+// EVT 1.x only
+// Critical failure of this approach is that we can't determine
+// transmit versus receive interrupts.
+static int _get_interrupt_count(int irq_num) {
+	int cpu_id;
+	int uart_int_cnt = 0;
+
+	for_each_online_cpu(cpu_id)
+		uart_int_cnt += kstat_irqs_cpu(irq_num, cpu_id);
+
+	return uart_int_cnt;
+}
+
+// EVT 1.x only
+static void gps_elton_work_task(struct work_struct *work)
+{
+	struct delayed_work *dw = to_delayed_work(work);
+	struct gps_elton_data_s *gps_elton_data = container_of(dw, struct gps_elton_data_s, work_check);
+	int uart_int_cnt;
+
+	if (-1 == gps_elton_data->irq_num) {
+		dev_err(&gps_elton_data->pdev->dev,
+		        "%s Unable to determine omap uart3 interrupt; aborting check for GPS awake\n",
+		        __func__);
+		return;
 	}
 
-	_toggle_power(gps_elton);
-	return count;
+	// If the interrupt count hasn't changed since last time, assume we are off.
+	// Need to make sure the polling time is long enough to allow interrupts to change
+	// in between.
+	uart_int_cnt = _get_interrupt_count(gps_elton_data->irq_num);
+	if (gps_elton_data->uart_int_cnt == uart_int_cnt) {
+		dev_info(&gps_elton_data->pdev->dev, "EVT 1.x Device was determined to be in hibernation\n");
+		gps_elton_data->is_awake = GPS_STATE_HIBERNATE;
+	} else {
+		dev_info(&gps_elton_data->pdev->dev, "EVT 1.x Device was determined to be awake\n");
+		gps_elton_data->is_awake = GPS_STATE_AWAKE;
+	}
+	// Update the uart interrutpt count for next time.
+	gps_elton_data->uart_int_cnt = uart_int_cnt;
+
+	// Put us back on the work queue.
+	schedule_delayed_work(&gps_elton_data->work_check,
+	                      msecs_to_jiffies(wait_between_check_uart_ints_in_ms));
 }
 
-
-static ssize_t gps_omap_suspend_show(struct device *dev,
-                                     struct device_attribute *attr, char *buf)
+/* Toggles the power line to the GPS chip to bring the chip either
+ * into hibernation or into awake state based upon previous state.
+ */
+static void _toggle_power(struct gps_elton_data_s * gps_elton_data)
 {
-	struct gps_elton_data *gps_elton = dev_get_drvdata(dev);
-	return snprintf(buf, PAGE_SIZE, "%d\n", gps_elton->is_suspended);
+	gpio_set_value(gps_elton_data->platform_data->gpio_on_off, 1);
+	msleep(wait_between_power_toggle_in_ms);
+	gpio_set_value(gps_elton_data->platform_data->gpio_on_off, 0);
+}
+
+static ssize_t gps_elton_awake_show(struct device *dev,
+                                    struct device_attribute *attr, char *buf)
+{
+	struct gps_elton_data_s *gps_elton_data = dev_get_drvdata(dev);
+	if (_is_evt_1_x(gps_elton_data)) {
+		// EVT 1.x
+		return snprintf(buf, PAGE_SIZE, "%d\n", gps_elton_data->is_awake);
+	} else {
+		// EVT 2.0
+		return snprintf(buf, PAGE_SIZE, "%d\n", gpio_get_value(gps_elton_data->platform_data->gpio_awake));
+	}
 }
 
 /* User manually specifying suspend or resume mode of GPS chip. */
-static ssize_t gps_omap_suspend_store(struct device *dev,
-                                      struct device_attribute *attr,
-                                      const char *buf, size_t count)
+static ssize_t gps_elton_awake_store(struct device *dev,
+                                     struct device_attribute *attr,
+                                     const char *buf, size_t count)
 {
 	int data;
-	struct gps_elton_data *gps_elton = dev_get_drvdata(dev);
+	unsigned long jiffies_current;
+	struct gps_elton_data_s *gps_elton_data = dev_get_drvdata(dev);
 	sscanf(buf, "%d", &data);
+
+	jiffies_current = jiffies;
 
 	/* Validate parameters. */
 	if (data != 0 && data != 1) {
 		return -EINVAL;
 	}
 
-	// We don't know the state of the device at this point.
-	if (gps_elton->is_suspended == -1) {
-		return -EAGAIN;
+	if (time_before(jiffies_current, gps_elton_data->valid_pulse_in_jiffies)) {
+		printk(KERN_WARNING "%s Unable to oscillate chip between awake and hibernate that fast %d\n",
+		       __func__, jiffies_to_msecs(gps_elton_data->valid_pulse_in_jiffies - jiffies_current));
+		return -EBUSY;
 	}
+
 
 	if (data == 1) {
-		/* We want to suspend. */
-		if (gps_elton->is_suspended == 1) {
-			/* But we are already suspended */
-			dev_info(gps_elton->dev, "%s already suspended\n", __func__);
-			return -EAGAIN;
+		/* We want to take the GPS chip out of hibernation. */
+		if (_is_evt_1_x(gps_elton_data)) {
+			/* EVT1.x */
+			if (gps_elton_data->is_awake != GPS_STATE_HIBERNATE) {
+				return -EAGAIN;
+			}
 		} else {
-			_toggle_power(gps_elton);
-			gps_elton->is_suspended = 1;
-			dev_info(gps_elton->dev, "%s user suspended GPS chip\n", __func__);
+			/* EVT2.0 */
+			if (gpio_get_value(gps_elton_data->platform_data->gpio_awake) == 1) {
+				/* Already awake */
+				return -EAGAIN;
+			}
 		}
+		_toggle_power(gps_elton_data);
+		if (_is_evt_1_x(gps_elton_data)) {
+			/* EVT 1.x - Force cache irq count to not equal system irq count. */
+			gps_elton_data->uart_int_cnt = -1;
+			/* EVT1.x */
+			gps_elton_data->is_awake = GPS_STATE_AWAKE;
+		}
+		dev_info(dev, "User awoke GPS chip\n");
 	} else {
-		/* We want to resume. */
-		if (gps_elton->is_suspended == 0) {
-			/* But we are already resumed. */
-			dev_info(gps_elton->dev, "%s already resumed\n", __func__);
-			return -EAGAIN;
+		/* We want to put the GPS chip into hibernation. */
+		if (_is_evt_1_x(gps_elton_data)) {
+			/* EVT1.x */
+			if (gps_elton_data->is_awake != GPS_STATE_AWAKE) {
+				return -EAGAIN;
+			}
+
 		} else {
-			_toggle_power(gps_elton);
-			gps_elton->is_suspended = 0;
-			dev_info(gps_elton->dev, "%s user resumed GPS chip\n", __func__);
+			/* EVT2.0 */
+			if (gpio_get_value(gps_elton_data->platform_data->gpio_awake) == 0) {
+				/* Already hibernating */
+				return -EAGAIN;
+			}
 		}
+		_toggle_power(gps_elton_data);
+		if (_is_evt_1_x(gps_elton_data)) {
+			/* EVT 1.x - Force cache irq count to be equal to system irq count. */
+			gps_elton_data->uart_int_cnt = _get_interrupt_count(gps_elton_data->irq_num);
+			/* EVT1.x */
+			gps_elton_data->is_awake = GPS_STATE_HIBERNATE;
+		}
+		dev_info(dev, "User put GPS chip into hibernation\n");
 	}
+
+	gps_elton_data->valid_pulse_in_jiffies = jiffies_current + msecs_to_jiffies(TIME_BETWEEN_AWAKE_PULSES_IN_MS);
 	return count;
 }
 
-/* User telling driver the state of the GPS chip. */
-static ssize_t gps_omap_set_suspend_store(struct device *dev,
-                                          struct device_attribute *attr,
-                                          const char *buf, size_t count)
-{
-	int data;
-	struct gps_elton_data *gps_elton = dev_get_drvdata(dev);
-	sscanf(buf, "%d", &data);
-
-	/* Validate parameters. */
-	if (data != 0 && data != 1) {
-		return -EINVAL;
-	}
-
-	// This is only valid when we don't know the state of the device.
-	if (gps_elton->is_suspended != -1) {
-		return -EAGAIN;
-	}
-
-	gps_elton->is_suspended = data;
-	return count;
-}
-
-/* Kernel power manager specifying suspend or resume mode of GPS chip. */
 static void gps_elton_early_suspend(struct early_suspend *h)
 {
-	// The suspend tristate indicating an unknown state.
-	if (gps_elton->is_suspended == -1) {
-		return;
+	if (_is_evt_1_x(gps_elton_data)) {
+		/* EVT 1.x - Force cache irq count to be equal to system irq count. */
+		// The suspend tristate indicating an unknown state.
+		if (gps_elton_data->is_awake == GPS_STATE_UNKNOWN) {
+			dev_warn(gps_elton_data->dev, "%s In an unknown state\n", __func__);
+			return;
+		}
+		if (gps_elton_data->is_awake == GPS_STATE_HIBERNATE) {
+			dev_warn(gps_elton_data->dev, "%s already hibernated\n", __func__);
+			return;
+		}
 	}
-	if (gps_elton->is_suspended == 1) {
-		dev_warn(gps_elton->dev, "%s already suspended\n", __func__);
-		return;
+
+	if (hibernate_during_early_suspend) {
+		_toggle_power(gps_elton_data);
+		gps_elton_data->is_awake = GPS_STATE_HIBERNATE;
+		dev_info(gps_elton_data->dev, "%s system hibernated GPS chip\n", __func__);
 	}
-	_toggle_power(gps_elton);
-	gps_elton->is_suspended = 1;
-	dev_dbg(gps_elton->dev, "%s system suspended GPS chip\n", __func__);
 }
 
 static void gps_elton_late_resume(struct early_suspend *h)
 {
-	// The suspend tristate indicating an unknown state.
-	if (gps_elton->is_suspended == -1) {
-		return;
+	if (_is_evt_1_x(gps_elton_data)) {
+		/* EVT 1.x - Force cache irq count to be equal to system irq count. */
+		// The suspend tristate indicating an unknown state.
+		if (gps_elton_data->is_awake == GPS_STATE_UNKNOWN) {
+			dev_warn(gps_elton_data->dev, "%s In an unknown state\n", __func__);
+			return;
+		}
+		if (gps_elton_data->is_awake == GPS_STATE_AWAKE) {
+			dev_warn(gps_elton_data->dev, "%s already awake\n", __func__);
+			return;
+		}
 	}
-	if (gps_elton->is_suspended == 0) {
-		dev_warn(gps_elton->dev, "%s already resumed\n", __func__);
-		return;
+	if (hibernate_during_early_suspend) {
+		_toggle_power(gps_elton_data);
+		gps_elton_data->is_awake = GPS_STATE_AWAKE;
+		dev_info(gps_elton_data->dev, "%s system awoke GPS chip\n", __func__);
 	}
-	_toggle_power(gps_elton);
-	gps_elton->is_suspended = 0;
-	dev_dbg(gps_elton->dev, "%s system resumed GPS chip\n", __func__);
 }
 
-static int __init gps_elton_init(void)
-{
+static int gps_elton_suspend(struct platform_device *pdev, pm_message_t state) {
+	int was_awake = 0;
+	if (_is_evt_1_x(gps_elton_data)) {
+		// EVT 1.x
+		if (gps_elton_data->is_awake == GPS_STATE_AWAKE) {
+			_toggle_power(gps_elton_data);
+			gps_elton_data->is_awake = GPS_STATE_HIBERNATE;
+			/* EVT 1.x - Force cache irq count to be equal to system irq count. */
+			gps_elton_data->uart_int_cnt = _get_interrupt_count(gps_elton_data->irq_num);
+			was_awake = 1;
+		}
+	} else {
+		// EVT 2.0
+		if (gpio_get_value(gps_elton_data->platform_data->gpio_awake) == 1) {
+			_toggle_power(gps_elton_data);
+			was_awake = 1;
+		}
+	}
+
+	dev_info(&pdev->dev, "Suspending - %s\n", (was_awake?"was awake":"was hibernating"));
+	return 0;
+}
+
+// Currently don't wake the GPS chip after a suspend cycle.
+static int gps_elton_resume(struct platform_device *pdev) {
+	dev_info(&pdev->dev, "Resuming\n");
+	return 0;
+}
+
+static int gps_elton_probe(struct platform_device *pdev) {
 	int rc = 0;
 	int attr_count = 0;
-	struct gps_elton_data *init_elton = NULL;
-	struct device *init_dev = NULL;
-	struct class *init_class = NULL;
 
-	init_elton = kzalloc(sizeof(struct gps_elton_data), GFP_KERNEL);
-	if (!init_elton) {
-		dev_err(gps_elton->dev, "%s Unable to allocate memory for device\n", __func__);
+	/* There can only be one elton driver instance. */
+	if (gps_elton_data) {
+		return -EINVAL;
+	}
+
+	gps_elton_data = kzalloc(sizeof(struct gps_elton_data_s), GFP_KERNEL);
+	if (!gps_elton_data) {
 		return -ENOMEM;
 	}
-	gps_elton = init_elton;
 
-	init_class = class_create(THIS_MODULE, "gps");
-	if (IS_ERR(init_class)) {
-		rc = PTR_ERR(init_class);
+	gps_elton_data->pdev = pdev;
+
+	gps_elton_data->valid_pulse_in_jiffies = INITIAL_JIFFIES;
+
+	gps_elton_data->platform_data = pdev->dev.platform_data;
+	if (NULL == gps_elton_data->platform_data) {
+		dev_err(&pdev->dev, "%s No platform data\n", __func__);
+		rc = -EINVAL;
 		goto error_exit;
 	}
-	gps_elton->class = init_class;
 
-	init_dev = device_create(gps_elton->class, NULL, MKDEV(0, 0), gps_elton, DRVNAME);
-	if (IS_ERR(init_dev)){
-		rc = PTR_ERR(init_dev);
+	// Create a sysfs class.
+	gps_elton_data->class = class_create(THIS_MODULE, "gps");
+	if (IS_ERR(gps_elton_data->class)) {
+		rc = PTR_ERR(gps_elton_data->class);
+		gps_elton_data->class = NULL;
 		goto error_exit;
 	}
-	gps_elton->dev = init_dev;
 
-	/* Setup the suspend and resume functionality */
-	INIT_LIST_HEAD(&gps_elton->early_suspend.link);
-	gps_elton->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-	gps_elton->early_suspend.suspend = gps_elton_early_suspend;
-	gps_elton->early_suspend.resume = gps_elton_late_resume;
-	// TODO(cmanton) Don't suspend/resume for Russ's testing.
-	// register_early_suspend(&gps_elton->early_suspend);
+	gps_elton_data->dev = device_create(gps_elton_data->class, NULL, MKDEV(0, 0),
+	                                    gps_elton_data, GPS_ELTON_DRVNAME);
+	if (IS_ERR(gps_elton_data->dev)){
+		rc = PTR_ERR(gps_elton_data->dev);
+		gps_elton_data->dev = NULL;
+		goto error_exit;
+	}
 
-	/* This flag must be synchronized with the power pin toggles on the device.
-	   Set flag indicating we don't know the state of the device. */
-	gps_elton->is_suspended = -1;
+	/* Setup the early suspend and late resume functionality */
+	INIT_LIST_HEAD(&gps_elton_data->early_suspend.link);
+	gps_elton_data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
+	gps_elton_data->early_suspend.suspend = gps_elton_early_suspend;
+	gps_elton_data->early_suspend.resume = gps_elton_late_resume;
+	register_early_suspend(&gps_elton_data->early_suspend);
 
-        /* Set up sysfs device attributes. */
+	/* NOTE(CMM) Only for EVT1.x.
+	 * Tristate flag indicating state driver believes device is in.
+	 *  1: GPS chip is in awake and in active mode.
+	 *  0: GPS chip is asleep and in hibernate mode.
+	 * -1: GPS chip is in an unkown state.
+	 * EVT2 uses a direct line from the GPS chip to indicate awake.
+	 */
+	gps_elton_data->is_awake = GPS_STATE_UNKNOWN;
+
+	/* Set up sysfs device attributes. */
 	for (attr_count = 0; attr_count < ARRAY_SIZE(attrs); attr_count++) {
-		rc = device_create_file(gps_elton->dev, &attrs[attr_count]);
+		rc = device_create_file(gps_elton_data->dev, &attrs[attr_count]);
 		if (rc < 0) {
-			dev_err(gps_elton->dev,
+			dev_err(gps_elton_data->dev,
 			        "%s: Failed to create sysfs file for %s.\n",
 			        __func__, attrs[attr_count].attr.name);
 			goto error_exit;
 		}
 	}
 
-	dev_info(gps_elton->dev, "%s driver initialized successfully\n", __func__);
+	// EVT1.x
+	if (-1 == gps_elton_data->platform_data->gpio_awake) {
+		// gps_elton_data->irq_num = 102; _search_for_interrupt
+		gps_elton_data->irq_num = _get_irq_num(OMAP_UART3_NAME);
+		dev_info(gps_elton_data->dev, "%s Detected omap uart3 interrupt:%d\n",
+		         __func__, gps_elton_data->irq_num);
+		INIT_DELAYED_WORK(&gps_elton_data->work_check, gps_elton_work_task);
+		schedule_delayed_work(&gps_elton_data->work_check,
+		                      msecs_to_jiffies(wait_between_check_uart_ints_in_ms));
+	}
+
+	// Check on_off line for default values
+	if (gpio_get_value(gps_elton_data->platform_data->gpio_on_off) != 0) {
+		dev_warn(gps_elton_data->dev, "%s Detected chip on_off value in uexpected state", __func__);
+	}
+
+	// Check reset line and take out of reset if needed.
+	// NOTE(cmanton) Not sure how long to wait before we guarantee reset
+	// is complete on the chip should we need to access again.
+	// e.g. checking awake line
+	if (gpio_get_value(gps_elton_data->platform_data->gpio_reset) == 0) {
+		dev_info(gps_elton_data->dev, "%s Detected chip in reset; taking out of reset", __func__);
+		gpio_set_value(gps_elton_data->platform_data->gpio_reset, 1);
+	}
+
+	// Keep in hibernate mode.
+	// Evt 2.x
+	if (-1 != gps_elton_data->platform_data->gpio_awake) {
+		if (gpio_get_value(gps_elton_data->platform_data->gpio_awake) == 1) {
+			dev_info(gps_elton_data->dev, "%s Detected chip awake; putting into hibernation", __func__);
+			_toggle_power(gps_elton_data);
+		}
+	}
+
+	// TODO(cmanton) Demote this to debug when confidence has been generated.
+	dev_info(&pdev->dev, "gpio on_off:%d reset:%d awake:%d\n",
+	         gps_elton_data->platform_data->gpio_on_off,
+	         gps_elton_data->platform_data->gpio_reset,
+	         gps_elton_data->platform_data->gpio_awake);
+
+	dev_info(gps_elton_data->dev, "%s driver initialized successfully\n", __func__);
 	return 0;
 
- error_exit:
-	if (gps_elton->dev)
-		device_destroy(gps_elton->class, gps_elton->dev->devt);
+error_exit:
+	if (gps_elton_data->class && gps_elton_data->dev)
+		device_destroy(gps_elton_data->class, gps_elton_data->dev->devt);
 
-	if (gps_elton->class)
-		class_destroy(gps_elton->class);
+	if (gps_elton_data->class)
+		class_destroy(gps_elton_data->class);
 
-	if (gps_elton)
-		kfree(gps_elton);
+	if (gps_elton_data)
+		kfree(gps_elton_data);
 
-	gps_elton = NULL;
+	gps_elton_data = NULL;
+	dev_info(&pdev->dev, "%s driver failed to initialize\n", __func__);
 	return rc;
+}
+
+static int gps_elton_remove(struct platform_device *pdev) {
+	int attr_count = 0;
+
+	unregister_early_suspend(&gps_elton_data->early_suspend);
+
+	for (attr_count = 0; attr_count < ARRAY_SIZE(attrs); attr_count++) {
+		device_remove_file(gps_elton_data->dev, &attrs[attr_count]);
+	}
+
+	device_destroy(gps_elton_data->class, gps_elton_data->dev->devt);
+	class_destroy(gps_elton_data->class);
+	return 0;
+}
+
+static struct platform_driver gps_elton_platform_driver = {
+	.probe = gps_elton_probe,
+	.remove = gps_elton_remove,
+	.suspend = gps_elton_suspend,
+	.resume = gps_elton_resume,
+	.driver = {
+		.name = "gps_elton",
+		.owner = THIS_MODULE,
+	},
+};
+
+static int __init gps_elton_init(void)
+{
+	return platform_driver_register(&gps_elton_platform_driver);
 }
 
 static void __exit gps_elton_cleanup(void)
 {
-	int attr_count = 0;
-
-	unregister_early_suspend(&gps_elton->early_suspend);
-
-	for (attr_count = 0; attr_count < ARRAY_SIZE(attrs); attr_count++) {
-		device_remove_file(gps_elton->dev, &attrs[attr_count]);
-	}
-
-	device_destroy(gps_elton->class, gps_elton->dev->devt);
-	class_destroy(gps_elton->class);
+	platform_driver_unregister(&gps_elton_platform_driver);
 }
 
 module_init(gps_elton_init);
 module_exit(gps_elton_cleanup);
+
+MODULE_AUTHOR("Chris Manton <cmanton@google.com>");
+MODULE_DESCRIPTION("Elton SiRF4e GPS Driver");
+MODULE_LICENSE("GPL");
