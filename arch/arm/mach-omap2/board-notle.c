@@ -1648,8 +1648,13 @@ static int __init notle_i2c_init(void)
 				notle_charger_data.supplied_to = notle_charger_supplicants_evt2;
 				notle_charger_data.num_supplicants =
 					ARRAY_SIZE(notle_charger_supplicants_evt2);
+
+				/* gas gauge is on i2c1, which is registered in the pmic init */
+				i2c_register_board_info(1, notle_i2c_1_boardinfo,
+						ARRAY_SIZE(notle_i2c_1_boardinfo));
 				break;
 
+			case V1_HOG:
 			case V1_EVT1:
 			default:
 				notle_charger_data.supplied_to = notle_charger_supplicants_evt1;
@@ -1671,9 +1676,6 @@ static int __init notle_i2c_init(void)
             synaptics_f11_data.swap_axes = false;
             synaptics_sensordata.attn_gpio_number = notle_get_gpio(GPIO_TOUCHPAD_INT_N_INDEX);
 #endif  /* CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C */
-            /* gas gauge is on i2c1, which is registered in the pmic init */
-            i2c_register_board_info(1, notle_i2c_1_boardinfo,
-                            ARRAY_SIZE(notle_i2c_1_boardinfo));
             omap4_pmic_init("twl6030", &notle_twldata);
             notle_i2c_irq_fixup();
             omap_register_i2c_bus(2, 400, NULL, 0);

@@ -92,14 +92,11 @@ static const unsigned int fuelgauge_rate[4] = {4, 16, 64, 256};
 
 static struct wake_lock battery_wake_lock;
 
-#define STATE_BATTERY   0 /* no wall power, charging disabled */
-#define STATE_FAULT     1 /* charging off due to fault condition */
-#define STATE_FULL      2 /* wall power but battery is charged */
-#define STATE_USB       3 /* 500mA wall power, charging enabled */
-#define STATE_AC        4 /* 1000mA wall power, charging enabled */
+#define STATE_BATTERY   0
+#define STATE_FULL      1
 
 static const char *twl6030_state[] = {
-	"BATTERY", "FAULT", "FULL", "USB", "AC"
+	"BATTERY", "FULL",
 };
 
 /* change the order, not the length to keep this a power of 2 */
@@ -602,15 +599,10 @@ static int twl6030_battery_get_property(struct power_supply *psy,
 
 	switch (psp) {
 		case POWER_SUPPLY_PROP_STATUS:
-			switch (di->state) {
-				case STATE_USB:
-				case STATE_AC:
-				case STATE_FULL: /* TODO ?? */
-					val->intval = POWER_SUPPLY_STATUS_CHARGING;
-					break;
-				default:
-					val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
-			}
+			if (di->current_avg_uA > 0)
+				val->intval = POWER_SUPPLY_STATUS_CHARGING;
+			else
+				val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
 			break;
 		case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 			val->intval = twl6030_get_battery_voltage(di) * 1000;
