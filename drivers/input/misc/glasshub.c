@@ -80,7 +80,9 @@
 #define REG_DETECTOR_GAIN		27
 #define REG_PROX_PART_ID		28
 #define REG_PROX_SEQ_ID			29
-#define REGISTER_FILE_SIZE		30
+#define REG_WINK_INHIBIT		30
+#define REG_WINK_STATUS			31
+#define REGISTER_FILE_SIZE		32
 
 #define CMD_BOOT			0xFA
 #define CMD_FLASH			0xF9
@@ -924,6 +926,51 @@ static ssize_t prox_version_show(struct device *dev, struct device_attribute *at
 	return sprintf(buf, "0x%02x 0x%02x\n", partId, seqId);
 }
 
+/* show wink status (also clears the status) */
+static ssize_t wink_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show_reg(dev, attr, buf, REG_WINK_STATUS);
+}
+
+/* show wink enable */
+static ssize_t wink_enable_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show_reg(dev, attr, buf, REG_ENABLE_WINK);
+}
+
+/* enable/disable wink */
+static ssize_t wink_enable_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	uint8_t enable = parse_enable(buf);
+	mutex_lock(&glasshub->device_lock);
+	boot_device_l(glasshub);
+	set_interrupt_state(glasshub, IRQ_WINK, enable);
+	_i2c_write_reg(glasshub, REG_ENABLE_WINK, enable); 
+	mutex_unlock(&glasshub->device_lock);
+	return count;
+}
+
+/* show wink inhibit period */
+static ssize_t wink_inhibit_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show_reg(dev, attr, buf, REG_WINK_INHIBIT);
+}
+
+/* set wink inhibit period */
+static ssize_t wink_inhibit_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	uint8_t period = parse_enable(buf);
+	mutex_lock(&glasshub->device_lock);
+	boot_device_l(glasshub);
+	_i2c_write_reg(glasshub, REG_WINK_INHIBIT, period); 
+	mutex_unlock(&glasshub->device_lock);
+	return count;
+}
+
 /* show last error code from device */
 static ssize_t error_code_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -1264,6 +1311,9 @@ static DEVICE_ATTR(led_drive, DEV_MODE_RW, led_drive_show, led_drive_store);
 static DEVICE_ATTR(calibrate, DEV_MODE_WO, NULL, calibrate_store);
 static DEVICE_ATTR(calibration_values, DEV_MODE_RO, calibration_values_show, NULL);
 static DEVICE_ATTR(prox_version, DEV_MODE_RO, prox_version_show, NULL);
+static DEVICE_ATTR(wink, DEV_MODE_RO, wink_show, NULL);
+static DEVICE_ATTR(wink_enable, DEV_MODE_RW, wink_enable_show, wink_enable_store);
+static DEVICE_ATTR(wink_inhibit, DEV_MODE_RW, wink_inhibit_show, wink_inhibit_store);
 static DEVICE_ATTR(error_code, DEV_MODE_RO, error_code_show, NULL);
 
 /* register prox device */
@@ -1390,6 +1440,18 @@ static void sysfs_register_class_input_entry_glasshub(struct glasshub_data *glas
 
 	if (!rc) {
 		rc = device_create_file(&i2c_client->dev, &dev_attr_prox_version);
+	}
+
+	if (!rc) {
+		rc = device_create_file(&i2c_client->dev, &dev_attr_wink);
+	}
+
+	if (!rc) {
+		rc = device_create_file(&i2c_client->dev, &dev_attr_wink_enable);
+	}
+
+	if (!rc) {
+		rc = device_create_file(&i2c_client->dev, &dev_attr_wink_inhibit);
 	}
 
 	if (!rc) {
