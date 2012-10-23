@@ -554,10 +554,8 @@ static void twl6030_read_fuelgauge(struct twl6030_battery_device_info *di)
 		twl6030_state[di->state],
 		di->trust_capacity ? " CC" : " EST");
 
-	if ((newcap != di->capacity) || statechanged) {
-		di->capacity = newcap;
-		power_supply_changed(&di->bat);
-	}
+	di->capacity = newcap;
+	power_supply_changed(&di->bat);
 
 	return;
 err:
@@ -599,7 +597,8 @@ static int twl6030_battery_get_property(struct power_supply *psy,
 
 	switch (psp) {
 		case POWER_SUPPLY_PROP_STATUS:
-			if (di->current_avg_uA > 0)
+			twl6030_battery_current(di);
+			if (di->current_uA > 0)
 				val->intval = POWER_SUPPLY_STATUS_CHARGING;
 			else
 				val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
