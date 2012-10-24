@@ -320,6 +320,32 @@ int mpu_memory_read(struct i2c_adapter *i2c_adap,
 	}
 }
 
+int mpu_memory_write_unaligned(struct inv_mpu_iio_s *st, u16 key, int len,
+								u8 const *d)
+{
+	int addr;
+	int start, end;
+	int len1, len2;
+	int result = 0;
+	if (len > MPU_MEM_BANK_SIZE)
+		return -EINVAL;
+	addr = inv_dmp_get_address(key);
+	start = (addr >> 8);
+	end   = ((addr + len - 1) >> 8);
+	if (start == end) {
+		result = mpu_memory_write(st->sl_handle,  st->i2c_addr, addr, len, d);
+	} else {
+		end <<= 8;
+		len1 = end - addr;
+		len2 = len - len1;
+		result = mpu_memory_write(st->sl_handle,  st->i2c_addr, addr, len1, d);
+		result |= mpu_memory_write(st->sl_handle,  st->i2c_addr, end, len2,
+									d + len1);
+	}
+
+	return result;
+}
+
 /**
  *  @internal
  *  @brief  Inverse lookup of the index of an MPL product key .
