@@ -22,6 +22,8 @@
  *#############################################################################
  */
 
+#define DEBUG_GESTURES 1
+
 #ifdef CONFIG_WAKELOCK
 #include <linux/wakelock.h>
 #define WAKELOCK_TIMEOUT_IN_MS 250
@@ -724,6 +726,40 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 		}
 	}
 
+#ifdef DEBUG_GESTURES
+	if (f11->finger_data_buffer[f11->data8_offset] || f11->finger_data_buffer[f11->data9_offset]) {
+		char buf[255] = {0};
+		char *pbuf = buf;
+		int flag = f11->finger_data_buffer[f11->data8_offset];
+		if (flag & HAS_SINGLE_TAP_MASK) {
+			pbuf += sprintf(pbuf, "SingleTap ");
+		}
+		if (flag & HAS_TAP_AND_HOLD_MASK) {
+			pbuf += sprintf(pbuf, "TapAndHold ");
+		}
+		if (flag & HAS_DOUBLE_TAP_MASK) {
+			pbuf += sprintf(pbuf, "DoubleTap ");
+		}
+		if (flag & HAS_EARLY_TAP_MASK) {
+			pbuf += sprintf(pbuf, "EarlyTap ");
+		}
+		if (flag & HAS_FLICK_MASK) {
+			pbuf += sprintf(pbuf, "Flick ");
+		}
+		if (flag & HAS_PRESS_MASK) {
+			pbuf += sprintf(pbuf, "Press ");
+		}
+		if (flag & HAS_PINCH_MASK) {
+			pbuf += sprintf(pbuf, "Pinch ");
+		}
+
+		printk("%s Debug Gestures:%s x:%d y:%d (raw: 0x%x 0x%x)\n", __func__,
+		       buf, (signed char)(f11->finger_data_buffer[f11->data10_offset]),
+		       (signed char)(f11->finger_data_buffer[f11->data11_offset]),
+		       f11->finger_data_buffer[f11->data8_offset],
+		       f11->finger_data_buffer[f11->data9_offset]);
+	}
+#endif
 	if (instance_data->sensor_info->has_absolute)
 		handle_absolute_reports(rmifninfo);
 
