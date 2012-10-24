@@ -198,20 +198,6 @@ struct inv_chip_info_s {
 	unsigned long accl_sens_trim;
 };
 
-/**
- *  struct inv_glu_s structure to store glu data.
- *  @outlier:	outlier threshold.
- *  @level:     level threshold.
- *  @trigger:	trigger threshold.
- *  @roll:      roll threshold.
- */
-struct inv_glu_s {
-	int outlier;
-	int level;
-	int trigger;
-	int roll;
-};
-
 enum inv_channel_num {
 	INV_CHANNEL_NUM_GYRO = 4,
 	INV_CHANNEL_NUM_GYRO_ACCL = 7,
@@ -236,7 +222,6 @@ struct inv_mpu_slave;
  *  @chip_config:	Cached attribute information.
  *  @chip_info:		Chip information from read-only registers.
  *  @trig;              iio trigger.
- *  @glu:		glu data structure
  *  @tap:               tap data structure
  *  @reg:		Map of important registers.
  *  @hw:		Other hardware-specific information.
@@ -280,7 +265,6 @@ struct inv_mpu_iio_s {
 	struct inv_chip_config_s chip_config;
 	struct inv_chip_info_s chip_info;
 	struct iio_trigger  *trig;
-	struct inv_glu_s glu;
 	struct inv_tap_s   tap;
 	struct inv_reg_map_s reg;
 	const struct inv_hw_s *hw;
@@ -515,8 +499,8 @@ struct inv_mpu_slave {
 #define DMP_PRECISION                   1000
 #define DMP_MAX_DIVIDER                 4
 #define DMP_MAX_MIN_TAPS                4
-#define DMP_IMAGE_CRC_VALUE             0x379c8e27
-#define DMP_IMAGE_SIZE                  2827
+#define DMP_IMAGE_CRC_VALUE             0xd48bc453
+#define DMP_IMAGE_SIZE                  2878
 
 #define BYTES_FOR_DMP            16
 #define QUATERNION_BYTES         16
@@ -683,7 +667,8 @@ enum MPU_MEMORY_BANKS {
 
 /* IIO attribute address */
 enum MPU_IIO_ATTR_ADDR {
-	ATTR_DMP_GLU_OUTLIER,
+	ATTR_DMP_GLU_OUTLIER_MAX,
+	ATTR_DMP_GLU_OUTLIER_MIN,
 	ATTR_DMP_GLU_LEVEL,
 	ATTR_DMP_GLU_TRIGGER,
 	ATTR_DMP_GLU_ROLL,

@@ -832,21 +832,20 @@ static ssize_t inv_dmp_attr_store(struct device *dev,
 		return -EINVAL;
 	data = (int)val;
 	switch (this_attr->address) {
-	case ATTR_DMP_GLU_OUTLIER:
-		WRITE_BE32_KEY_TO_MEM(KEY_D_GLU_OUTLIER)
-		st->glu.outlier = data;
+	case ATTR_DMP_GLU_OUTLIER_MAX:
+		WRITE_BE32_KEY_TO_MEM(KEY_D_GLU_MAX_ACCEL_THRESHOLD)
+		break;
+	case ATTR_DMP_GLU_OUTLIER_MIN:
+		WRITE_BE32_KEY_TO_MEM(KEY_D_GLU_MIN_ACCEL_THRESHOLD)
 		break;
 	case ATTR_DMP_GLU_LEVEL:
 		WRITE_BE32_KEY_TO_MEM(KEY_D_GLU_LEVEL_THRESHOLD)
-		st->glu.level = data;
 		break;
 	case ATTR_DMP_GLU_TRIGGER:
 		WRITE_BE32_KEY_TO_MEM(KEY_D_GLU_TRIGGER_THRESHOLD)
-		st->glu.trigger = data;
 		break;
 	case ATTR_DMP_GLU_ROLL:
 		WRITE_BE32_KEY_TO_MEM(KEY_D_GLU_ROLL_THRESHOLD)
-		st->glu.roll = data;
 		break;
 	case ATTR_DMP_TAP_THRESHOLD: {
 		const char ax[] = {INV_TAP_AXIS_X, INV_TAP_AXIS_Y,
@@ -959,8 +958,13 @@ static ssize_t inv_attr_show(struct device *dev,
 	int i;
 
 	switch (this_attr->address) {
-	case ATTR_DMP_GLU_OUTLIER:
-		result = inv_read_dmp(st, KEY_D_GLU_OUTLIER, &data);
+	case ATTR_DMP_GLU_OUTLIER_MAX:
+		result = inv_read_dmp(st, KEY_D_GLU_MAX_ACCEL_THRESHOLD, &data);
+		if (result)
+			return result;
+		return sprintf(buf, "%d\n", data);
+	case ATTR_DMP_GLU_OUTLIER_MIN:
+		result = inv_read_dmp(st, KEY_D_GLU_MIN_ACCEL_THRESHOLD, &data);
 		if (result)
 			return result;
 		return sprintf(buf, "%d\n", data);
@@ -1454,8 +1458,10 @@ static IIO_DEVICE_ATTR(accl_matrix, S_IRUGO, inv_attr_show, NULL,
 	ATTR_ACCL_MATRIX);
 static IIO_DEVICE_ATTR(compass_matrix, S_IRUGO, inv_attr_show, NULL,
 	ATTR_COMPASS_MATRIX);
-static IIO_DEVICE_ATTR(glu_outlier, S_IRUGO | S_IWUGO, inv_attr_show,
-	inv_dmp_attr_store, ATTR_DMP_GLU_OUTLIER);
+static IIO_DEVICE_ATTR(glu_outlier_max, S_IRUGO | S_IWUGO, inv_attr_show,
+	inv_dmp_attr_store, ATTR_DMP_GLU_OUTLIER_MAX);
+static IIO_DEVICE_ATTR(glu_outlier_min, S_IRUGO | S_IWUGO, inv_attr_show,
+	inv_dmp_attr_store, ATTR_DMP_GLU_OUTLIER_MIN);
 static IIO_DEVICE_ATTR(glu_level, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_GLU_LEVEL);
 static IIO_DEVICE_ATTR(glu_trigger, S_IRUGO | S_IWUGO, inv_attr_show,
@@ -1524,7 +1530,8 @@ static const struct attribute *inv_mpu6050_attributes[] = {
 	&iio_dev_attr_firmware_loaded.dev_attr.attr,
 	&iio_dev_attr_lpa_mode.dev_attr.attr,
 	&iio_dev_attr_lpa_freq.dev_attr.attr,
-	&iio_dev_attr_glu_outlier.dev_attr.attr,
+	&iio_dev_attr_glu_outlier_max.dev_attr.attr,
+	&iio_dev_attr_glu_outlier_min.dev_attr.attr,
 	&iio_dev_attr_glu_level.dev_attr.attr,
 	&iio_dev_attr_glu_trigger.dev_attr.attr,
 	&iio_dev_attr_glu_roll.dev_attr.attr,
