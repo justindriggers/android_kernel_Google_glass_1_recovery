@@ -2034,9 +2034,13 @@ static struct omapfb_platform_data notle_fb_pdata = {
  *
  * Same devices installed on EMIF1 and EMIF2
  */
-static __initdata struct emif_device_details emif_devices = {
+static __initdata struct emif_device_details emif_devices_evt1 = {
         .cs0_device = &lpddr2_elpida_2G_S4_dev,
         .cs1_device = &lpddr2_elpida_2G_S4_dev
+};
+
+static __initdata struct emif_device_details emif_devices_evt2 = {
+        .cs0_device = &lpddr2_elpida_4G_S4_dev,
 };
 
 
@@ -2046,17 +2050,17 @@ static void __init notle_init(void)
         int err;
         u32 omap_reg;
 
-        omap_emif_setup_device_details(&emif_devices, &emif_devices);
-
         if (omap_rev() == OMAP4430_REV_ES1_0)
                 package = OMAP_PACKAGE_CBL;
         notle_version_init();
         switch (NOTLE_VERSION) {
         case V1_HOG:
+            omap_emif_setup_device_details(&emif_devices_evt1, &emif_devices_evt1);
             omap4_mux_init(hog_board_mux, hog_board_wkup_mux, package);
             break;
 
         case V1_EVT1:
+            omap_emif_setup_device_details(&emif_devices_evt1, &emif_devices_evt1);
             omap4_mux_init(evt1_board_mux, evt1_board_wkup_mux, package);
 
             // Additional mux/pad settings
@@ -2068,6 +2072,7 @@ static void __init notle_init(void)
             break;
 
         case V1_EVT2:
+            omap_emif_setup_device_details(&emif_devices_evt2, &emif_devices_evt2);
             omap4_mux_init(evt2_board_mux, evt2_board_wkup_mux, package);
 
             // Additional mux/pad settings
@@ -2088,6 +2093,7 @@ static void __init notle_init(void)
             break;
 
         default:
+            omap_emif_setup_device_details(&emif_devices_evt1, &emif_devices_evt1);
             pr_err("No mux init for Notle version: %s\n",
                    notle_version_str(NOTLE_VERSION));
             break;
