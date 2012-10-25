@@ -232,6 +232,7 @@ static const struct tKeyLabel dmpTConfig[] = {
 	{KEY_D_1_92,               D_1_92},
 	{KEY_D_1_160,               D_1_160},
 	{KEY_D_1_176,               D_1_176},
+	{KEY_D_1_178,               D_1_178},
 	{KEY_D_1_218,               D_1_218},
 	{KEY_D_1_232,               D_1_232},
 	{KEY_D_1_250,               D_1_250},

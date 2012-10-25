@@ -333,14 +333,16 @@ int mpu_memory_write_unaligned(struct inv_mpu_iio_s *st, u16 key, int len,
 	start = (addr >> 8);
 	end   = ((addr + len - 1) >> 8);
 	if (start == end) {
-		result = mpu_memory_write(st->sl_handle,  st->i2c_addr, addr, len, d);
+		result = mpu_memory_write(st->sl_handle,  st->i2c_addr,
+					addr, len, d);
 	} else {
 		end <<= 8;
 		len1 = end - addr;
 		len2 = len - len1;
-		result = mpu_memory_write(st->sl_handle,  st->i2c_addr, addr, len1, d);
-		result |= mpu_memory_write(st->sl_handle,  st->i2c_addr, end, len2,
-									d + len1);
+		result = mpu_memory_write(st->sl_handle,  st->i2c_addr,
+					addr, len1, d);
+		result |= mpu_memory_write(st->sl_handle,  st->i2c_addr,
+					end, len2, d + len1);
 	}
 
 	return result;
@@ -1505,7 +1507,14 @@ int inv_set_interrupt_on_gesture_event(struct inv_mpu_iio_s *st, bool on)
 	/*For some reason DINAC4 is defined as 0xb8,
 	but DINBC4 is not defined.*/
 	const u8 regs_end[] = {DINAFE, DINAF2, DINAAB, 0xc4,
-					DINAAA, DINAF1, DINADF, DINADF};
+					DINAAA, DINAF1, DINADF, DINADF,
+					0xbb, 0xaf, DINADF, DINADF};
+	const u8 regs[] = {0, 0};
+	/* reset fifo count to zero */
+	result = mem_w_key(KEY_D_1_178, ARRAY_SIZE(regs), regs);
+	if (result)
+		return result;
+
 	if (on)
 		/*Sets the DMP to send an interrupt and put a FIFO packet
 		in the FIFO if and only if a tap/orientation event

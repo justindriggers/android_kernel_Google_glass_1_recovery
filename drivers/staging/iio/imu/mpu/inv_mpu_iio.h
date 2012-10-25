@@ -769,15 +769,14 @@ int mpu_memory_read(struct i2c_adapter *i2c_adap,
 			   u8 mpu_addr,
 			   u16 mem_addr,
 			   u32 len, u8 *data);
-int mpu_memory_write_unaligned(struct inv_mpu_iio_s *st,
-			    u16 key,
-			    int len, u8 const *d);
 int inv_hw_self_test(struct inv_mpu_iio_s *st);
 int inv_clear_GLU_int_flag(struct inv_mpu_iio_s *st);
 int inv_read_dmp_image(struct inv_mpu_iio_s *st, char *buf, int count);
 int inv_load_firmware(struct inv_mpu_iio_s *st, u8 *data, int size);
 
 s64 get_time_ns(void);
+int mpu_memory_write_unaligned(struct inv_mpu_iio_s *st, u16 key, int len,
+								u8 const *d);
 #define mem_w(a, b, c) mpu_memory_write(st->sl_handle,\
 			st->i2c_addr, a, b, c)
 #define mem_w_key(key, b, c) mpu_memory_write_unaligned(st, key, b, c)
