@@ -791,7 +791,7 @@ static void twl6030_monitor_work(struct work_struct *work)
 	/* TODO: stop charger after a maximum charge timeout or temp threshold */
 	if (is_charging(di) && capacity == 100 && current_uA < 50000) {
 		if (!di->charge_top_off) {
-			di->full_jiffies = jiffies = msecs_to_jiffies(120 * 1000);
+			di->full_jiffies = msecs_to_jiffies(120 * 1000) + jiffies;
 			di->charge_top_off = 1;
 		} else if (time_after_eq(jiffies, di->full_jiffies)) {
 			di->charge_top_off = 0;
