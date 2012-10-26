@@ -173,15 +173,6 @@
 
 #define NUM_SYNTH_KEYS_PER_SUSPEND 1
 
-/* Android 4.0 specified multitouch should not send empty
-   MT configs on each finger leaving the touchpad.  If so,
-   the Android input event layer turns them into hover events
-   which does not make sense in a touchpad environment.
-   It's kept here for future information, but should probably
-   not be turned on for this touchpad device.
-   */
-static int use_hover = 0;
-
 struct f11_instance_data {
 	struct rmi_F11_device_query *device_info;
 	struct rmi_F11_sensor_query *sensor_info;
@@ -830,18 +821,13 @@ static void handle_absolute_reports(struct rmi_function_info *rmifninfo)
 		/* if finger status indicates a finger is present then
 		 *   extract the finger data and report it */
 		if (finger_status == F11_NO_FINGER) {
-			instance_data->finger_tracker[finger] = finger_status;
-			if (prev_state != F11_NO_FINGER) {
-				/* this is a release. Android 4.0 specifies that
-				 * the input device should simply stop sending
-				 * data.  Otherwise it will get interpreted as
-				 * a hover event.*/
+			if (prev_state) {
+				/* this is a release */
 
-				if (use_hover) {
-					/* MT sync between fingers */
-					input_report_abs(function_device->input, ABS_MT_TRACKING_ID, finger);
-					input_mt_sync(function_device->input);
-				}
+				/* MT sync between fingers */
+				input_report_abs(function_device->input, ABS_MT_TRACKING_ID, finger);
+				input_mt_sync(function_device->input);
+				instance_data->finger_tracker[finger] = finger_status;
 				continue;
 			} else {
 				/* nothing to report */
