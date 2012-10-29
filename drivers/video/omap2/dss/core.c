@@ -474,7 +474,6 @@ static void omap_dss_driver_disable(struct omap_dss_device *dssdev)
 static int omap_dss_driver_enable(struct omap_dss_device *dssdev)
 {
 	int r;
-	omap_dss_request_bandwidth(dssdev);
 	r = dssdev->driver->enable_orig(dssdev);
 	if (!r && dssdev->state == OMAP_DSS_DISPLAY_ACTIVE)
 		blocking_notifier_call_chain(&dssdev->state_notifiers,
@@ -485,7 +484,6 @@ static int omap_dss_driver_enable(struct omap_dss_device *dssdev)
 static int omap_dss_driver_suspend(struct omap_dss_device *dssdev)
 {
 	int r = dssdev->driver->suspend_orig(dssdev);
-	omap_dss_reset_bandwidth();
 	return r;
 }
 
