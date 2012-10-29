@@ -173,6 +173,15 @@
 
 #define NUM_SYNTH_KEYS_PER_SUSPEND 1
 
+/* Android 4.0 specified multitouch should not send empty
+   MT configs on each finger leaving the touchpad.  If so,
+   the Android input event layer turns them into hover events
+   which does not make sense in a touchpad environment.
+   It's kept here for future information, but should probably
+   not be turned on for this touchpad device.
+   */
+static int use_hover = 0;
+
 struct f11_instance_data {
 	struct rmi_F11_device_query *device_info;
 	struct rmi_F11_sensor_query *sensor_info;
@@ -794,7 +803,16 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 
         if (finger_down_count) {
                 wake_lock_timeout(&f11->wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
-        }
+        } else {
+	        /* An empty report sync will be consumed by the input layer.
+	         * So to get an empty report sync passed the input layer
+	         * we will provide an empty config sync.  Only do this if the
+	         * previous run through here had finger data.
+	         */
+	        if (instance_data->last_finger_down_count != 0) {
+			input_mt_sync(function_device->input);
+		}
+	}
 
 	instance_data->last_finger_down_count = finger_down_count;
 	input_sync(function_device->input); /* sync after groups of events */
@@ -821,13 +839,18 @@ static void handle_absolute_reports(struct rmi_function_info *rmifninfo)
 		/* if finger status indicates a finger is present then
 		 *   extract the finger data and report it */
 		if (finger_status == F11_NO_FINGER) {
-			if (prev_state) {
-				/* this is a release */
+			instance_data->finger_tracker[finger] = finger_status;
+			if (prev_state != F11_NO_FINGER) {
+				/* this is a release. Android 4.0 specifies that
+				 * the input device should simply stop sending
+				 * data.  Otherwise it will get interpreted as
+				 * a hover event.*/
 
-				/* MT sync between fingers */
-				input_report_abs(function_device->input, ABS_MT_TRACKING_ID, finger);
-				input_mt_sync(function_device->input);
-				instance_data->finger_tracker[finger] = finger_status;
+				if (use_hover) {
+					/* MT sync between fingers */
+					input_report_abs(function_device->input, ABS_MT_TRACKING_ID, finger);
+					input_mt_sync(function_device->input);
+				}
 				continue;
 			} else {
 				/* nothing to report */
