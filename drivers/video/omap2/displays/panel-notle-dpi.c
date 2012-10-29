@@ -22,6 +22,9 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/spi/spi.h>
+#include <plat/omap_hwmod.h>
+#include <plat/omap-pm.h>
+
 
 #include <video/omapdss.h>
 #include <video/omap-panel-notle.h>
@@ -296,6 +299,7 @@ static inline struct panel_notle_data
         return (struct panel_notle_data *) dssdev->data;
 }
 
+static int requested_l3_throughput;
 /* Local functions used by the sysfs interface */
 static char tmp_buf[PAGE_SIZE];
 static int fpga_rev = -1;
@@ -1665,8 +1669,30 @@ static int panel_notle_enable(struct omap_dss_device *dssdev) {
         return 0;
 }
 
+#define L3_TPUT 800000 /* MiB/s */
 static int panel_notle_resume(struct omap_dss_device *dssdev) {
-        int r = 0;
+	struct device *dss_dev;
+	int r = -1;
+
+	/*
+	 * This is a notle optimization.
+	 * Hold L3 constraint to OPP 100 (200Mhz) when display is on
+	 */
+	if (!requested_l3_throughput) {
+		dss_dev = omap_hwmod_name_get_dev("dss_core");
+		if (dss_dev) {
+			r = omap_pm_set_min_bus_tput(&dssdev->dev,
+					 OCP_INITIATOR_AGENT,
+					 L3_TPUT);
+
+			if (!r)
+				requested_l3_throughput = 1;
+
+		}
+
+		if (r)
+			printk(KERN_ERR LOG_TAG "Failed to set L3 bus speed\n");
+	}
 
         r = panel_notle_power_on(dssdev);
         if (r)
@@ -1687,6 +1713,16 @@ static int panel_notle_suspend(struct omap_dss_device *dssdev) {
         panel_notle_power_off(dssdev);
 
         dssdev->state = OMAP_DSS_DISPLAY_SUSPENDED;
+
+	/*
+	 * Release L3 constraint on display off.
+	 */
+	if (requested_l3_throughput) {
+		omap_pm_set_min_bus_tput(&dssdev->dev,
+			OCP_INITIATOR_AGENT, -1);
+		requested_l3_throughput = 0;
+	}
+
 
         return 0;
 }
