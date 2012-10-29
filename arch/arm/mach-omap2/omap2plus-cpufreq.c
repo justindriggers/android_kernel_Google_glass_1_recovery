@@ -370,8 +370,42 @@ static int cpufreq_apply_cooling(struct thermal_dev *dev,
 
 #ifdef CONFIG_OMAP4_DUTY_CYCLE
 
+/*
+ * duty_cycle_apply_cooling: set the max thermal
+ * @param max: max thermal frequency.
+ *
+ * Imposes the maximum cpu frequency that a cpu governor can scale to.
+*/
+static int duty_cycle_apply_cooling(struct thermal_dev *dev, int max)
+{
+	unsigned int cur;
+
+	pr_debug("%s: setting max to %i\n", __func__, max);
+
+	if (!omap_cpufreq_ready)
+		return 0;
+
+	mutex_lock(&omap_cpufreq_lock);
+
+	if (max_thermal == max) {
+		pr_warn("%s: not throttling\n", __func__);
+		goto out;
+	}
+
+	max_thermal = max;
+
+	if (!omap_cpufreq_suspended) {
+		cur = omap_getspeed(0);
+		omap_cpufreq_scale(current_target_freq, cur);
+	}
+out:
+	mutex_unlock(&omap_cpufreq_lock);
+
+	return 0;
+}
+
 static struct duty_cycle_dev duty_dev = {
-	.cool_device = cpufreq_apply_cooling,
+	.cool_device = duty_cycle_apply_cooling,
 };
 
 static int __init omap_duty_cooling_init(void)

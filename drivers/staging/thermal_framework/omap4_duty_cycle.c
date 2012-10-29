@@ -98,7 +98,7 @@ static void omap4_duty_enter_normal(void)
 	duty_desc.heating_budget = NITRO_P(nitro_percentage, nitro_interval);
 
 	if (duty_desc.cool_device != NULL)
-		duty_desc.cool_device(NULL, 0);
+		duty_desc.cool_device(NULL, nitro_rate);
 
 }
 
@@ -125,7 +125,7 @@ static void omap4_duty_enter_cooling(unsigned int next_max,
 	pr_debug("%s enter at (%u)\n", __func__, policy->cur);
 
 	if ((duty_desc.cool_device != NULL) && (next_max != nitro_rate))
-		duty_desc.cool_device(NULL, 1);
+		duty_desc.cool_device(NULL, next_max);
 
 	queue_delayed_work(duty_wq, &work_exit_cool, msecs_to_jiffies(
 		NITRO_P(100 - nitro_percentage, nitro_interval)));
