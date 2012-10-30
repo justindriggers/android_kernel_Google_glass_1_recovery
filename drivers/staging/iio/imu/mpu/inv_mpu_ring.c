@@ -533,6 +533,12 @@ flush_fifo:
 	return IRQ_HANDLED;
 }
 
+/* These defines must be in sync with MPLSensor.cpp in HAL. */
+#define DATA_FORMAT_QUAT    0x01
+#define DATA_FORMAT_GYRO    0x02
+#define DATA_FORMAT_ACCEL   0x04
+#define DATA_FORMAT_COMPASS 0x08
+
 static int inv_report_gyro_accl_compass(struct iio_dev *indio_dev,
 					unsigned char *data, s64 t)
 {
@@ -545,6 +551,7 @@ static int inv_report_gyro_accl_compass(struct iio_dev *indio_dev,
 	u32 word;
 	u8 d[8];
 	u8 *tmp, compass_divider;
+	u8 data_format;
 	int source;
 	struct inv_chip_config_s *conf;
 
@@ -652,18 +659,31 @@ static int inv_report_gyro_accl_compass(struct iio_dev *indio_dev,
 
 	tmp = (unsigned char *)buf;
 	d_ind = 0;
-	if (conf->quaternion_on & conf->dmp_on)
+	data_format = 0;
+	if (conf->quaternion_on & conf->dmp_on) {
 		d_ind = put_scan_to_buf_q(indio_dev, tmp, q,
 				INV_MPU_SCAN_QUAT_R, d_ind);
-	if (conf->gyro_fifo_enable)
+		data_format |= DATA_FORMAT_QUAT;
+	}
+	if (conf->gyro_fifo_enable) {
 		d_ind = put_scan_to_buf(indio_dev, tmp, g,
 				INV_MPU_SCAN_GYRO_X, d_ind);
-	if (conf->accl_fifo_enable)
+		data_format |= DATA_FORMAT_GYRO;
+	}
+	if (conf->accl_fifo_enable) {
 		d_ind = put_scan_to_buf(indio_dev, tmp, a,
 				INV_MPU_SCAN_ACCL_X, d_ind);
-	if (conf->compass_fifo_enable)
+		data_format |= DATA_FORMAT_ACCEL;
+	}
+	if (conf->compass_fifo_enable) {
 		d_ind = put_scan_to_buf(indio_dev, tmp, c,
 				INV_MPU_SCAN_MAGN_X, d_ind);
+		data_format |= DATA_FORMAT_COMPASS;
+	}
+	/* Add a format field in the byte preceeding the timestamp
+		if we're sending more than just quaternion data. */
+	if (data_format != DATA_FORMAT_QUAT)
+		tmp[((d_ind + 7) & ~7) - 1] = data_format;
 	if (ring->scan_timestamp)
 		buf[(d_ind + 7) / 8] = t;
 	ring->access->store_to(indio_dev->buffer, (u8 *)buf, t);
