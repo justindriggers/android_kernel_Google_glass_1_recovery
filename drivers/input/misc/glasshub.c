@@ -82,7 +82,8 @@
 #define REG_PROX_SEQ_ID			29
 #define REG_WINK_INHIBIT		30
 #define REG_WINK_STATUS			31
-#define REGISTER_FILE_SIZE		32
+#define REG_DEBUG			32
+#define REGISTER_FILE_SIZE		33
 
 #define CMD_BOOT			0xFA
 #define CMD_FLASH			0xF9
@@ -111,8 +112,8 @@
 #define FLAG_FLASH_MODE			2
 
 /* flags for device permissions */
-#define DEV_MODE_RO (S_IRUSR | S_IRGRP | S_IROTH)
-#define DEV_MODE_WO (S_IWUSR | S_IWGRP | S_IWOTH)
+#define DEV_MODE_RO (S_IRUSR | S_IRGRP)
+#define DEV_MODE_WO (S_IWUSR | S_IWGRP)
 #define DEV_MODE_RW (DEV_MODE_RO | DEV_MODE_WO)
 
 /* firmware parameters */
@@ -147,6 +148,9 @@
 
 /* number of samples to take for calibration mean */
 #define NUM_CALIBRATION_SAMPLES		3
+
+/* button values for don/doff and wink */
+#define DON_DOFF_BUTTON			BTN_BASE5
 
 /*
  * Basic theory of operation:
@@ -190,7 +194,6 @@
 struct glasshub_data {
 	struct i2c_client *i2c_client;
 	struct input_dev *ps_input_dev;
-	struct input_dev *don_doff_dev;
 	struct early_suspend early_suspend;
 	const struct glasshub_platform_data *pdata;
 	uint8_t *fw_image;
@@ -483,8 +486,7 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 			if (rc) goto Error;
 			dev_info(&glasshub->i2c_client->dev, "%s: don/doff state = %u\n",
 					__FUNCTION__, glasshub->don_doff_state);
-			input_report_key(glasshub->don_doff_dev, BTN_0, glasshub->don_doff_state);
-			input_sync(glasshub->don_doff_dev);
+			sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "don_doff_state");
 		}
 
 		/* process prox data */
@@ -523,6 +525,12 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 			wake_up_interruptible(&glasshub_read_wait);
 			/* end raw misc driver */
 		}
+
+		if (status & IRQ_WINK) {
+			dev_info(&glasshub->i2c_client->dev, "%s: wink signal received\n",
+					__FUNCTION__);
+			sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "wink");
+		}
 	}
 	mutex_unlock(&glasshub->device_lock);
 
@@ -535,7 +543,7 @@ Error:
 }
 
 /* enable/disable interrupts from the device */
-static int set_interrupt_state(struct glasshub_data *glasshub, uint8_t interrupt, int enable)
+static int set_interrupt_state_l(struct glasshub_data *glasshub, uint8_t interrupt, int enable)
 {
 	int rc;
 	dev_info(&glasshub->i2c_client->dev, "%s: interrupt = 0x%08x enable = %d\n",
@@ -607,7 +615,7 @@ static ssize_t don_doff_enable_store(struct device *dev, struct device_attribute
 	uint8_t enable = parse_enable(buf);
 	mutex_lock(&glasshub->device_lock);
 	boot_device_l(glasshub);
-	set_interrupt_state(glasshub, IRQ_DON_DOFF, enable);
+	set_interrupt_state_l(glasshub, IRQ_DON_DOFF, enable);
 	_i2c_write_reg(glasshub, REG_ENABLE_DON_DOFF, enable); 
 	mutex_unlock(&glasshub->device_lock);
 	return count;
@@ -627,7 +635,7 @@ static ssize_t passthru_enable_store(struct device *dev, struct device_attribute
 	uint8_t enable = parse_enable(buf);
 	mutex_lock(&glasshub->device_lock);
 	boot_device_l(glasshub);
-	set_interrupt_state(glasshub, IRQ_PASSTHRU, enable);
+	set_interrupt_state_l(glasshub, IRQ_PASSTHRU, enable);
 	_i2c_write_reg(glasshub, REG_ENABLE_PASSTHRU, enable); 
 	mutex_unlock(&glasshub->device_lock);
 	return count;
@@ -946,7 +954,7 @@ static ssize_t wink_enable_store(struct device *dev, struct device_attribute *at
 	uint8_t enable = parse_enable(buf);
 	mutex_lock(&glasshub->device_lock);
 	boot_device_l(glasshub);
-	set_interrupt_state(glasshub, IRQ_WINK, enable);
+	set_interrupt_state_l(glasshub, IRQ_WINK, enable);
 	_i2c_write_reg(glasshub, REG_ENABLE_WINK, enable); 
 	mutex_unlock(&glasshub->device_lock);
 	return count;
@@ -975,6 +983,25 @@ static ssize_t wink_inhibit_store(struct device *dev, struct device_attribute *a
 static ssize_t error_code_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return show_reg(dev, attr, buf, REG_ERROR_CODE);
+}
+
+/* show debug value */
+static ssize_t debug_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show_reg(dev, attr, buf, REG_DEBUG);
+}
+
+/* write debug value */
+static ssize_t debug_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	uint8_t value = parse_enable(buf);
+	mutex_lock(&glasshub->device_lock);
+	boot_device_l(glasshub);
+	_i2c_write_reg(glasshub, REG_DEBUG, value); 
+	mutex_unlock(&glasshub->device_lock);
+	return count;
 }
 
 /* sysfs node for updating device firmware */
@@ -1314,7 +1341,36 @@ static DEVICE_ATTR(prox_version, DEV_MODE_RO, prox_version_show, NULL);
 static DEVICE_ATTR(wink, DEV_MODE_RO, wink_show, NULL);
 static DEVICE_ATTR(wink_enable, DEV_MODE_RW, wink_enable_show, wink_enable_store);
 static DEVICE_ATTR(wink_inhibit, DEV_MODE_RW, wink_inhibit_show, wink_inhibit_store);
+static DEVICE_ATTR(debug, DEV_MODE_RW, debug_show, debug_store);
 static DEVICE_ATTR(error_code, DEV_MODE_RO, error_code_show, NULL);
+
+static struct attribute *attrs[] = {
+	&dev_attr_version.attr,
+	&dev_attr_bootloader_version.attr,
+	&dev_attr_passthru_enable.attr,
+	&dev_attr_proxraw.attr,
+	&dev_attr_ir.attr,
+	&dev_attr_vis.attr,
+	&dev_attr_don_doff_enable.attr,
+	&dev_attr_don_doff.attr,
+	&dev_attr_don_doff_threshold.attr,
+	&dev_attr_don_doff_hysteresis.attr,
+	&dev_attr_update_fw_enable.attr,
+	&dev_attr_led_drive.attr,
+	&dev_attr_calibrate.attr,
+	&dev_attr_calibration_values.attr,
+	&dev_attr_prox_version.attr,
+	&dev_attr_wink.attr,
+	&dev_attr_wink_enable.attr,
+	&dev_attr_wink_inhibit.attr,
+	&dev_attr_debug.attr,
+	&dev_attr_error_code.attr,
+	NULL
+};
+
+static struct attribute_group attr_group = {
+	.attrs = attrs,
+};
 
 /* register prox device */
 static int register_ps_device(struct glasshub_data *glasshub)
@@ -1346,36 +1402,6 @@ free_device:
 	return rc;
 }
 
-/* register don/doff device */
-static int register_don_doff_device(struct glasshub_data *glasshub)
-{
-	int rc;
-
-	glasshub->don_doff_dev = input_allocate_device();
-	if (!glasshub->don_doff_dev) {
-		dev_err(&glasshub->i2c_client->dev, "%s: Failed to allocate don_doff input device\n",
-				__func__);
-		return -ENOMEM;
-	}
-
-	glasshub->don_doff_dev->name = "glasshub_don_doff";
-	glasshub->don_doff_dev->evbit[0] = BIT_MASK(EV_KEY);
-	glasshub->don_doff_dev->keybit[BIT_WORD(BTN_0)] = BIT_MASK(BTN_0);
-
-	rc = input_register_device(glasshub->don_doff_dev);
-	if (rc) {
-		dev_err(&glasshub->i2c_client->dev, "%s: Failed to register don_doff input device\n",
-				__func__);
-		goto err_out;
-	}
-
-	return 0;
-
-err_out:
-	input_free_device(glasshub->don_doff_dev);
-	return rc;
-}
-
 /* register sysfs status and control nodes */
 static void sysfs_register_class_input_entry_glasshub(struct glasshub_data *glasshub,
 		struct i2c_client *i2c_client) {
@@ -1384,81 +1410,8 @@ static void sysfs_register_class_input_entry_glasshub(struct glasshub_data *glas
 	/* store driver data into device private structure */
 	dev_set_drvdata(&i2c_client->dev, glasshub);
 
-	rc = device_create_file(&i2c_client->dev, &dev_attr_version);
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_bootloader_version);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_passthru_enable);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_proxraw);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_ir);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_vis);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_don_doff_enable);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_don_doff);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_don_doff_threshold);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_don_doff_hysteresis);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_update_fw_enable);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_led_drive);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_calibrate);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_calibration_values);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_prox_version);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_wink);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_wink_enable);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_wink_inhibit);
-	}
-
-	if (!rc) {
-		rc = device_create_file(&i2c_client->dev, &dev_attr_error_code);
-	}
-
-	/* output error to kernel log */
+	/* create attributes */
+	rc = sysfs_create_group(&i2c_client->dev.kobj,&attr_group);
 	if (rc) {
 		dev_err(&i2c_client->dev, "%s Unable to create sysfs class files\n", __FUNCTION__);
 	}
@@ -1655,7 +1608,6 @@ static int	__devinit glasshub_probe(struct i2c_client *i2c_client,
 
 	// register input devices
 	register_ps_device(glasshub);
-	register_don_doff_device(glasshub);
 
 	/* register sysfs entries */
 	sysfs_register_class_input_entry_glasshub(glasshub, i2c_client);
