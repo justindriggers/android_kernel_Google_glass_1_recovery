@@ -558,7 +558,7 @@ static int set_interrupt_state_l(struct glasshub_data *glasshub, uint8_t interru
 }
 
 /* common routine to return an I2C register to userspace */
-static ssize_t show_reg(struct device *dev, struct device_attribute *attr, char *buf, uint8_t reg)
+static ssize_t show_reg(struct device *dev, char *buf, uint8_t reg)
 {
 	uint8_t data;
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
@@ -569,6 +569,23 @@ static ssize_t show_reg(struct device *dev, struct device_attribute *attr, char 
 	mutex_unlock(&glasshub->device_lock);
 
 	return sprintf(buf, "%u\n", data);
+}
+
+/* common routine to set an I2C register from userspace */
+static ssize_t store_reg(struct device *dev, const char *buf, size_t count,
+		uint8_t reg, uint8_t min, uint8_t max)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	uint8_t value = 0;
+	if (!kstrtou8(buf, 10, &value)) {
+		value = (value < min) ? min : value;
+		value = (value > max) ? max : value;
+		mutex_lock(&glasshub->device_lock);
+		boot_device_l(glasshub);
+		_i2c_write_reg(glasshub, reg, value);
+		mutex_unlock(&glasshub->device_lock);
+	}
+	return count;
 }
 
 /* parses a value from user space into an enable bit, i.e. 1 or 0 */
@@ -598,13 +615,13 @@ static ssize_t bootloader_version_show(struct device *dev, struct device_attribu
 /* show don/doff status */
 static ssize_t don_doff_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return show_reg(dev, attr, buf, REG_DON_DOFF);
+	return show_reg(dev, buf, REG_DON_DOFF);
 }
 
 /* show don/doff enable status */
 static ssize_t don_doff_enable_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return show_reg(dev, attr, buf, REG_ENABLE_DON_DOFF);
+	return show_reg(dev, buf, REG_ENABLE_DON_DOFF);
 }
 
 /* enable/disable don/doff */
@@ -624,7 +641,7 @@ static ssize_t don_doff_enable_store(struct device *dev, struct device_attribute
 /* show prox passthrough mode */
 static ssize_t passthru_enable_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return show_reg(dev, attr, buf, REG_ENABLE_PASSTHRU);
+	return show_reg(dev, buf, REG_ENABLE_PASSTHRU);
 }
 
 /* enable/disable prox passthrough mode */
@@ -774,43 +791,27 @@ static ssize_t don_doff_threshold_store(struct device *dev, struct device_attrib
 static ssize_t don_doff_hysteresis_show(struct device *dev, struct device_attribute *attr,
 		char *buf)
 {
-	return show_reg(dev, attr, buf, REG_DON_DOFF_HYSTERESIS);
+	return show_reg(dev, buf, REG_DON_DOFF_HYSTERESIS);
 }
 
 /* set don/doff hysteresis value */
 static ssize_t don_doff_hysteresis_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-	uint8_t value = 0;
-	if (!kstrtou8(buf, 10, &value)) {
-		mutex_lock(&glasshub->device_lock);
-		boot_device_l(glasshub);
-		_i2c_write_reg(glasshub, REG_DON_DOFF_HYSTERESIS, value); 
-		mutex_unlock(&glasshub->device_lock);
-	}
-	return count;
+	return store_reg(dev, buf, count, REG_DON_DOFF_HYSTERESIS, 1, 255);
 }
 
 /* show IR LED drive value */
 static ssize_t led_drive_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return show_reg(dev, attr, buf, REG_LED_DRIVE);
+	return show_reg(dev, buf, REG_LED_DRIVE);
 }
 
 /* set IR LED drive value */
 static ssize_t led_drive_store(struct device *dev, struct device_attribute *attr, const char *buf,
 		size_t count)
 {
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-	uint8_t value = 0;
-	if (!kstrtou8(buf, 10, &value)) {
-		mutex_lock(&glasshub->device_lock);
-		boot_device_l(glasshub);
-		_i2c_write_reg(glasshub, REG_LED_DRIVE, value); 
-		mutex_unlock(&glasshub->device_lock);
-	}
-	return count;
+	return store_reg(dev, buf, count, REG_LED_DRIVE, 0, 7);
 }
 
 /* calibrate IR LED drive levels */
@@ -937,13 +938,13 @@ static ssize_t prox_version_show(struct device *dev, struct device_attribute *at
 /* show wink status (also clears the status) */
 static ssize_t wink_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return show_reg(dev, attr, buf, REG_WINK_STATUS);
+	return show_reg(dev, buf, REG_WINK_STATUS);
 }
 
 /* show wink enable */
 static ssize_t wink_enable_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return show_reg(dev, attr, buf, REG_ENABLE_WINK);
+	return show_reg(dev, buf, REG_ENABLE_WINK);
 }
 
 /* enable/disable wink */
@@ -963,45 +964,46 @@ static ssize_t wink_enable_store(struct device *dev, struct device_attribute *at
 /* show wink inhibit period */
 static ssize_t wink_inhibit_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return show_reg(dev, attr, buf, REG_WINK_INHIBIT);
+	return show_reg(dev, buf, REG_WINK_INHIBIT);
 }
 
 /* set wink inhibit period */
 static ssize_t wink_inhibit_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-	uint8_t period = parse_enable(buf);
-	mutex_lock(&glasshub->device_lock);
-	boot_device_l(glasshub);
-	_i2c_write_reg(glasshub, REG_WINK_INHIBIT, period); 
-	mutex_unlock(&glasshub->device_lock);
-	return count;
+	return store_reg(dev, buf, count, REG_WINK_INHIBIT, 1, 255);
+}
+
+/* show detector gain */
+static ssize_t detector_gain_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show_reg(dev, buf, REG_DETECTOR_GAIN);
+}
+
+/* set detector gain */
+static ssize_t detector_gain_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	return store_reg(dev, buf, count, REG_DETECTOR_GAIN, 0x01, 0x80);
 }
 
 /* show last error code from device */
 static ssize_t error_code_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return show_reg(dev, attr, buf, REG_ERROR_CODE);
+	return show_reg(dev, buf, REG_ERROR_CODE);
 }
 
 /* show debug value */
 static ssize_t debug_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return show_reg(dev, attr, buf, REG_DEBUG);
+	return show_reg(dev, buf, REG_DEBUG);
 }
 
 /* write debug value */
 static ssize_t debug_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-	uint8_t value = parse_enable(buf);
-	mutex_lock(&glasshub->device_lock);
-	boot_device_l(glasshub);
-	_i2c_write_reg(glasshub, REG_DEBUG, value); 
-	mutex_unlock(&glasshub->device_lock);
-	return count;
+	return store_reg(dev, buf, count, REG_DEBUG, 0, 255);
 }
 
 /* sysfs node for updating device firmware */
@@ -1341,6 +1343,7 @@ static DEVICE_ATTR(prox_version, DEV_MODE_RO, prox_version_show, NULL);
 static DEVICE_ATTR(wink, DEV_MODE_RO, wink_show, NULL);
 static DEVICE_ATTR(wink_enable, DEV_MODE_RW, wink_enable_show, wink_enable_store);
 static DEVICE_ATTR(wink_inhibit, DEV_MODE_RW, wink_inhibit_show, wink_inhibit_store);
+static DEVICE_ATTR(detector_gain, DEV_MODE_RW, detector_gain_show, detector_gain_store);
 static DEVICE_ATTR(debug, DEV_MODE_RW, debug_show, debug_store);
 static DEVICE_ATTR(error_code, DEV_MODE_RO, error_code_show, NULL);
 
@@ -1363,6 +1366,7 @@ static struct attribute *attrs[] = {
 	&dev_attr_wink.attr,
 	&dev_attr_wink_enable.attr,
 	&dev_attr_wink_inhibit.attr,
+	&dev_attr_detector_gain.attr,
 	&dev_attr_debug.attr,
 	&dev_attr_error_code.attr,
 	NULL
