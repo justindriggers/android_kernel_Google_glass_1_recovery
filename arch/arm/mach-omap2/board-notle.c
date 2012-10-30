@@ -216,7 +216,7 @@ static char * notle_version_str(notle_version board_ver)
 
 static struct pcb_section omap4_duty_governor_pcb_sections[] = {
 	{
-		.pcb_temp_level			= 40000,
+		.pcb_temp_level			= 25000,
 		.max_opp			= 1008000,
 		.duty_cycle_enabled		= false,
 		.tduty_params = {
@@ -227,7 +227,7 @@ static struct pcb_section omap4_duty_governor_pcb_sections[] = {
 		},
 	},
 	{
-		.pcb_temp_level			= 45000,
+		.pcb_temp_level			= 30000,
 		.max_opp			= 1008000,
 		.duty_cycle_enabled		= true,
 		.tduty_params = {
@@ -238,7 +238,7 @@ static struct pcb_section omap4_duty_governor_pcb_sections[] = {
 		},
 	},
 	{
-		.pcb_temp_level			= 50000,
+		.pcb_temp_level			= 35000,
 		.max_opp			= 1008000,
 		.duty_cycle_enabled		= true,
 		.tduty_params = {
@@ -249,7 +249,7 @@ static struct pcb_section omap4_duty_governor_pcb_sections[] = {
 		},
 	},
 	{
-		.pcb_temp_level			= 60000,
+		.pcb_temp_level			= 40000,
 		.max_opp			= 800000,
 		.duty_cycle_enabled		= true,
 		.tduty_params = {
@@ -260,7 +260,7 @@ static struct pcb_section omap4_duty_governor_pcb_sections[] = {
 		},
 	},
 	{
-		.pcb_temp_level			= 65000,
+		.pcb_temp_level			= 55000,
 		.max_opp			= 800000,
 		.duty_cycle_enabled		= true,
 		.tduty_params = {
@@ -271,7 +271,7 @@ static struct pcb_section omap4_duty_governor_pcb_sections[] = {
 		},
 	},
 	{
-		.pcb_temp_level			= 90000,
+		.pcb_temp_level			= 70000,
 		.max_opp			= 600000,
 		.duty_cycle_enabled		= true,
 		.tduty_params = {
