@@ -758,6 +758,15 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 		       (signed char)(f11->finger_data_buffer[f11->data11_offset]),
 		       f11->finger_data_buffer[f11->data8_offset],
 		       f11->finger_data_buffer[f11->data9_offset]);
+
+		/* Send up a flick gesture as a relative input event */
+		if (flag & HAS_FLICK_MASK) {
+			input_report_rel(function_device->input, REL_X,
+			                 (int8_t)(f11->finger_data_buffer[f11->data10_offset]));
+			input_report_rel(function_device->input, REL_Y,
+			                 (int8_t)(f11->finger_data_buffer[f11->data11_offset]));
+			input_sync(function_device->input); /* sync after groups of events */
+		}
 	}
 #endif
 	if (instance_data->sensor_info->has_absolute)
@@ -787,7 +796,7 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
                 return;
         }
 
-        /* CMM Debugging loggging */
+        /* CMM Debugging logging */
         if (f11->last_finger_down_count == 0 && finger_down_count != 0) {
                 pr_info("%s Starting movement sequence cnt:%d\n", __func__, f11->movement_seq_cnt);
         }
@@ -1156,6 +1165,11 @@ int FN_11_init(struct rmi_function_device *function_device)
 	/* need to init the input abs params for the 2D */
 	set_bit(EV_ABS, function_device->input->evbit);
 	set_bit(EV_SYN, function_device->input->evbit);
+
+        /* NOTE(CMM)_Gesture detection kludge */
+        set_bit(EV_REL, function_device->input->evbit);
+        set_bit(REL_X, function_device->input->relbit);
+        set_bit(REL_Y, function_device->input->relbit);
 
 #ifdef CONFIG_WAKELOCK
         wake_lock_init(&f11->wakelock, WAKE_LOCK_SUSPEND, "touchpad_wakelock");
