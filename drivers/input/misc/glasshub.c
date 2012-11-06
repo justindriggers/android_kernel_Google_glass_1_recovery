@@ -83,7 +83,9 @@
 #define REG_WINK_INHIBIT		30
 #define REG_WINK_STATUS			31
 #define REG_DEBUG			32
-#define REGISTER_FILE_SIZE		33
+#define REG_MIN_PROX_LO			33
+#define REG_MIN_PROX_HI			34
+#define REGISTER_FILE_SIZE		35
 
 #define CMD_BOOT			0xFA
 #define CMD_FLASH			0xF9
@@ -149,8 +151,9 @@
 /* number of samples to take for calibration mean */
 #define NUM_CALIBRATION_SAMPLES		3
 
-/* button values for don/doff and wink */
-#define DON_DOFF_BUTTON			BTN_BASE5
+/* number of samples in prox data buffer */
+#define PROX_QUEUE_SZ			64
+#define PROX_INTERVAL			(1000000000LL / 32)
 
 /*
  * Basic theory of operation:
@@ -207,7 +210,6 @@ struct glasshub_data {
 	struct mutex device_lock;
 	long long irq_timestamp;
 	volatile unsigned long flags;
-	uint8_t irq_enable;
 	uint8_t don_doff_state;
 	uint8_t bootloaderVersion;
 	uint8_t appVersionMajor;
@@ -219,9 +221,8 @@ struct glasshub_data *glasshub_private = NULL;
 /*
  * Filesystem API is implemented with the kernel fifo.
  */
-#define READ_QUEUE_SZ 256
 static DECLARE_WAIT_QUEUE_HEAD(glasshub_read_wait);
-static struct glasshub_data_user glasshub_fifo_buffer[READ_QUEUE_SZ];
+static struct glasshub_data_user glasshub_fifo_buffer[PROX_QUEUE_SZ];
 static struct glasshub_data_user *glasshub_user_wr_ptr = NULL;
 static struct glasshub_data_user *glasshub_user_rd_ptr = NULL;
 static struct mutex glasshub_user_lock;
@@ -464,19 +465,23 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 	int rc = 0;
 	uint8_t status;
 	uint8_t buffer[1];
-	uint16_t data;
+	uint16_t data[PROX_QUEUE_SZ];
+	int proxCount = 0;
+	int i;
+	u64 timestamp;
 
 	/* clear in-service flag */
 	clear_bit(FLAG_WAKE_THREAD, &glasshub->flags);
 
 	mutex_lock(&glasshub->device_lock);
 
-	/* read values from device until IRQ line goes high */
-	while (gpio_get_value(glasshub->pdata->gpio_int_no) == 0) {
+	/* read values from device until all interrupts are cleared */
+	while (1) {
 
 		/* read the IRQ source */
 		rc = _i2c_read_one(glasshub, REG_STATUS, &status);
 		if (rc) goto Error;
+		if (status == 0) break;
 
 		/* process don/doff */
 		if (status & IRQ_DON_DOFF) {
@@ -486,7 +491,14 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 			if (rc) goto Error;
 			dev_info(&glasshub->i2c_client->dev, "%s: don/doff state = %u\n",
 					__FUNCTION__, glasshub->don_doff_state);
-			sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "don_doff_state");
+			sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "don_doff");
+		}
+
+		/* process wink signal */
+		if (status & IRQ_WINK) {
+			dev_info(&glasshub->i2c_client->dev, "%s: wink signal received\n",
+					__FUNCTION__);
+			sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "wink");
 		}
 
 		/* process prox data */
@@ -499,62 +511,49 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 			if (rc) goto Error;
 
 			/* save LSB */
-			data = buffer[0];
+			data[proxCount] = buffer[0];
 			buffer[0] = REG_PROX_DATA_HI;
 
 			/* read MSB */
 			rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
 			if (rc) goto Error;
 
-			/* queue sample into FIFO and wakeup userspace */
-			data |= (uint16_t) buffer[0] << 8;
-			input_report_abs(glasshub->ps_input_dev, ABS_DISTANCE, data);
-			input_sync(glasshub->ps_input_dev);
-
-			/* raw misc driver */
-			glasshub_user_wr_ptr->value = data;
-			glasshub_user_wr_ptr->timestamp = glasshub->irq_timestamp;
-
-			mutex_lock(&glasshub_user_lock);
-			glasshub_user_wr_ptr++;
-			if (glasshub_user_wr_ptr == (glasshub_fifo_buffer + READ_QUEUE_SZ)) {
-				glasshub_user_wr_ptr = glasshub_fifo_buffer;
+			/* buffer up data (drop data that exceeds our buffer length) */
+			if (proxCount < PROX_QUEUE_SZ) {
+				data[proxCount++] |= (uint16_t) buffer[0] << 8;
 			}
-			mutex_unlock(&glasshub_user_lock);
-
-			wake_up_interruptible(&glasshub_read_wait);
-			/* end raw misc driver */
-		}
-
-		if (status & IRQ_WINK) {
-			dev_info(&glasshub->i2c_client->dev, "%s: wink signal received\n",
-					__FUNCTION__);
-			sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "wink");
 		}
 	}
-	mutex_unlock(&glasshub->device_lock);
 
+	/* pass prox data to user space */
+	if (proxCount) {
+		mutex_lock(&glasshub_user_lock);
+
+		/* backdate timestamps */
+		timestamp = glasshub->irq_timestamp - (proxCount - 1) * PROX_INTERVAL;
+
+		for (i = 0; i < proxCount; i++) {
+			glasshub_user_wr_ptr->value = data[i];
+			glasshub_user_wr_ptr->timestamp = timestamp;
+			timestamp += PROX_INTERVAL;
+			glasshub_user_wr_ptr++;
+			if (glasshub_user_wr_ptr == (glasshub_fifo_buffer + PROX_QUEUE_SZ)) {
+				glasshub_user_wr_ptr = glasshub_fifo_buffer;
+			}
+		}
+
+		/* wake up user space */
+		wake_up_interruptible(&glasshub_read_wait);
+		mutex_unlock(&glasshub_user_lock);
+	}
+
+	mutex_unlock(&glasshub->device_lock);
 	return IRQ_HANDLED;
 
 Error:
 	mutex_unlock(&glasshub->device_lock);
 	dev_err(&glasshub->i2c_client->dev, "%s: device read error\n", __FUNCTION__);
 	return IRQ_HANDLED;
-}
-
-/* enable/disable interrupts from the device */
-static int set_interrupt_state_l(struct glasshub_data *glasshub, uint8_t interrupt, int enable)
-{
-	int rc;
-	dev_info(&glasshub->i2c_client->dev, "%s: interrupt = 0x%08x enable = %d\n",
-			__FUNCTION__, interrupt, enable);
-	if (enable) {
-		glasshub->irq_enable |= interrupt;
-	} else {
-		glasshub->irq_enable &= ~interrupt;
-	}
-	rc = _i2c_write_reg(glasshub, REG_ENABLE_INT, glasshub->irq_enable); 
-	return rc;
 }
 
 /* common routine to return an I2C register to userspace */
@@ -632,7 +631,6 @@ static ssize_t don_doff_enable_store(struct device *dev, struct device_attribute
 	uint8_t enable = parse_enable(buf);
 	mutex_lock(&glasshub->device_lock);
 	boot_device_l(glasshub);
-	set_interrupt_state_l(glasshub, IRQ_DON_DOFF, enable);
 	_i2c_write_reg(glasshub, REG_ENABLE_DON_DOFF, enable); 
 	mutex_unlock(&glasshub->device_lock);
 	return count;
@@ -652,7 +650,6 @@ static ssize_t passthru_enable_store(struct device *dev, struct device_attribute
 	uint8_t enable = parse_enable(buf);
 	mutex_lock(&glasshub->device_lock);
 	boot_device_l(glasshub);
-	set_interrupt_state_l(glasshub, IRQ_PASSTHRU, enable);
 	_i2c_write_reg(glasshub, REG_ENABLE_PASSTHRU, enable); 
 	mutex_unlock(&glasshub->device_lock);
 	return count;
@@ -678,6 +675,34 @@ static int read_prox_raw(struct glasshub_data *glasshub, uint16_t *pProxData)
 		}
 	}
 	return rc;
+}
+
+/* show minimum prox value */
+static ssize_t proxmin_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int rc;
+	uint16_t data = 0xffff;
+	uint8_t buffer[1];
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+
+	mutex_lock(&glasshub->device_lock);
+	boot_device_l(glasshub);
+	buffer[0] = REG_MIN_PROX_LO;
+	rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
+	if (rc == 0) {
+		data = buffer[0];
+		buffer[0] = REG_MIN_PROX_HI;
+		rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
+		if (rc == 0) {
+			data |= (uint16_t) buffer[0] << 8;
+		}
+	}
+	mutex_unlock(&glasshub->device_lock);
+
+	if (rc) {
+		dev_err(dev, "Comm error in %s\n", __FUNCTION__);
+	}
+	return sprintf(buf, "%u\n", data);
 }
 
 /* show raw prox value */
@@ -955,7 +980,6 @@ static ssize_t wink_enable_store(struct device *dev, struct device_attribute *at
 	uint8_t enable = parse_enable(buf);
 	mutex_lock(&glasshub->device_lock);
 	boot_device_l(glasshub);
-	set_interrupt_state_l(glasshub, IRQ_WINK, enable);
 	_i2c_write_reg(glasshub, REG_ENABLE_WINK, enable); 
 	mutex_unlock(&glasshub->device_lock);
 	return count;
@@ -1325,11 +1349,19 @@ static ssize_t update_fw_enable_show(struct device *dev, struct device_attribute
 	return sprintf(buf, "%d\n", enable);
 }
 
+/* show state of IRQ */
+static ssize_t irq_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	return sprintf(buf, "%d\n", gpio_get_value(glasshub->pdata->gpio_int_no));
+}
+
 static DEVICE_ATTR(update_fw_enable, DEV_MODE_RW, update_fw_enable_show, update_fw_enable_store);
 static DEVICE_ATTR(version, DEV_MODE_RO, version_show, NULL);
 static DEVICE_ATTR(bootloader_version, DEV_MODE_RO, bootloader_version_show, NULL);
 static DEVICE_ATTR(passthru_enable, DEV_MODE_RW, passthru_enable_show, passthru_enable_store);
 static DEVICE_ATTR(proxraw, DEV_MODE_RO, proxraw_show, NULL);
+static DEVICE_ATTR(proxmin, DEV_MODE_RO, proxmin_show, NULL);
 static DEVICE_ATTR(vis, DEV_MODE_RO, vis_show, NULL);
 static DEVICE_ATTR(ir, DEV_MODE_RO, ir_show, NULL);
 static DEVICE_ATTR(don_doff_enable, DEV_MODE_RW, don_doff_enable_show, don_doff_enable_store);
@@ -1346,12 +1378,14 @@ static DEVICE_ATTR(wink_inhibit, DEV_MODE_RW, wink_inhibit_show, wink_inhibit_st
 static DEVICE_ATTR(detector_gain, DEV_MODE_RW, detector_gain_show, detector_gain_store);
 static DEVICE_ATTR(debug, DEV_MODE_RW, debug_show, debug_store);
 static DEVICE_ATTR(error_code, DEV_MODE_RO, error_code_show, NULL);
+static DEVICE_ATTR(irq, DEV_MODE_RO, irq_show, NULL);
 
 static struct attribute *attrs[] = {
 	&dev_attr_version.attr,
 	&dev_attr_bootloader_version.attr,
 	&dev_attr_passthru_enable.attr,
 	&dev_attr_proxraw.attr,
+	&dev_attr_proxmin.attr,
 	&dev_attr_ir.attr,
 	&dev_attr_vis.attr,
 	&dev_attr_don_doff_enable.attr,
@@ -1369,6 +1403,7 @@ static struct attribute *attrs[] = {
 	&dev_attr_detector_gain.attr,
 	&dev_attr_debug.attr,
 	&dev_attr_error_code.attr,
+	&dev_attr_irq.attr,
 	NULL
 };
 
@@ -1483,8 +1518,8 @@ static ssize_t glasshub_read(struct file *file, char __user *buf, size_t count, 
 	if (count < sizeof(struct glasshub_data_user))
 		return -EINVAL;
 
-	if (count > READ_QUEUE_SZ * sizeof(struct glasshub_data_user))
-		count = READ_QUEUE_SZ * sizeof(struct glasshub_data_user);
+	if (count > PROX_QUEUE_SZ * sizeof(struct glasshub_data_user))
+		count = PROX_QUEUE_SZ * sizeof(struct glasshub_data_user);
 
 	if (mutex_lock_interruptible(&glasshub_user_lock)) {
 			dev_err(&client->dev, "%s: Unable to acquire user read lock\n", __func__);
@@ -1517,7 +1552,7 @@ static ssize_t glasshub_read(struct file *file, char __user *buf, size_t count, 
 		count -= sizeof(struct glasshub_data_user);
 
 		glasshub_user_rd_ptr++;
-		if (glasshub_user_rd_ptr == (glasshub_fifo_buffer + READ_QUEUE_SZ)) {
+		if (glasshub_user_rd_ptr == (glasshub_fifo_buffer + PROX_QUEUE_SZ)) {
 			glasshub_user_rd_ptr = glasshub_fifo_buffer;
 		}
 	}
@@ -1557,10 +1592,30 @@ static int glasshub_setup(struct glasshub_data *glasshub) {
 	rc = get_app_version_l(glasshub);
 	if (rc) goto err_out;
 
+	/* check bootloader version */
+	if (glasshub->bootloaderVersion < 3) {
+		dev_err(&glasshub->i2c_client->dev,
+				"%s: MCU bootloader is down-rev: %u\n",
+				__FUNCTION__, glasshub->bootloaderVersion);
+		rc = -EIO;
+		goto err_out;
+	}
+
+	/* check app code version */
+	if ((glasshub->appVersionMajor == 0) && (glasshub->appVersionMinor < 7)) {
+		dev_err(&glasshub->i2c_client->dev,
+				"%s: MCU application code is down-rev: %u.%u\n",
+				__FUNCTION__,
+				glasshub->appVersionMajor,
+				glasshub->appVersionMinor);
+		rc = -EIO;
+		goto err_out;
+	}
+
 	/* request IRQ */
 	dev_info(&glasshub->i2c_client->dev, "%s call request_threaded_irq\n", __FUNCTION__);
 	rc = request_threaded_irq(glasshub->pdata->irq, glasshub_irq_handler,
-			glasshub_threaded_irq_handler, IRQF_TRIGGER_FALLING | IRQF_SHARED,
+			glasshub_threaded_irq_handler, IRQF_TRIGGER_FALLING,
 			"glasshub_irq", glasshub);
 	if (rc) {
 		dev_err(&glasshub->i2c_client->dev, "%s request_threaded_irq failed\n",
@@ -1578,7 +1633,7 @@ err_out:
 	return rc;
 }
 
-static int	__devinit glasshub_probe(struct i2c_client *i2c_client,
+static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 		const struct i2c_device_id *id)
 {
 	struct glasshub_data *glasshub = NULL;
@@ -1592,7 +1647,6 @@ static int	__devinit glasshub_probe(struct i2c_client *i2c_client,
 
 	/* initialize data structure */
 	glasshub->i2c_client = i2c_client;
-	glasshub->irq_enable = 0;
 	glasshub->flags = 0;
 	mutex_init(&glasshub->device_lock);
 
