@@ -1255,6 +1255,15 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 	if (kstrtoul(buf, 10, &value)) {
 		goto err_out;
 	}
+
+	/* version 2 bootloader was borked, disable firmware update */
+	if (glasshub->bootloaderVersion == 2) {
+		dev_info(&glasshub->i2c_client->dev,
+				"%s MCU bootloader is down-rev, update function disabled\n",
+				__FUNCTION__);
+		goto err_out;
+	}
+
 	dev_info(&glasshub->i2c_client->dev, "%s update_fw_enable = %lu\n", __FUNCTION__, value);
 
 	mutex_lock(&glasshub->device_lock);
@@ -1594,22 +1603,26 @@ static int glasshub_setup(struct glasshub_data *glasshub) {
 
 	/* check bootloader version */
 	if (glasshub->bootloaderVersion < 3) {
-		dev_err(&glasshub->i2c_client->dev,
-				"%s: MCU bootloader is down-rev: %u\n",
+		dev_info(&glasshub->i2c_client->dev,
+				"%s: WARNING: MCU bootloader is down-rev: %u\n",
 				__FUNCTION__, glasshub->bootloaderVersion);
+		/* TODO: Turn this back into an error
 		rc = -EIO;
 		goto err_out;
+		*/
 	}
 
 	/* check app code version */
 	if ((glasshub->appVersionMajor == 0) && (glasshub->appVersionMinor < 7)) {
-		dev_err(&glasshub->i2c_client->dev,
-				"%s: MCU application code is down-rev: %u.%u\n",
+		dev_info(&glasshub->i2c_client->dev,
+				"%s: WARNING: MCU application code is down-rev: %u.%u\n",
 				__FUNCTION__,
 				glasshub->appVersionMajor,
 				glasshub->appVersionMinor);
+		/* TODO: Turn this back into an error
 		rc = -EIO;
 		goto err_out;
+		*/
 	}
 
 	/* request IRQ */
