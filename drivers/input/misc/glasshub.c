@@ -255,8 +255,6 @@ static int _i2c_read(struct glasshub_data *glasshub, uint8_t *txData, int txLeng
 		if (i2c_transfer(glasshub->i2c_client->adapter, data, 2) > 0)
 			break;
 		/* Delay before retrying */
-		dev_warn(&glasshub->i2c_client->dev, "%s Retried read count:%d\n",
-				__FUNCTION__, i);
 		mdelay(10);
 	}
 
@@ -287,8 +285,6 @@ static int _i2c_write_mult(struct glasshub_data *glasshub, uint8_t *txData, int 
 		if (i2c_transfer(glasshub->i2c_client->adapter, data, 1) > 0)
 			break;
 		/* Delay before retrying */
-		dev_warn(&glasshub->i2c_client->dev, "%s Retried read count:%d\n",
-				__FUNCTION__, i);
 		mdelay(10);
 	}
 
@@ -364,8 +360,6 @@ int boot_device_l(struct glasshub_data *glasshub)
 	/* tell glass hub to boot */
 	temp = CMD_BOOT;
 	for (retry = 0; retry < 5; retry++) {
-		dev_info(&glasshub->i2c_client->dev, "%s Attempt %d to boot glasshub device\n",
-				__FUNCTION__, retry);
 		rc = _i2c_write_mult(glasshub, &temp, sizeof(temp));
 		msleep(50);
 		if (rc == 0) break;
@@ -377,16 +371,12 @@ int boot_device_l(struct glasshub_data *glasshub)
 	}
 
 	/* verify part ID */
-	dev_info(&glasshub->i2c_client->dev, "%s Attempt to verify glasshub part ID\n",
-			__FUNCTION__);
 	if (_check_part_id(glasshub)) {
 		rc = -ENODEV;
 		goto err_out;
 	}
 
 	/* get current don/doff state */
-	dev_info(&glasshub->i2c_client->dev, "%s Attempt to read glasshub don/doff status\n",
-			__FUNCTION__);
 	_i2c_read_one(glasshub, REG_DON_DOFF, &glasshub->don_doff_state);
 
 	set_bit(FLAG_DEVICE_BOOTED, &glasshub->flags);
@@ -406,8 +396,6 @@ int reset_device_l(struct glasshub_data *glasshub, int force)
 
 	/* reset glass hub */
 	for (retry = 0; retry < 5; retry++) {
-		dev_info(&glasshub->i2c_client->dev, "%s Attempt %d to reset glasshub device\n",
-				__FUNCTION__, retry);
 		temp = REG_RESET;
 		rc = _i2c_write_mult(glasshub, &temp, sizeof(temp));
 		if (rc == 0) break;
@@ -1051,16 +1039,14 @@ static int get_app_version_l(struct glasshub_data *glasshub)
 	uint8_t buffer[2];
 
 	/* get current app version number */
-	dev_info(&glasshub->i2c_client->dev, "%s Attempt to get glasshub firmwware version\n",
-			__FUNCTION__);
 	buffer[0] = CMD_APP_VERSION;
 	rc = _i2c_read(glasshub, buffer, 1, buffer, sizeof(buffer));
 	if (rc) {
 		dev_err(&glasshub->i2c_client->dev, "%s Error getting firmware version: %d\n",
 				__FUNCTION__, rc);
 	} else {
-		dev_info(&glasshub->i2c_client->dev, "%s Firmware version: %d.%d\n",
-				__FUNCTION__, buffer[0], buffer[1]);
+		dev_info(&glasshub->i2c_client->dev, "Firmware version: %d.%d\n",
+				buffer[0], buffer[1]);
 		glasshub->appVersionMajor = buffer[0];
 		glasshub->appVersionMinor = buffer[1];
 	}
@@ -1486,9 +1472,6 @@ static int glasshub_open(struct inode *inode, struct file *file)
 
 	glasshub_user_rd_ptr = glasshub_user_wr_ptr;
 	mutex_unlock(&glasshub_user_lock);
-
-	dev_info(&client->dev, "%s: Opened device\n", __func__);
-	dev_info(&client->dev, "%p %s\n", inode, inode->i_sb->s_id);
 	return 0;
 }
 
@@ -1503,8 +1486,6 @@ static int glasshub_release(struct inode *inode, struct file *file)
 		return -EBUSY;
 	}
 	atomic_set(&glasshub_opened, 0);
-
-	dev_info(&client->dev, "%s: Closed device\n", __func__);
 	return 0;
 }
 
@@ -1626,7 +1607,6 @@ static int glasshub_setup(struct glasshub_data *glasshub) {
 	}
 
 	/* request IRQ */
-	dev_info(&glasshub->i2c_client->dev, "%s call request_threaded_irq\n", __FUNCTION__);
 	rc = request_threaded_irq(glasshub->pdata->irq, glasshub_irq_handler,
 			glasshub_threaded_irq_handler, IRQF_TRIGGER_FALLING,
 			"glasshub_irq", glasshub);
@@ -1636,7 +1616,6 @@ static int glasshub_setup(struct glasshub_data *glasshub) {
 	}
 
 	/* Allow this interrupt to wake the system */
-	dev_info(&glasshub->i2c_client->dev, "%s call irq_set_irq_wake\n", __FUNCTION__);
 	rc = irq_set_irq_wake(glasshub->pdata->irq, 1);
 	if (rc) {
 		dev_err(&glasshub->i2c_client->dev, "%s irq_set_irq_wake failed\n", __FUNCTION__);
@@ -1683,12 +1662,14 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 	/* register sysfs entries */
 	sysfs_register_class_input_entry_glasshub(glasshub, i2c_client);
 
+#if 0
 	/* Setup the suspend and resume functionality */
 	INIT_LIST_HEAD(&glasshub->early_suspend.link);
 	glasshub->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
 	glasshub->early_suspend.suspend = glasshub_early_suspend;
 	glasshub->early_suspend.resume = glasshub_late_resume;
 	register_early_suspend(&glasshub->early_suspend);
+#endif
 
 	glasshub_private = glasshub;
 
