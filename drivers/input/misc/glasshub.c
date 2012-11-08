@@ -42,10 +42,10 @@
 
 /* driver name/version */
 #define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.1"
+#define DRIVER_VERSION "0.2"
 
 /* minimum MCU version for this driver */
-#define MINIMUM_MCU_VERSION	8
+#define MINIMUM_MCU_VERSION	9
 
 /* number of retries */
 #define NUMBER_OF_I2C_RETRIES	3
@@ -56,40 +56,28 @@
 #define REG_PART_ID			1
 #define REG_VERSION			2
 #define REG_ENABLE_INT			3
-#define REG_PROX_RAW_DATA		4
-#define REG_PROX_RAW_DATA_LO		5
-#define REG_PROX_RAW_DATA_HI		6
-#define REG_ALS_VIS_DATA		7
-#define REG_ALS_VIS_DATA_LO		8
-#define REG_ALS_VIS_DATA_HI		9
-#define REG_ALS_IR_DATA			10
-#define REG_ALS_IR_DATA_LO		11
-#define REG_ALS_IR_DATA_HI		12
-#define REG_ENABLE_PASSTHRU		13
-#define REG_PROX_DATA			14
-#define REG_PROX_DATA_LO		15
-#define REG_PROX_DATA_HI		16
-#define REG_ENABLE_DON_DOFF		17
-#define REG_DON_DOFF			18
-#define REG_ENABLE_WINK			19
-#define REG_RESERVED			20
-#define REG_DON_DOFF_HYSTERESIS		21
-#define REG_LED_DRIVE			22
-#define REG_ERROR_CODE			23
-#define REG_ADDR_LO			24
-#define REG_ADDR_HI			25
-#define REG_FLASH_DATA			26
-#define REG_DETECTOR_GAIN		27
-#define REG_PROX_PART_ID		28
-#define REG_PROX_SEQ_ID			29
-#define REG_WINK_INHIBIT		30
-#define REG_WINK_STATUS			31
-#define REG_DEBUG			32
+#define REG_ENABLE_PASSTHRU		4
+#define REG_ENABLE_DON_DOFF		5
+#define REG_DON_DOFF			6
+#define REG_ENABLE_WINK			7
+#define REG_DON_DOFF_HYSTERESIS		8
+#define REG_LED_DRIVE			9
+#define REG_ERROR_CODE			10
+#define REG_FLASH_DATA			11
+#define REG_DETECTOR_GAIN		12
+#define REG_PROX_PART_ID		13
+#define REG_PROX_SEQ_ID			14
+#define REG_WINK_INHIBIT		15
+#define REG_WINK_STATUS			16
+#define REG_DEBUG			17
 
 /* 16-bit registers */
 #define REG16_DETECTOR_BIAS		0x80
 #define REG16_DON_DOFF_THRESH		0x81
 #define REG16_MIN_PROX			0x82
+#define REG16_PROX_RAW			0x83
+#define REG16_PROX_DATA			0x84
+#define REG16_ADDRESS			0x85
 
 #define CMD_BOOT			0xFA
 #define CMD_FLASH			0xF9
@@ -147,8 +135,7 @@
 #define FW_STATE_CHECKSUM_LO		15
 
 /* location of calibration data */
-#define CALIB_ADDR_HI			0x9f
-#define CALIB_ADDR_LO			0xf0
+#define CALIB_ADDRESS			0x9ff0
 
 /* number of samples to take for calibration mean */
 #define NUM_CALIBRATION_SAMPLES		3
@@ -297,19 +284,41 @@ static int _i2c_write_mult(struct glasshub_data *glasshub, uint8_t *txData, int 
 }
 
 /*
+ * I2C bus transaction to read a register
+ * Returns 0 on success.
+ */
+static int _i2c_read_reg(struct glasshub_data *glasshub, uint8_t reg, unsigned *value)
+{
+	int rc = 0;
+	uint8_t buffer[2];
+	*value = 0xffff;
+
+	buffer[0] = reg;
+	buffer[1] = 0;
+	if (reg & 0x80) {
+		rc = _i2c_read(glasshub, buffer, 1, buffer, 2);
+		if (rc == 0) {
+			*value = buffer[0] | (unsigned) buffer[1] << 8;
+		}
+	} else {
+		rc = _i2c_read(glasshub, buffer, 1, buffer, 1);
+		if (rc == 0) {
+			*value = buffer[0];
+		}
+	}
+	return rc;
+}
+
+/*
  * I2C bus transaction to read single byte.
  * Returns 0 on success.
  */
-static int _i2c_read_one(struct glasshub_data *glasshub, uint8_t addr, uint8_t *data)
+static int _i2c_read_reg8(struct glasshub_data *glasshub, uint8_t reg, uint8_t *data)
 {
-	int rc = 0;
-	uint8_t buffer[1];
-
-	buffer[0] = addr;
-	rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
-	if (rc == 0) {
-		*data = buffer[0];
-	}
+	int rc;
+	unsigned value;
+	rc = _i2c_read_reg(glasshub, reg, &value);
+	*data = (uint8_t) value;
 	return rc;
 }
 
@@ -317,23 +326,43 @@ static int _i2c_read_one(struct glasshub_data *glasshub, uint8_t addr, uint8_t *
  * I2C bus transaction to write register
  * Returns 0 on success.
  */
-static int _i2c_write_reg(struct glasshub_data *glasshub, uint8_t reg, uint8_t data)
-{
-	uint8_t buffer[2];
-
-	buffer[0] = reg;
-	buffer[1] = data;
-	return _i2c_write_mult(glasshub, buffer, sizeof(buffer));
-}
-
-static int _i2c_write_reg16(struct glasshub_data *glasshub, uint8_t reg, uint16_t data)
+static int _i2c_write_reg(struct glasshub_data *glasshub, uint8_t reg, uint16_t data)
 {
 	uint8_t buffer[3];
 
 	buffer[0] = reg;
 	buffer[1] = data & 0xff;
 	buffer[2] = (data >> 8) & 0xff;
-	return _i2c_write_mult(glasshub, buffer, sizeof(buffer));
+	return _i2c_write_mult(glasshub, buffer, reg & 0x80 ? 3 : 2);
+}
+
+/* read an 8-bit value from glasshub memory */
+static int read_glasshub_memory(struct glasshub_data *glasshub, uint16_t addr, unsigned *value)
+{
+	int rc;
+
+	*value = 0;
+
+	/* send address */
+	rc = _i2c_write_reg(glasshub, REG16_ADDRESS, addr);
+	if (rc) goto Error;
+
+	/* read data */
+	rc = _i2c_read_reg(glasshub, REG_FLASH_DATA, value);
+
+Error:
+	return rc;
+}
+
+static int write_glasshub_memory(struct glasshub_data *glasshub, uint16_t addr, uint8_t value)
+{
+	int rc;
+
+	rc = _i2c_write_reg(glasshub, REG16_ADDRESS, addr);
+	if (rc == 0) {
+		_i2c_write_reg(glasshub, REG_FLASH_DATA, value);
+	}
+	return rc;
 }
 
 static int _check_part_id(struct glasshub_data *glasshub)
@@ -344,7 +373,7 @@ static int _check_part_id(struct glasshub_data *glasshub)
 
 	dev_info(&i2c_client->dev, "%s\n", __FUNCTION__);
 
-	rc = _i2c_read_one(glasshub, REG_PART_ID, &data);
+	rc = _i2c_read_reg8(glasshub, REG_PART_ID, &data);
 	if (rc < 0) {
 		dev_err(&i2c_client->dev, "%s: Unable to read part identifier\n", __FUNCTION__);
 		return -EIO;
@@ -388,7 +417,7 @@ int boot_device_l(struct glasshub_data *glasshub)
 	}
 
 	/* get current don/doff state */
-	_i2c_read_one(glasshub, REG_DON_DOFF, &glasshub->don_doff_state);
+	_i2c_read_reg8(glasshub, REG_DON_DOFF, &glasshub->don_doff_state);
 
 	set_bit(FLAG_DEVICE_BOOTED, &glasshub->flags);
 
@@ -447,7 +476,6 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 	struct glasshub_data *glasshub = (struct glasshub_data*) dev_id;
 	int rc = 0;
 	uint8_t status;
-	uint8_t buffer[1];
 	uint16_t data[PROX_QUEUE_SZ];
 	int proxCount = 0;
 	int i;
@@ -458,54 +486,43 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 
 	mutex_lock(&glasshub->device_lock);
 
-	/* read values from device until all interrupts are cleared */
-	while (1) {
+	/* read the IRQ source */
+	rc = _i2c_read_reg8(glasshub, REG_STATUS, &status);
+	if (rc) goto Error;
 
-		/* read the IRQ source */
-		rc = _i2c_read_one(glasshub, REG_STATUS, &status);
+	/* process don/doff */
+	if (status & IRQ_DON_DOFF) {
+		dev_info(&glasshub->i2c_client->dev, "%s: don/doff signal received\n",
+				__FUNCTION__);
+		rc = _i2c_read_reg8(glasshub, REG_DON_DOFF, &glasshub->don_doff_state);
 		if (rc) goto Error;
-		if (status == 0) break;
+		dev_info(&glasshub->i2c_client->dev, "%s: don/doff state = %u\n",
+				__FUNCTION__, glasshub->don_doff_state);
+		sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "don_doff");
+	}
 
-		/* process don/doff */
-		if (status & IRQ_DON_DOFF) {
-			dev_info(&glasshub->i2c_client->dev, "%s: don/doff signal received\n",
-					__FUNCTION__);
-			rc = _i2c_read_one(glasshub, REG_DON_DOFF, &glasshub->don_doff_state);
-			if (rc) goto Error;
-			dev_info(&glasshub->i2c_client->dev, "%s: don/doff state = %u\n",
-					__FUNCTION__, glasshub->don_doff_state);
-			sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "don_doff");
+	/* process wink signal */
+	if (status & IRQ_WINK) {
+		dev_info(&glasshub->i2c_client->dev, "%s: wink signal received\n",
+				__FUNCTION__);
+		sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "wink");
+	}
+
+	/* process prox data */
+	while (status & IRQ_PASSTHRU) {
+		unsigned value = 0;
+
+		/* read value */
+		rc = _i2c_read_reg(glasshub, REG16_PROX_DATA, &value);
+		if (rc) goto Error;
+
+		/* buffer up data (drop data that exceeds our buffer length) */
+		if (proxCount < PROX_QUEUE_SZ) {
+			data[proxCount++] = (uint16_t) value & 0x7fff;
 		}
 
-		/* process wink signal */
-		if (status & IRQ_WINK) {
-			dev_info(&glasshub->i2c_client->dev, "%s: wink signal received\n",
-					__FUNCTION__);
-			sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "wink");
-		}
-
-		/* process prox data */
-		if (status & IRQ_PASSTHRU) {
-
-			/* TODO: fix the 16-bit read */
-			/* read LSB */
-			buffer[0] = REG_PROX_DATA_LO;
-			rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
-			if (rc) goto Error;
-
-			/* save LSB */
-			data[proxCount] = buffer[0];
-			buffer[0] = REG_PROX_DATA_HI;
-
-			/* read MSB */
-			rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
-			if (rc) goto Error;
-
-			/* buffer up data (drop data that exceeds our buffer length) */
-			if (proxCount < PROX_QUEUE_SZ) {
-				data[proxCount++] |= (uint16_t) buffer[0] << 8;
-			}
-		}
+		/* check for end of data */
+		if (value & 0x8000) break;
 	}
 
 	/* pass prox data to user space */
@@ -542,27 +559,12 @@ Error:
 /* common routine to return an I2C register to userspace */
 static ssize_t show_reg(struct device *dev, char *buf, uint8_t reg)
 {
-	int rc;
-	uint8_t buffer[2];
 	unsigned value = 0xffff;
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 
 	mutex_lock(&glasshub->device_lock);
 	boot_device_l(glasshub);
-
-	/* handle 16-bit registers */
-	buffer[0] = reg;
-	if (reg >= 0x80) {
-		rc = _i2c_read(glasshub, buffer, 1, buffer, sizeof(buffer));
-		if (rc == 0) {
-			value = buffer[0] | (unsigned) buffer[1] << 8;
-		}
-	} else {
-		rc = _i2c_read(glasshub, buffer, 1, buffer, 1);
-		if (rc == 0) {
-			value = buffer[0];
-		}
-	}
+	_i2c_read_reg(glasshub, reg, &value);
 	mutex_unlock(&glasshub->device_lock);
 
 	return sprintf(buf, "%u\n", value);
@@ -570,11 +572,11 @@ static ssize_t show_reg(struct device *dev, char *buf, uint8_t reg)
 
 /* common routine to set an I2C register from userspace */
 static ssize_t store_reg(struct device *dev, const char *buf, size_t count,
-		uint8_t reg, uint8_t min, uint8_t max)
+		uint8_t reg, uint16_t min, uint16_t max)
 {
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-	uint8_t value = 0;
-	if (!kstrtou8(buf, 10, &value)) {
+	unsigned long value = 0;
+	if (!kstrtoul(buf, 10, &value)) {
 		value = (value < min) ? min : value;
 		value = (value > max) ? max : value;
 		mutex_lock(&glasshub->device_lock);
@@ -583,16 +585,6 @@ static ssize_t store_reg(struct device *dev, const char *buf, size_t count,
 		mutex_unlock(&glasshub->device_lock);
 	}
 	return count;
-}
-
-/* parses a value from user space into an enable bit, i.e. 1 or 0 */
-static uint8_t parse_enable(const char* buf)
-{
-	uint8_t enable = 0;
-	if (!kstrtou8(buf, 10, &enable)) {
-		enable = enable ? 1 : 0;
-	}
-	return enable;
 }
 
 /* show the application version number */
@@ -625,13 +617,7 @@ static ssize_t don_doff_enable_show(struct device *dev, struct device_attribute 
 static ssize_t don_doff_enable_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-	uint8_t enable = parse_enable(buf);
-	mutex_lock(&glasshub->device_lock);
-	boot_device_l(glasshub);
-	_i2c_write_reg(glasshub, REG_ENABLE_DON_DOFF, enable); 
-	mutex_unlock(&glasshub->device_lock);
-	return count;
+	return store_reg(dev, buf, count, REG_ENABLE_DON_DOFF, 0, 1);
 }
 
 /* show prox passthrough mode */
@@ -644,33 +630,19 @@ static ssize_t passthru_enable_show(struct device *dev, struct device_attribute 
 static ssize_t passthru_enable_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-	uint8_t enable = parse_enable(buf);
-	mutex_lock(&glasshub->device_lock);
-	boot_device_l(glasshub);
-	_i2c_write_reg(glasshub, REG_ENABLE_PASSTHRU, enable); 
-	mutex_unlock(&glasshub->device_lock);
-	return count;
+	return store_reg(dev, buf, count, REG_ENABLE_PASSTHRU, 0, 1);
 }
 
 /* read prox value */
 static int read_prox_raw(struct glasshub_data *glasshub, uint16_t *pProxData)
 {
 	int rc;
-	uint8_t buffer[1];
-	uint16_t data;
+	unsigned data;
 
 	*pProxData = 0xffff;
-	buffer[0] = REG_PROX_RAW_DATA_LO;
-	rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
+	rc = _i2c_read_reg(glasshub, REG16_PROX_RAW, &data);
 	if (rc == 0) {
-		data = buffer[0];
-		buffer[0] = REG_PROX_RAW_DATA_HI;
-		rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
-		if (rc == 0) {
-			data |= (uint16_t) buffer[0] << 8;
-			*pProxData = data;
-		}
+		*pProxData = (uint16_t) data;
 	}
 	return rc;
 }
@@ -684,76 +656,22 @@ static ssize_t proxmin_show(struct device *dev, struct device_attribute *attr, c
 /* show raw prox value */
 static ssize_t proxraw_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	int rc;
-	uint16_t data;
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-
-	mutex_lock(&glasshub->device_lock);
-	boot_device_l(glasshub);
-	rc = read_prox_raw(glasshub, &data);
-	mutex_unlock(&glasshub->device_lock);
-
-	if (rc) {
-		dev_err(dev, "Comm error in %s\n", __FUNCTION__);
-	}
-	return sprintf(buf, "%u\n", data);
+	return show_reg(dev, buf, REG16_PROX_RAW);
 }
 
 /* show raw IR value */
 static ssize_t ir_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	int rc;
-	uint8_t buffer[1];
-	uint16_t data;
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-
-	mutex_lock(&glasshub->device_lock);
-	boot_device_l(glasshub);
-	buffer[0] = REG_ALS_IR_DATA_LO;
-	rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
-	if (rc == 0) {
-		data = buffer[0];
-		buffer[0] = REG_ALS_IR_DATA_HI;
-		rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
-		if (rc == 0) {
-			data |= (uint16_t) buffer[0] << 8;
-		}
-	}
-	mutex_unlock(&glasshub->device_lock);
-
-	if (rc) {
-		data = 0xffff;
-		dev_err(dev, "Comm error in %s\n", __FUNCTION__);
-	}
+	/* TODO implement this!!! */
+	unsigned data = 0xffff;
 	return sprintf(buf, "%u\n", data);
 }
 
 /* show raw visible light value */
 static ssize_t vis_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	int rc;
-	uint8_t buffer[1];
-	uint16_t data;
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-
-	mutex_lock(&glasshub->device_lock);
-	boot_device_l(glasshub);
-	buffer[0] = REG_ALS_VIS_DATA_LO;
-	rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
-	if (rc == 0) {
-		data = buffer[0];
-		buffer[0] = REG_ALS_VIS_DATA_HI;
-		rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
-		if (rc == 0) {
-			data |= (uint16_t) buffer[0] << 8;
-		}
-	}
-	mutex_unlock(&glasshub->device_lock);
-
-	if (rc) {
-		data = 0xffff;
-		dev_err(dev, "Comm error in %s\n", __FUNCTION__);
-	}
+	/* TODO implement this!!! */
+	unsigned data = 0xffff;
 	return sprintf(buf, "%u\n", data);
 }
 
@@ -768,15 +686,7 @@ static ssize_t don_doff_threshold_show(struct device *dev, struct device_attribu
 static ssize_t don_doff_threshold_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-	unsigned long value = 0;
-	if (!kstrtoul(buf, 10, &value)) {
-		mutex_lock(&glasshub->device_lock);
-		boot_device_l(glasshub);
-		_i2c_write_reg16(glasshub, REG16_DON_DOFF_THRESH, (uint16_t)value); 
-		mutex_unlock(&glasshub->device_lock);
-	}
-	return count;
+	return store_reg(dev, buf, count, REG16_DON_DOFF_THRESH, 1, 5000);
 }
 
 /* show don/doff hysteresis value */
@@ -818,6 +728,7 @@ static ssize_t calibrate_store(struct device *dev,
 	int rc;
 	uint8_t led_drive = 0x04;
 	uint8_t value = 0;
+	uint16_t addr;
 
 	glasshub = dev_get_drvdata(dev);
 	if (!kstrtou8(buf, 10, &value) && value) {
@@ -825,7 +736,7 @@ static ssize_t calibrate_store(struct device *dev,
 		boot_device_l(glasshub);
 
 		/* read current drive level */
-		_i2c_read_one(glasshub, REG_LED_DRIVE, &led_drive);
+		_i2c_read_reg8(glasshub, REG_LED_DRIVE, &led_drive);
 
 		/* test all 7 LED levels */
 		for (i = 0; i < 8; i++) {
@@ -858,15 +769,12 @@ static ssize_t calibrate_store(struct device *dev,
 
 		/* write calibration values to flash */
 		if (rc == 0) {
-			_i2c_write_reg(glasshub, REG_ADDR_HI, CALIB_ADDR_HI);
+			addr = CALIB_ADDRESS;
 			for (i = 0; i < 8; i++) {
 
 				/* store calibration data */
-				_i2c_write_reg(glasshub, REG_ADDR_LO, CALIB_ADDR_LO + i * 2);
-				_i2c_write_reg(glasshub, REG_FLASH_DATA, (uint8_t) proxValues[i]);
-				_i2c_write_reg(glasshub, REG_ADDR_LO, CALIB_ADDR_LO + i * 2 + 1);
-				_i2c_write_reg(glasshub, REG_FLASH_DATA,
-						(uint8_t) (proxValues[i] >> 8));
+				write_glasshub_memory(glasshub, addr++, (uint8_t) proxValues[i]);
+				write_glasshub_memory(glasshub, addr++, (uint8_t) (proxValues[i] >> 8));
 			}
 		}
 
@@ -882,27 +790,33 @@ static ssize_t calibrate_store(struct device *dev,
 static ssize_t calibration_values_show(struct device *dev, struct device_attribute *attr,
 		char *buf)
 {
-	uint16_t proxValues[8];
+	int rc;
 	int i;
-	uint8_t temp;
+	unsigned temp;
+	unsigned proxValues[8];
+	uint16_t addr;
 
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 	mutex_lock(&glasshub->device_lock);
 	boot_device_l(glasshub);
 
 	/* read calibration values from flash */
-	_i2c_write_reg(glasshub, REG_ADDR_HI, CALIB_ADDR_HI);
+	memset(proxValues, 0, sizeof(proxValues));
+	addr = CALIB_ADDRESS;
 	for (i = 0; i < 8; i++) {
 
-		/* store calibration data */
-		_i2c_write_reg(glasshub, REG_ADDR_LO, CALIB_ADDR_LO + i * 2);
-		_i2c_read_one(glasshub, REG_FLASH_DATA, &temp);
+		/* read LSB */
+		rc = read_glasshub_memory(glasshub, addr++, &temp);
+		if (rc) goto Error;
 		proxValues[i] = temp;
-		_i2c_write_reg(glasshub, REG_ADDR_LO, CALIB_ADDR_LO + i * 2 + 1);
-		_i2c_read_one(glasshub, REG_FLASH_DATA, &temp);
-		proxValues[i] |= (uint16_t) temp << 8;
+
+		/* read MSB */
+		rc = read_glasshub_memory(glasshub, addr++, &temp);
+		if (rc) goto Error;
+		proxValues[i] |= temp << 8;
 	}
 
+Error:
 	mutex_unlock(&glasshub->device_lock);
 
 	return sprintf(buf, "%u %u %u %u %u %u %u %u\n",
@@ -920,8 +834,8 @@ static ssize_t prox_version_show(struct device *dev, struct device_attribute *at
 
 	mutex_lock(&glasshub->device_lock);
 	boot_device_l(glasshub);
-	_i2c_read_one(glasshub, REG_PROX_PART_ID, &partId);
-	_i2c_read_one(glasshub, REG_PROX_SEQ_ID, &seqId);
+	_i2c_read_reg8(glasshub, REG_PROX_PART_ID, &partId);
+	_i2c_read_reg8(glasshub, REG_PROX_SEQ_ID, &seqId);
 	mutex_unlock(&glasshub->device_lock);
 
 	return sprintf(buf, "0x%02x 0x%02x\n", partId, seqId);
@@ -943,13 +857,7 @@ static ssize_t wink_enable_show(struct device *dev, struct device_attribute *att
 static ssize_t wink_enable_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-	uint8_t enable = parse_enable(buf);
-	mutex_lock(&glasshub->device_lock);
-	boot_device_l(glasshub);
-	_i2c_write_reg(glasshub, REG_ENABLE_WINK, enable); 
-	mutex_unlock(&glasshub->device_lock);
-	return count;
+	return store_reg(dev, buf, count, REG_ENABLE_WINK, 0, 1);
 }
 
 /* show wink inhibit period */
@@ -988,15 +896,7 @@ static ssize_t detector_bias_show(struct device *dev, struct device_attribute *a
 static ssize_t detector_bias_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-	unsigned long value = 0;
-	if (!kstrtoul(buf, 10, &value)) {
-		mutex_lock(&glasshub->device_lock);
-		boot_device_l(glasshub);
-		_i2c_write_reg16(glasshub, REG16_DETECTOR_BIAS, (uint16_t)value); 
-		mutex_unlock(&glasshub->device_lock);
-	}
-	return count;
+	return store_reg(dev, buf, count, REG16_DETECTOR_BIAS, 1, 5000);
 }
 
 /* show last error code from device */
