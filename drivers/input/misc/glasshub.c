@@ -18,7 +18,6 @@
  */
 
 #include <linux/delay.h>
-#include <linux/earlysuspend.h>
 #include <linux/i2c.h>
 #include <linux/gpio.h>
 #include <linux/interrupt.h>
@@ -197,7 +196,6 @@
 struct glasshub_data {
 	struct i2c_client *i2c_client;
 	struct input_dev *ps_input_dev;
-	struct early_suspend early_suspend;
 	const struct glasshub_platform_data *pdata;
 	uint8_t *fw_image;
 	uint32_t fw_dirty[FIRMWARE_NUM_DIRTY_BITS];
@@ -410,22 +408,6 @@ int reset_device_l(struct glasshub_data *glasshub, int force)
 
 err_out:
 	return rc;
-}
-
-static void glasshub_early_suspend(struct early_suspend *h)
-{
-	struct glasshub_data *glasshub = container_of(h, struct glasshub_data, early_suspend);
-	struct i2c_client *i2c_client = glasshub->i2c_client;
-
-	dev_info(&i2c_client->dev, "%s:\n", __FUNCTION__);
-}
-
-static void glasshub_late_resume(struct early_suspend *h)
-{
-	struct glasshub_data *glasshub = container_of(h, struct glasshub_data, early_suspend);
-	struct i2c_client *i2c_client = glasshub->i2c_client;
-
-	dev_info(&i2c_client->dev, "%s:\n", __FUNCTION__);
 }
 
 /* Main interrupt handler. We save a timestamp here and schedule
@@ -1661,15 +1643,6 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 
 	/* register sysfs entries */
 	sysfs_register_class_input_entry_glasshub(glasshub, i2c_client);
-
-#if 0
-	/* Setup the suspend and resume functionality */
-	INIT_LIST_HEAD(&glasshub->early_suspend.link);
-	glasshub->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-	glasshub->early_suspend.suspend = glasshub_early_suspend;
-	glasshub->early_suspend.resume = glasshub_late_resume;
-	register_early_suspend(&glasshub->early_suspend);
-#endif
 
 	glasshub_private = glasshub;
 
