@@ -44,10 +44,13 @@
 #define DEVICE_NAME "glasshub"
 #define DRIVER_VERSION "0.1"
 
+/* minimum MCU version for this driver */
+#define MINIMUM_MCU_VERSION	8
+
 /* number of retries */
 #define NUMBER_OF_I2C_RETRIES	3
 
-/* commands for the glass hub MCU */
+/* 8-bit registers for the glass hub MCU */
 #define REG_RESET			0
 #define REG_STATUS			0
 #define REG_PART_ID			1
@@ -69,7 +72,7 @@
 #define REG_ENABLE_DON_DOFF		17
 #define REG_DON_DOFF			18
 #define REG_ENABLE_WINK			19
-#define REG_DON_DOFF_THRESHOLD		20
+#define REG_RESERVED			20
 #define REG_DON_DOFF_HYSTERESIS		21
 #define REG_LED_DRIVE			22
 #define REG_ERROR_CODE			23
@@ -82,9 +85,11 @@
 #define REG_WINK_INHIBIT		30
 #define REG_WINK_STATUS			31
 #define REG_DEBUG			32
-#define REG_MIN_PROX_LO			33
-#define REG_MIN_PROX_HI			34
-#define REGISTER_FILE_SIZE		35
+
+/* 16-bit registers */
+#define REG16_DETECTOR_BIAS		0x80
+#define REG16_DON_DOFF_THRESH		0x81
+#define REG16_MIN_PROX			0x82
 
 #define CMD_BOOT			0xFA
 #define CMD_FLASH			0xF9
@@ -98,8 +103,6 @@
 
 /* device ID */
 #define GLASSHUB_PART_ID		0xbb
-
-#define DON_DOFF_OFFSET			256
 
 #define PROX_DATA_FIFO_SIZE		16
 
@@ -323,6 +326,16 @@ static int _i2c_write_reg(struct glasshub_data *glasshub, uint8_t reg, uint8_t d
 	return _i2c_write_mult(glasshub, buffer, sizeof(buffer));
 }
 
+static int _i2c_write_reg16(struct glasshub_data *glasshub, uint8_t reg, uint16_t data)
+{
+	uint8_t buffer[3];
+
+	buffer[0] = reg;
+	buffer[1] = data & 0xff;
+	buffer[2] = (data >> 8) & 0xff;
+	return _i2c_write_mult(glasshub, buffer, sizeof(buffer));
+}
+
 static int _check_part_id(struct glasshub_data *glasshub)
 {
 	int rc = 0;
@@ -529,15 +542,30 @@ Error:
 /* common routine to return an I2C register to userspace */
 static ssize_t show_reg(struct device *dev, char *buf, uint8_t reg)
 {
-	uint8_t data;
+	int rc;
+	uint8_t buffer[2];
+	unsigned value = 0xffff;
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 
 	mutex_lock(&glasshub->device_lock);
 	boot_device_l(glasshub);
-	_i2c_read_one(glasshub, reg, &data);
+
+	/* handle 16-bit registers */
+	buffer[0] = reg;
+	if (reg >= 0x80) {
+		rc = _i2c_read(glasshub, buffer, 1, buffer, sizeof(buffer));
+		if (rc == 0) {
+			value = buffer[0] | (unsigned) buffer[1] << 8;
+		}
+	} else {
+		rc = _i2c_read(glasshub, buffer, 1, buffer, 1);
+		if (rc == 0) {
+			value = buffer[0];
+		}
+	}
 	mutex_unlock(&glasshub->device_lock);
 
-	return sprintf(buf, "%u\n", data);
+	return sprintf(buf, "%u\n", value);
 }
 
 /* common routine to set an I2C register from userspace */
@@ -650,29 +678,7 @@ static int read_prox_raw(struct glasshub_data *glasshub, uint16_t *pProxData)
 /* show minimum prox value */
 static ssize_t proxmin_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	int rc;
-	uint16_t data = 0xffff;
-	uint8_t buffer[1];
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-
-	mutex_lock(&glasshub->device_lock);
-	boot_device_l(glasshub);
-	buffer[0] = REG_MIN_PROX_LO;
-	rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
-	if (rc == 0) {
-		data = buffer[0];
-		buffer[0] = REG_MIN_PROX_HI;
-		rc = _i2c_read(glasshub, buffer, sizeof(buffer), buffer, sizeof(buffer));
-		if (rc == 0) {
-			data |= (uint16_t) buffer[0] << 8;
-		}
-	}
-	mutex_unlock(&glasshub->device_lock);
-
-	if (rc) {
-		dev_err(dev, "Comm error in %s\n", __FUNCTION__);
-	}
-	return sprintf(buf, "%u\n", data);
+	return show_reg(dev, buf, REG16_MIN_PROX);
 }
 
 /* show raw prox value */
@@ -755,14 +761,7 @@ static ssize_t vis_show(struct device *dev, struct device_attribute *attr, char 
 static ssize_t don_doff_threshold_show(struct device *dev, struct device_attribute *attr,
 		char *buf)
 {
-	uint8_t value = 0;
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-
-	mutex_lock(&glasshub->device_lock);
-	boot_device_l(glasshub);
-	_i2c_read_one(glasshub, REG_DON_DOFF_THRESHOLD, &value);
-	mutex_unlock(&glasshub->device_lock);
-	return sprintf(buf, "%u\n", (unsigned)value + DON_DOFF_OFFSET);
+	return show_reg(dev, buf, REG16_DON_DOFF_THRESH);
 }
 
 /* set don/doff threshold value */
@@ -772,11 +771,9 @@ static ssize_t don_doff_threshold_store(struct device *dev, struct device_attrib
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 	unsigned long value = 0;
 	if (!kstrtoul(buf, 10, &value)) {
-		value = value < DON_DOFF_OFFSET ? 0 : value - DON_DOFF_OFFSET;
-		value = value > 255 ? 255 : value;
 		mutex_lock(&glasshub->device_lock);
 		boot_device_l(glasshub);
-		_i2c_write_reg(glasshub, REG_DON_DOFF_THRESHOLD, (uint8_t)value); 
+		_i2c_write_reg16(glasshub, REG16_DON_DOFF_THRESH, (uint16_t)value); 
 		mutex_unlock(&glasshub->device_lock);
 	}
 	return count;
@@ -979,6 +976,27 @@ static ssize_t detector_gain_store(struct device *dev, struct device_attribute *
 		const char *buf, size_t count)
 {
 	return store_reg(dev, buf, count, REG_DETECTOR_GAIN, 0x01, 0x80);
+}
+
+/* show detector bias */
+static ssize_t detector_bias_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show_reg(dev, buf, REG16_DETECTOR_BIAS);
+}
+
+/* set detector bias */
+static ssize_t detector_bias_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	unsigned long value = 0;
+	if (!kstrtoul(buf, 10, &value)) {
+		mutex_lock(&glasshub->device_lock);
+		boot_device_l(glasshub);
+		_i2c_write_reg16(glasshub, REG16_DETECTOR_BIAS, (uint16_t)value); 
+		mutex_unlock(&glasshub->device_lock);
+	}
+	return count;
 }
 
 /* show last error code from device */
@@ -1353,6 +1371,7 @@ static DEVICE_ATTR(wink, DEV_MODE_RO, wink_show, NULL);
 static DEVICE_ATTR(wink_enable, DEV_MODE_RW, wink_enable_show, wink_enable_store);
 static DEVICE_ATTR(wink_inhibit, DEV_MODE_RW, wink_inhibit_show, wink_inhibit_store);
 static DEVICE_ATTR(detector_gain, DEV_MODE_RW, detector_gain_show, detector_gain_store);
+static DEVICE_ATTR(detector_bias, DEV_MODE_RW, detector_bias_show, detector_bias_store);
 static DEVICE_ATTR(debug, DEV_MODE_RW, debug_show, debug_store);
 static DEVICE_ATTR(error_code, DEV_MODE_RO, error_code_show, NULL);
 static DEVICE_ATTR(irq, DEV_MODE_RO, irq_show, NULL);
@@ -1378,6 +1397,7 @@ static struct attribute *attrs[] = {
 	&dev_attr_wink_enable.attr,
 	&dev_attr_wink_inhibit.attr,
 	&dev_attr_detector_gain.attr,
+	&dev_attr_detector_bias.attr,
 	&dev_attr_debug.attr,
 	&dev_attr_error_code.attr,
 	&dev_attr_irq.attr,
@@ -1550,6 +1570,7 @@ struct miscdevice glasshub_misc = {
 static int glasshub_setup(struct glasshub_data *glasshub) {
 	int rc = 0;
 	uint8_t buffer;
+	unsigned app_version;
 
 	/* reset glass hub */
 	rc = reset_device_l(glasshub, 1);
@@ -1576,7 +1597,8 @@ static int glasshub_setup(struct glasshub_data *glasshub) {
 	}
 
 	/* check app code version */
-	if ((glasshub->appVersionMajor == 0) && (glasshub->appVersionMinor < 7)) {
+	app_version = ((unsigned) glasshub->appVersionMajor << 8) | glasshub->appVersionMinor;
+	if (app_version < MINIMUM_MCU_VERSION) {
 		dev_info(&glasshub->i2c_client->dev,
 				"%s: WARNING: MCU application code is down-rev: %u.%u\n",
 				__FUNCTION__,
