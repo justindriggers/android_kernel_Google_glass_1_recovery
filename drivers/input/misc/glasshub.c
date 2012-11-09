@@ -102,6 +102,7 @@
 #define FLAG_WAKE_THREAD		0
 #define FLAG_DEVICE_BOOTED		1
 #define FLAG_FLASH_MODE			2
+#define FLAG_SYSFS_CREATED		3
 
 /* flags for device permissions */
 #define DEV_MODE_RO (S_IRUSR | S_IRGRP)
@@ -215,6 +216,9 @@ static struct glasshub_data_user *glasshub_user_wr_ptr = NULL;
 static struct glasshub_data_user *glasshub_user_rd_ptr = NULL;
 static struct mutex glasshub_user_lock;
 static atomic_t glasshub_opened = ATOMIC_INIT(0);
+
+static void unregister_device_files(struct glasshub_data *glasshub);
+static int register_device_files(struct glasshub_data *glasshub);
 
 /*
  * I2C bus transaction read for consecutive data.
@@ -965,6 +969,9 @@ static void exit_flash_mode_l(struct glasshub_data *glasshub)
 
 	/* get app version number */
 	get_app_version_l(glasshub);
+
+	/* register run mode sysfs files */
+	register_device_files(glasshub);
 }
 
 /* sysfs node to download device firmware to be flashed */
@@ -1142,14 +1149,6 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 		goto err_out;
 	}
 
-	/* version 2 bootloader was borked, disable firmware update */
-	if (glasshub->bootloaderVersion == 2) {
-		dev_info(&glasshub->i2c_client->dev,
-				"%s MCU bootloader is down-rev, update function disabled\n",
-				__FUNCTION__);
-		goto err_out;
-	}
-
 	dev_info(&glasshub->i2c_client->dev, "%s update_fw_enable = %lu\n", __FUNCTION__, value);
 
 	mutex_lock(&glasshub->device_lock);
@@ -1169,6 +1168,9 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 				}
 				memset(glasshub->fw_dirty, 0, sizeof(glasshub->fw_dirty));
 			}
+
+			/* unregister device files */
+			unregister_device_files(glasshub);
 
 			rc = device_create_file(&glasshub->i2c_client->dev,
 					&dev_attr_update_fw_data);
@@ -1277,8 +1279,6 @@ static DEVICE_ATTR(error_code, DEV_MODE_RO, error_code_show, NULL);
 static DEVICE_ATTR(irq, DEV_MODE_RO, irq_show, NULL);
 
 static struct attribute *attrs[] = {
-	&dev_attr_version.attr,
-	&dev_attr_bootloader_version.attr,
 	&dev_attr_passthru_enable.attr,
 	&dev_attr_proxraw.attr,
 	&dev_attr_proxmin.attr,
@@ -1288,7 +1288,6 @@ static struct attribute *attrs[] = {
 	&dev_attr_don_doff.attr,
 	&dev_attr_don_doff_threshold.attr,
 	&dev_attr_don_doff_hysteresis.attr,
-	&dev_attr_update_fw_enable.attr,
 	&dev_attr_led_drive.attr,
 	&dev_attr_calibrate.attr,
 	&dev_attr_calibration_values.attr,
@@ -1306,6 +1305,17 @@ static struct attribute *attrs[] = {
 
 static struct attribute_group attr_group = {
 	.attrs = attrs,
+};
+
+static struct attribute *bootmode_attrs[] = {
+	&dev_attr_bootloader_version.attr,
+	&dev_attr_version.attr,
+	&dev_attr_update_fw_enable.attr,
+	NULL
+};
+
+static struct attribute_group bootmode_attr_group = {
+	.attrs = bootmode_attrs,
 };
 
 /* register prox device */
@@ -1338,18 +1348,57 @@ free_device:
 	return rc;
 }
 
-/* register sysfs status and control nodes */
-static void sysfs_register_class_input_entry_glasshub(struct glasshub_data *glasshub,
-		struct i2c_client *i2c_client) {
-	int rc = 0;
+/* unregister prox device */
+static void unregister_ps_device(struct glasshub_data *glasshub)
+{
+	input_unregister_device(glasshub->ps_input_dev);
+	input_free_device(glasshub->ps_input_dev);
+}
 
-	/* store driver data into device private structure */
-	dev_set_drvdata(&i2c_client->dev, glasshub);
+/* register device files */
+static int register_device_files(struct glasshub_data *glasshub)
+{
+	int rc = 0;
+	unsigned app_version;
+
+	/* check app code version */
+	app_version = ((unsigned) glasshub->appVersionMajor << 8) | glasshub->appVersionMinor;
+	if (app_version < MINIMUM_MCU_VERSION) {
+		dev_info(&glasshub->i2c_client->dev,
+				"%s: WARNING: MCU application code is down-rev: %u.%u\n",
+				__FUNCTION__,
+				glasshub->appVersionMajor,
+				glasshub->appVersionMinor);
+		dev_info(&glasshub->i2c_client->dev,
+				"%s: All functions except firmware update are disabled\n",
+				__FUNCTION__);
+		goto Exit;
+	}
+
+	/* are sysfs files already created? */
+	if (test_and_set_bit(FLAG_SYSFS_CREATED, &glasshub->flags)) goto Exit;
 
 	/* create attributes */
-	rc = sysfs_create_group(&i2c_client->dev.kobj,&attr_group);
+	rc = sysfs_create_group(&glasshub->i2c_client->dev.kobj, &attr_group);
 	if (rc) {
-		dev_err(&i2c_client->dev, "%s Unable to create sysfs class files\n", __FUNCTION__);
+		dev_err(&glasshub->i2c_client->dev, "%s Unable to create sysfs class files\n",
+				__FUNCTION__);
+	}
+
+	/* register input devices */
+	register_ps_device(glasshub);
+
+Exit:
+	return rc;
+}
+
+/* unregister device files */
+static void unregister_device_files(struct glasshub_data *glasshub)
+{
+	/* are sysfs files created? */
+	if (test_and_clear_bit(FLAG_SYSFS_CREATED, &glasshub->flags)) {
+		sysfs_remove_group(&glasshub->i2c_client->dev.kobj,&attr_group);
+		unregister_ps_device(glasshub);
 	}
 }
 
@@ -1470,7 +1519,6 @@ struct miscdevice glasshub_misc = {
 static int glasshub_setup(struct glasshub_data *glasshub) {
 	int rc = 0;
 	uint8_t buffer;
-	unsigned app_version;
 
 	/* reset glass hub */
 	rc = reset_device_l(glasshub, 1);
@@ -1486,28 +1534,17 @@ static int glasshub_setup(struct glasshub_data *glasshub) {
 	if (rc) goto err_out;
 
 	/* check bootloader version */
+	/* TODO: Abort on anything less than V3 once we retire Joey devices */
 	if (glasshub->bootloaderVersion < 3) {
 		dev_info(&glasshub->i2c_client->dev,
 				"%s: WARNING: MCU bootloader is down-rev: %u\n",
 				__FUNCTION__, glasshub->bootloaderVersion);
-		/* TODO: Turn this back into an error
-		rc = -EIO;
-		goto err_out;
-		*/
-	}
 
-	/* check app code version */
-	app_version = ((unsigned) glasshub->appVersionMajor << 8) | glasshub->appVersionMinor;
-	if (app_version < MINIMUM_MCU_VERSION) {
-		dev_info(&glasshub->i2c_client->dev,
-				"%s: WARNING: MCU application code is down-rev: %u.%u\n",
-				__FUNCTION__,
-				glasshub->appVersionMajor,
-				glasshub->appVersionMinor);
-		/* TODO: Turn this back into an error
-		rc = -EIO;
-		goto err_out;
-		*/
+		/* this version is completely borked */
+		if (glasshub->bootloaderVersion == 2) {
+			rc = -EIO;
+			goto err_out;
+		}
 	}
 
 	/* request IRQ */
@@ -1533,6 +1570,8 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 		const struct i2c_device_id *id)
 {
 	struct glasshub_data *glasshub = NULL;
+	int rc;
+
 	glasshub = kzalloc(sizeof(struct glasshub_data), GFP_KERNEL);
 	if (!glasshub)
 	{
@@ -1560,13 +1599,19 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 	}
 	dev_info(&i2c_client->dev, "%s: Probe successful\n", __FUNCTION__);
 
-	// register input devices
-	register_ps_device(glasshub);
-
-	/* register sysfs entries */
-	sysfs_register_class_input_entry_glasshub(glasshub, i2c_client);
-
+	/* store driver data into device private structure */
+	dev_set_drvdata(&i2c_client->dev, glasshub);
 	glasshub_private = glasshub;
+
+	/* create bootmode sysfs files */
+	rc = sysfs_create_group(&glasshub->i2c_client->dev.kobj, &bootmode_attr_group);
+	if (rc) {
+		dev_err(&glasshub->i2c_client->dev, "%s Unable to create sysfs class files\n",
+				__FUNCTION__);
+	}
+
+	/* create sysfs files, etc. */
+	register_device_files(glasshub);
 
 	/* set misc driver */
 	mutex_init(&glasshub_user_lock);
