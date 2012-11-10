@@ -42,7 +42,7 @@
 
 /* driver name/version */
 #define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.2"
+#define DRIVER_VERSION "0.3"
 
 /* minimum MCU version for this driver */
 #define MINIMUM_MCU_VERSION	9
@@ -375,8 +375,6 @@ static int _check_part_id(struct glasshub_data *glasshub)
 	uint8_t data = 0;
 	struct i2c_client *i2c_client = glasshub->i2c_client;
 
-	dev_info(&i2c_client->dev, "%s\n", __FUNCTION__);
-
 	rc = _i2c_read_reg8(glasshub, REG_PART_ID, &data);
 	if (rc < 0) {
 		dev_err(&i2c_client->dev, "%s: Unable to read part identifier\n", __FUNCTION__);
@@ -401,11 +399,17 @@ int boot_device_l(struct glasshub_data *glasshub)
 
 	if (test_bit(FLAG_DEVICE_BOOTED, &glasshub->flags)) goto err_out;
 
+	/* don't allow boot from flash mode */
+	if (test_bit(FLAG_FLASH_MODE, &glasshub->flags)) {
+		rc = -ENODEV;
+		goto err_out;
+	}
+
 	/* tell glass hub to boot */
 	temp = CMD_BOOT;
 	for (retry = 0; retry < 5; retry++) {
 		rc = _i2c_write_mult(glasshub, &temp, sizeof(temp));
-		msleep(50);
+		msleep(100);
 		if (rc == 0) break;
 	}
 	if (rc) {
@@ -496,8 +500,6 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 
 	/* process don/doff */
 	if (status & IRQ_DON_DOFF) {
-		dev_info(&glasshub->i2c_client->dev, "%s: don/doff signal received\n",
-				__FUNCTION__);
 		rc = _i2c_read_reg8(glasshub, REG_DON_DOFF, &glasshub->don_doff_state);
 		if (rc) goto Error;
 		dev_info(&glasshub->i2c_client->dev, "%s: don/doff state = %u\n",
@@ -520,7 +522,11 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 		rc = _i2c_read_reg(glasshub, REG16_PROX_DATA, &value);
 		if (rc) goto Error;
 
-		/* buffer up data (drop data that exceeds our buffer length) */
+		/* Buffer up data (and drop data that exceeds our buffer
+		 * length). Note that when the high bit is set, there is
+		 * no more data. This mechanism saves us from doing another
+		 * I2C bus transfer to check the status register.
+		 */
 		if (proxCount < PROX_QUEUE_SZ) {
 			data[proxCount++] = (uint16_t) value & 0x7fff;
 		}
@@ -567,8 +573,9 @@ static ssize_t show_reg(struct device *dev, char *buf, uint8_t reg)
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 
 	mutex_lock(&glasshub->device_lock);
-	boot_device_l(glasshub);
-	_i2c_read_reg(glasshub, reg, &value);
+	if (boot_device_l(glasshub) == 0) {
+		_i2c_read_reg(glasshub, reg, &value);
+	}
 	mutex_unlock(&glasshub->device_lock);
 
 	return sprintf(buf, "%u\n", value);
@@ -584,8 +591,9 @@ static ssize_t store_reg(struct device *dev, const char *buf, size_t count,
 		value = (value < min) ? min : value;
 		value = (value > max) ? max : value;
 		mutex_lock(&glasshub->device_lock);
-		boot_device_l(glasshub);
-		_i2c_write_reg(glasshub, reg, value);
+		if (boot_device_l(glasshub) == 0) {
+			_i2c_write_reg(glasshub, reg, value);
+		}
 		mutex_unlock(&glasshub->device_lock);
 	}
 	return count;
@@ -737,7 +745,10 @@ static ssize_t calibrate_store(struct device *dev,
 	glasshub = dev_get_drvdata(dev);
 	if (!kstrtou8(buf, 10, &value) && value) {
 		mutex_lock(&glasshub->device_lock);
-		boot_device_l(glasshub);
+		if (boot_device_l(glasshub)) {
+			rc = -ENODEV;
+			goto Unlock;
+		}
 
 		/* read current drive level */
 		_i2c_read_reg8(glasshub, REG_LED_DRIVE, &led_drive);
@@ -785,6 +796,7 @@ static ssize_t calibrate_store(struct device *dev,
 		/* restore LED drive level */
 		_i2c_write_reg(glasshub, REG_LED_DRIVE, led_drive);
 
+Unlock:
 		mutex_unlock(&glasshub->device_lock);
 	}
 	return count;
@@ -801,11 +813,12 @@ static ssize_t calibration_values_show(struct device *dev, struct device_attribu
 	uint16_t addr;
 
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	memset(proxValues, 0, sizeof(proxValues));
+
 	mutex_lock(&glasshub->device_lock);
-	boot_device_l(glasshub);
+	if (boot_device_l(glasshub)) goto Error;
 
 	/* read calibration values from flash */
-	memset(proxValues, 0, sizeof(proxValues));
 	addr = CALIB_ADDRESS;
 	for (i = 0; i < 8; i++) {
 
@@ -833,13 +846,15 @@ Error:
 /* return prox version */
 static ssize_t prox_version_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	uint8_t partId, seqId;
+	uint8_t partId = 0xff;
+	uint8_t seqId = 0xff;
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 
 	mutex_lock(&glasshub->device_lock);
-	boot_device_l(glasshub);
-	_i2c_read_reg8(glasshub, REG_PROX_PART_ID, &partId);
-	_i2c_read_reg8(glasshub, REG_PROX_SEQ_ID, &seqId);
+	if (boot_device_l(glasshub) == 0) {
+		_i2c_read_reg8(glasshub, REG_PROX_PART_ID, &partId);
+		_i2c_read_reg8(glasshub, REG_PROX_SEQ_ID, &seqId);
+	}
 	mutex_unlock(&glasshub->device_lock);
 
 	return sprintf(buf, "0x%02x 0x%02x\n", partId, seqId);
@@ -980,6 +995,7 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 {
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 	int i;
+	int pageNum;
 
 #if DEBUG_FLASH_MODE
 	dev_info(&glasshub->i2c_client->dev, "%s Rx SREC %u bytes\n", __FUNCTION__, count);
@@ -1092,8 +1108,8 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 				/* store byte in image buffer */
 				glasshub->fw_image[glasshub->fw_index] = glasshub->fw_value;
 				glasshub->fw_value = 0;
-				glasshub->fw_dirty[glasshub->fw_index / (FIRMWARE_PAGE_SIZE * 32)] |=
-					(1 << (glasshub->fw_index & 31));
+				pageNum = glasshub->fw_index / FIRMWARE_PAGE_SIZE;
+				glasshub->fw_dirty[pageNum / 32] |= (1 << (pageNum & 31));
 				glasshub->fw_index++;
 				glasshub->fw_state = FW_STATE_BYTE_HI;
 
@@ -1149,7 +1165,9 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 		goto err_out;
 	}
 
+#if DEBUG_FLASH_MODE
 	dev_info(&glasshub->i2c_client->dev, "%s update_fw_enable = %lu\n", __FUNCTION__, value);
+#endif
 
 	mutex_lock(&glasshub->device_lock);
 
@@ -1180,50 +1198,62 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 			set_bit(FLAG_FLASH_MODE, &glasshub->flags);
 		}
 	} else {
+		/* exit flash, write code to device */
 		if (test_bit(FLAG_FLASH_MODE, &glasshub->flags)) {
+
 			/* put device into bootloader mode */
 			rc = reset_device_l(glasshub, 0);
-			if (!rc) {
+			if (rc)  goto ExitFlashMode;
 
-				/* here's where we flash the image if it has dirty bits */
-				if (glasshub->fw_image) {
-					int page;
+			/* here's where we flash the image if it has dirty bits */
+			if (glasshub->fw_image) {
+				int pagesFlashed = 0;
+				int page;
 
-					dev_info(&glasshub->i2c_client->dev,
-							"Dirty: %08x %08x %08x %08x\n",
-							glasshub->fw_dirty[0],
-							glasshub->fw_dirty[1],
-							glasshub->fw_dirty[2],
-							glasshub->fw_dirty[3]);
+#if DEBUG_FLASH_MODE
+				dev_info(&glasshub->i2c_client->dev,
+						"Update pages: %08x %08x %08x %08x\n",
+						glasshub->fw_dirty[0],
+						glasshub->fw_dirty[1],
+						glasshub->fw_dirty[2],
+						glasshub->fw_dirty[3]);
+#endif
 
-					for (page = 0; page < FIRMWARE_TOTAL_PAGES; page++) {
-						/* flash only dirty pages */
-						if (glasshub->fw_dirty[page / 32] &
-								(1 << (page & 31))) {
-							uint8_t buffer[66];
-							int i, j;
-							buffer[0] = CMD_FLASH;
-							buffer[1] = page;
-							for (i = 2, j = page * FIRMWARE_PAGE_SIZE;
-									i < FIRMWARE_PAGE_SIZE + 2;
-									i++, j++) {
-								buffer[i] = glasshub->fw_image[j];
-							}
-
-							dev_info(&glasshub->i2c_client->dev,
-									"%s Flash page %d\n",
-									__FUNCTION__, page);
-							rc = _i2c_write_mult(glasshub, buffer,
-									sizeof(buffer));
-							if (rc) {
-								dev_err(&glasshub->i2c_client->dev,
-										"%s Unable to flash glasshub device\n",
-										__FUNCTION__);
-							}
+				for (page = 0; page < FIRMWARE_TOTAL_PAGES; page++) {
+					/* flash only dirty pages */
+					if (glasshub->fw_dirty[page / 32] &
+							(1 << (page & 31))) {
+						uint8_t buffer[66];
+						int i, j;
+						buffer[0] = CMD_FLASH;
+						buffer[1] = page;
+						for (i = 2, j = page * FIRMWARE_PAGE_SIZE;
+								i < FIRMWARE_PAGE_SIZE + 2;
+								i++, j++) {
+							buffer[i] = glasshub->fw_image[j];
 						}
+
+#if DEBUG_FLASH_MODE
+						dev_info(&glasshub->i2c_client->dev,
+								"%s: Flash page %d\n",
+								__FUNCTION__, page);
+#endif
+						rc = _i2c_write_mult(glasshub, buffer,
+								sizeof(buffer));
+						if (rc) {
+							dev_err(&glasshub->i2c_client->dev,
+									"%s Unable to flash glasshub device\n",
+									__FUNCTION__);
+							goto ExitFlashMode;
+						}
+						++pagesFlashed;
 					}
 				}
+				dev_info(&glasshub->i2c_client->dev,
+						"%s: %d code page(s) flashed\n",
+						__FUNCTION__, pagesFlashed);
 			}
+ExitFlashMode:
 			clear_bit(FLAG_FLASH_MODE, &glasshub->flags);
 		}
 	}
@@ -1608,6 +1638,7 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 	if (rc) {
 		dev_err(&glasshub->i2c_client->dev, "%s Unable to create sysfs class files\n",
 				__FUNCTION__);
+		goto err_out;
 	}
 
 	/* create sysfs files, etc. */
@@ -1618,8 +1649,6 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 	glasshub_user_wr_ptr = glasshub_fifo_buffer;
 	glasshub_user_rd_ptr = glasshub_fifo_buffer;
 	misc_register(&glasshub_misc);
-
-	dev_info(&i2c_client->dev, "%s: device setup complete\n", __FUNCTION__);
 
 	return 0;
 
