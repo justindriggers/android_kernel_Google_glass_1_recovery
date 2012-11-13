@@ -62,6 +62,8 @@ struct ltr506_data {
 	struct early_suspend early_suspend;
 	struct wake_lock ps_wake_lock;
 
+	uint8_t part_id;
+
 	/* Device mode
 	 * 0 = ALS
 	 * 1 = PS
@@ -236,6 +238,26 @@ static int _ltr506_set_field(struct i2c_client *client, u8 mask, u8 cmd, u8 data
 	return ret;
 }
 
+/* Read ALS ADC Channel 1 Value */
+static uint32_t read_als_adc_ch1_value(struct ltr506_data *ltr506)
+{
+	int ret;
+	uint32_t value;
+	uint8_t buffer[3];
+
+	buffer[0] = LTR506_ALS_DATA_CH1_0;
+
+	/* read data bytes from data regs */
+	ret = I2C_Read(buffer, sizeof(buffer));
+	if (ret < 0) {
+		dev_err(&ltr506->i2c_client->dev, "%s Unable to read als adc ch1 values\n", __func__);
+		return 0;
+	}
+
+	value = ((uint32_t)buffer[2] << 12) | ((uint32_t)buffer[1] << 4) | ((uint32_t)buffer[0] >> 3);
+	return value;
+}
+
 /* Read ADC Value */
 static uint16_t read_adc_value(struct ltr506_data *ltr506)
 {
@@ -403,7 +425,18 @@ static void report_als_input_event(struct ltr506_data *ltr506)
 	int thresh_hi, thresh_lo, thresh_delta;
 
 	ltr506->mode = 0;
-	adc_value = read_adc_value(ltr506);
+	if (ltr506->ps_must_be_on_while_als_on == 1) {
+		uint16_t adc_value_tmp;
+		/* Hack to read incandescent light with PS on.
+		 * We are stuffing a 20 bit value into a 16 bit register so
+		 * drop last 4 bits */
+		adc_value = (read_als_adc_ch1_value(ltr506) >> 4);
+		adc_value_tmp = read_adc_value(ltr506);
+		dev_dbg(&ltr506->i2c_client->dev, "%s adc_value:%d ch1_adc_value:%d \n",
+		         __func__, adc_value_tmp, adc_value);
+	} else {
+		adc_value = read_adc_value(ltr506);
+	}
 
 	input_report_abs(ltr506->als_input_dev, ABS_MISC, adc_value);
 	input_sync(ltr506->als_input_dev);
@@ -1633,6 +1666,7 @@ static int _check_part_id(struct ltr506_data *ltr506)
 	if (buffer[0] == PARTID) {
 		ltr506->ps_must_be_on_while_als_on = 1;
 	}
+	ltr506->part_id = buffer[0];
 	return 0;
 }
 
@@ -1727,6 +1761,9 @@ static int ltr506_setup(struct ltr506_data *ltr506)
 		dev_err(&ltr506->i2c_client->dev, "%s: PS MeasRate Setup Fail...\n", __func__);
 		goto err_out2;
 	}
+
+	dev_info(&ltr506->i2c_client->dev, "%s Using part id:0x%02x\n", __func__, ltr506->part_id);
+
 	return ret;
 
 err_out2:
