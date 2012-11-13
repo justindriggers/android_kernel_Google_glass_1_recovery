@@ -79,10 +79,11 @@
 #define REG16_PROX_DATA			0x84
 #define REG16_ADDRESS			0x85
 
-#define CMD_BOOT			0xFA
-#define CMD_FLASH			0xF9
 #define CMD_APP_VERSION			0xF6
 #define CMD_BOOTLOADER_VERSION		0xF7
+#define CMD_FLASH_STATUS		0xF8
+#define CMD_FLASH			0xF9
+#define CMD_BOOT			0xFA
 
 /* interrupt sources */
 #define IRQ_PASSTHRU			0b00000001
@@ -467,11 +468,19 @@ err_out:
 static irqreturn_t glasshub_irq_handler(int irq, void *dev_id)
 {
 	struct glasshub_data *glasshub = (struct glasshub_data*) dev_id;
-	if (test_and_set_bit(FLAG_WAKE_THREAD, &glasshub->flags)) {
-		return IRQ_HANDLED;
-	}
+
+	/* if device is not booted, the interrupt must be someone else */
+	if (!test_bit(FLAG_DEVICE_BOOTED, &glasshub->flags)) goto Handled;
+
+	/* if threaded handler is already scheduled, don't schedule it again */
+	if (test_and_set_bit(FLAG_WAKE_THREAD, &glasshub->flags)) goto Handled;
+
+	/* save timestamp for threaded handler and schedule it */
 	glasshub->irq_timestamp = read_robust_clock();
 	return IRQ_WAKE_THREAD;
+
+Handled:
+	return IRQ_HANDLED;
 }
 
 /* Threaded interrupt handler. This is where the real work gets done.
@@ -1209,6 +1218,10 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 			if (glasshub->fw_image) {
 				int pagesFlashed = 0;
 				int page;
+				uint8_t checksum;
+
+				/* bootloader version 3 does not support checksum */
+				int oldBoot = (glasshub->bootloaderVersion < 4) ? 1 : 0;
 
 #if DEBUG_FLASH_MODE
 				dev_info(&glasshub->i2c_client->dev,
@@ -1223,28 +1236,52 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 					/* flash only dirty pages */
 					if (glasshub->fw_dirty[page / 32] &
 							(1 << (page & 31))) {
-						uint8_t buffer[66];
+						uint8_t buffer[FIRMWARE_PAGE_SIZE+3];
 						int i, j;
+
+						/* initalize command and page number */
 						buffer[0] = CMD_FLASH;
 						buffer[1] = page;
+
+						/* seed checksum */
+						checksum = 0xa5;
+
+						/* copy firmware into buffer */
 						for (i = 2, j = page * FIRMWARE_PAGE_SIZE;
 								i < FIRMWARE_PAGE_SIZE + 2;
 								i++, j++) {
 							buffer[i] = glasshub->fw_image[j];
+							checksum = (checksum << 1) ^ buffer[i] ^ (checksum >> 7);
 						}
+
+						/* add checksum to buffer */
+						buffer[66] = checksum;
 
 #if DEBUG_FLASH_MODE
 						dev_info(&glasshub->i2c_client->dev,
 								"%s: Flash page %d\n",
 								__FUNCTION__, page);
 #endif
+						/* don't send checksum for older bootloader version */
 						rc = _i2c_write_mult(glasshub, buffer,
-								sizeof(buffer));
+								sizeof(buffer) - oldBoot);
 						if (rc) {
 							dev_err(&glasshub->i2c_client->dev,
 									"%s Unable to flash glasshub device\n",
 									__FUNCTION__);
 							goto ExitFlashMode;
+						}
+
+						/* new bootloader: check status for error */
+						if (!oldBoot) {
+							buffer[0] = CMD_FLASH_STATUS;
+							rc = _i2c_read(glasshub, buffer, 1, buffer, 1);
+							if (rc || (buffer[0] != 0)) {
+								dev_err(&glasshub->i2c_client->dev,
+										"%s Error flashing firmware\n",
+										__FUNCTION__);
+								goto ExitFlashMode;
+							}
 						}
 						++pagesFlashed;
 					}
@@ -1550,7 +1587,7 @@ static int glasshub_setup(struct glasshub_data *glasshub) {
 	int rc = 0;
 	uint8_t buffer;
 
-	/* reset glass hub */
+	/* force glass hub reset */
 	rc = reset_device_l(glasshub, 1);
 
 	/* get bootloader version */
