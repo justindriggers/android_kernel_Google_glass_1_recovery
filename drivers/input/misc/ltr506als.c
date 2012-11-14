@@ -104,6 +104,7 @@ struct ltr506_data {
 	int gpio_int_no;
 	int gpio_int_wake_dev;
 	int is_suspend;
+	int use_polling;
 
 	/* Workarounds */
 	int ps_must_be_on_while_als_on;
@@ -1669,6 +1670,7 @@ static int ltr506_setup(struct ltr506_data *ltr506)
 			dev_err(&ltr506->i2c_client->dev, "%s: GPIO Request Fail...\n", __func__);
 			goto err_out1;
 		}
+		ltr506->use_polling = 1;
 	}
 	dev_dbg(&ltr506->i2c_client->dev, "%s Requested interrupt\n", __func__);
 
@@ -1679,21 +1681,23 @@ static int ltr506_setup(struct ltr506_data *ltr506)
 		goto err_out2;
 	}
 
-	ret = _ltr506_set_bit(ltr506->i2c_client, SET_BIT, LTR506_INTERRUPT_PRST, 0x00);
-	if (ret < 0) {
-		dev_err(&ltr506->i2c_client->dev,"%s: PS Set Persist Fail...\n", __func__);
-		goto err_out2;
-	}
-	dev_dbg(&ltr506->i2c_client->dev, "%s: Set ltr506 persists\n", __func__);
+	if (!ltr506->use_polling) {
+		ret = _ltr506_set_bit(ltr506->i2c_client, SET_BIT, LTR506_INTERRUPT_PRST, 0x00);
+		if (ret < 0) {
+			dev_err(&ltr506->i2c_client->dev,"%s: PS Set Persist Fail...\n", __func__);
+			goto err_out2;
+		}
+		dev_dbg(&ltr506->i2c_client->dev, "%s: Set ltr506 persists\n", __func__);
 
-	/* Enable interrupts on the device and clear only when status is read */
-	ret = _ltr506_set_bit(ltr506->i2c_client, CLR_BIT, LTR506_INTERRUPT, 0x08);
-	ret = _ltr506_set_bit(ltr506->i2c_client, SET_BIT, LTR506_INTERRUPT, INTERRUPT_MODE);
-	if (ret < 0) {
-		dev_err(&ltr506->i2c_client->dev, "%s: Enabled interrupts failed...\n", __func__);
-		goto err_out2;
+		/* Enable interrupts on the device and clear only when status is read */
+		ret = _ltr506_set_bit(ltr506->i2c_client, CLR_BIT, LTR506_INTERRUPT, 0x08);
+		ret = _ltr506_set_bit(ltr506->i2c_client, SET_BIT, LTR506_INTERRUPT, INTERRUPT_MODE);
+		if (ret < 0) {
+			dev_err(&ltr506->i2c_client->dev, "%s: Enabled interrupts failed...\n", __func__);
+			goto err_out2;
+		}
+		dev_dbg(&ltr506->i2c_client->dev, "%s Enabled interrupt to device\n", __func__);
 	}
-	dev_dbg(&ltr506->i2c_client->dev, "%s Enabled interrupt to device\n", __func__);
 
 	/* Set ALS measurement gain */
 	ret = _ltr506_set_field(ltr506->i2c_client, ALS_GAIN, LTR506_ALS_CONTR,
