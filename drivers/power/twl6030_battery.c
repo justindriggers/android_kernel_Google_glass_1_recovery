@@ -497,7 +497,7 @@ static void twl6030_read_fuelgauge(struct twl6030_battery_device_info *di)
 	twl6030_update_voltage(di);
 
 	/* detect charge termination */
-	if ((di->voltage_mV > 4100) && (di->current_avg_uA < 50000)) {
+	if ((di->voltage_mV > 4100) && (di->current_avg_uA < 50000) && (di->current_avg_uA > 0)) {
 		if (di->trust_capacity && (di->capacity_uAh < di->capacity_max_uAh) && (di->current_avg_uA > 25000)) {
 			/* if we are charging back to a full state with the CC,
 			 * be a bit more aggressive than if we only have voltage
