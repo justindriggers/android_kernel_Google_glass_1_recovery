@@ -153,10 +153,12 @@ static void gps_elton_work_task(struct work_struct *work)
 	uart_int_cnt_curr = _get_interrupt_count(gps_elton_data->irq_num);
 	uart_int_cnt_last = atomic_read(&gps_elton_data->uart_int_cnt);
 	if (uart_int_cnt_last >= uart_int_cnt_curr) {
-		dev_info(&gps_elton_data->pdev->dev, "EVT 1.x Device was determined to be in hibernation\n");
+		dev_info(&gps_elton_data->pdev->dev, "EVT 1.x Device was determined to be in hibernation last_cnt:%d curr_cnt:%d\n",
+		         uart_int_cnt_last, uart_int_cnt_curr);
 		gps_elton_data->is_awake = GPS_STATE_HIBERNATE;
 	} else {
-		dev_info(&gps_elton_data->pdev->dev, "EVT 1.x Device was determined to be awake\n");
+		dev_info(&gps_elton_data->pdev->dev, "EVT 1.x Device was determined to be awake last_cnt:%d curr_cnt:%d\n",
+		         uart_int_cnt_last, uart_int_cnt_curr);
 		gps_elton_data->is_awake = GPS_STATE_AWAKE;
 		// Update the uart interrupt count for next time.
 		atomic_set(&gps_elton_data->uart_int_cnt, uart_int_cnt_curr);
@@ -221,6 +223,11 @@ static ssize_t gps_elton_awake_store(struct device *dev,
 			if (gps_elton_data->is_awake != GPS_STATE_HIBERNATE) {
 				return -EAGAIN;
 			}
+			/* NOTE(cmanton) Disable on EVT 1.x as counting indirectly
+			 * determining the state of the GPS chip is difficult for
+			 * ensuring a proper suspend. */
+			dev_warn(dev, "Disabled enabling GPS on EVT 1.x\n");
+			return -ENODEV;
 		} else {
 			/* EVT2.0 */
 			if (gpio_get_value(gps_elton_data->platform_data->gpio_awake) == 1) {
@@ -369,6 +376,17 @@ static int gps_elton_suspend(struct platform_device *pdev, pm_message_t state) {
 // Currently don't wake the GPS chip after a suspend cycle.
 static int gps_elton_resume(struct platform_device *pdev) {
 	dev_info(&pdev->dev, "Resuming\n");
+	if (_is_evt_1_x(gps_elton_data)) {
+		// EVT 1.x
+		gps_elton_data->is_awake = GPS_STATE_HIBERNATE;
+		/* EVT 1.x - Force cache irq count to be equal to system irq
+		 * count.  This because during suspend/resume cycles the UART
+		 * code is called which causes exactly 3 interrupts per
+		 * suspend/resume cycle.  Setting the irq count equal will
+		 * ensure that the GPS chip awake polling routine finds it
+		 * still hibernating.  */
+		atomic_set(&gps_elton_data->uart_int_cnt, _get_interrupt_count(gps_elton_data->irq_num));
+	}
 	return 0;
 }
 
