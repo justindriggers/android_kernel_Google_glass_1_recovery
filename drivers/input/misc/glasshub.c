@@ -146,6 +146,18 @@
 #define PROX_QUEUE_SZ			64
 #define PROX_INTERVAL			(1000000000LL / 32)
 
+/* values for flash_status */
+#define FLASH_STATUS_OK			0
+#define FLASH_STATUS_READY		1
+#define FLASH_ERROR_DEV_REJECTED_PKT	-1
+#define FLASH_ERROR_INVALID_S_RECORD	-2
+#define FLASH_ERROR_ADDRESS_RANGE	-3
+#define FLASH_ERROR_INVALID_HEX_DIGIT	-4
+#define FLASH_ERROR_SREC_CHECKSUM_ERROR	-5
+#define FLASH_ERROR_DEVICE_RESET_ERROR	-6
+#define FLASH_ERROR_I2C_DEVICE_COMM	-7
+#define FLASH_ERROR_NO_PAGES_FLASHED	-8
+
 /*
  * Basic theory of operation:
  *
@@ -191,6 +203,7 @@ struct glasshub_data {
 	const struct glasshub_platform_data *pdata;
 	uint8_t *fw_image;
 	uint32_t fw_dirty[FIRMWARE_NUM_DIRTY_BITS];
+	int flash_status;
 	int fw_state;
 	int fw_rec_type;
 	int fw_index;
@@ -201,9 +214,9 @@ struct glasshub_data {
 	long long irq_timestamp;
 	volatile unsigned long flags;
 	uint8_t don_doff_state;
-	uint8_t bootloaderVersion;
-	uint8_t appVersionMajor;
-	uint8_t appVersionMinor;
+	uint8_t bootloader_version;
+	uint8_t app_version_major;
+	uint8_t app_version_minor;
 };
 
 struct glasshub_data *glasshub_private = NULL;
@@ -612,14 +625,14 @@ static ssize_t store_reg(struct device *dev, const char *buf, size_t count,
 static ssize_t version_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-	return sprintf(buf, "%d.%d\n", glasshub->appVersionMajor, glasshub->appVersionMinor);
+	return sprintf(buf, "%d.%d\n", glasshub->app_version_major, glasshub->app_version_minor);
 }
 
 /* show the bootloader version number */
 static ssize_t bootloader_version_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-	return sprintf(buf, "%d\n", glasshub->bootloaderVersion);
+	return sprintf(buf, "%d\n", glasshub->bootloader_version);
 }
 
 /* show don/doff status */
@@ -975,8 +988,8 @@ static int get_app_version_l(struct glasshub_data *glasshub)
 	} else {
 		dev_info(&glasshub->i2c_client->dev, "Firmware version: %d.%d\n",
 				buffer[0], buffer[1]);
-		glasshub->appVersionMajor = buffer[0];
-		glasshub->appVersionMinor = buffer[1];
+		glasshub->app_version_major = buffer[0];
+		glasshub->app_version_minor = buffer[1];
 	}
 	return rc;
 }
@@ -1032,7 +1045,10 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 				break;
 
 			case FW_STATE_TYPE:
-				if (buf[i] < '0' || buf[i] > '9') goto err_out;
+				if (buf[i] < '0' || buf[i] > '9') {
+					glasshub->flash_status = FLASH_ERROR_INVALID_S_RECORD;
+					goto err_out;
+				}
 
 				/* process only S1-S3 records */
 				if (buf[i] >= '1' && buf[i] <= '3') {
@@ -1055,7 +1071,10 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 			case FW_STATE_ADDR_6:
 			case FW_STATE_ADDR_4:
 			case FW_STATE_ADDR_2:
-				if (convert_hex(buf[i], &glasshub->fw_value)) goto err_out;
+				if (convert_hex(buf[i], &glasshub->fw_value)) {
+					glasshub->flash_status = FLASH_ERROR_INVALID_HEX_DIGIT;
+					goto err_out;
+				}
 				glasshub->fw_checksum += glasshub->fw_value & 0xff;
 				glasshub->fw_count--;
 				glasshub->fw_state++;
@@ -1068,12 +1087,18 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 			case FW_STATE_ADDR_1:
 			case FW_STATE_BYTE_HI:
 			case FW_STATE_CHECKSUM_HI:
-				if (convert_hex(buf[i], &glasshub->fw_value)) goto err_out;
+				if (convert_hex(buf[i], &glasshub->fw_value)) {
+					glasshub->flash_status = FLASH_ERROR_INVALID_HEX_DIGIT;
+					goto err_out;
+				}
 				glasshub->fw_state++;
 				break;
 
 			case FW_STATE_COUNT_LO:
-				if (convert_hex(buf[i], &glasshub->fw_value)) goto err_out;
+				if (convert_hex(buf[i], &glasshub->fw_value)) {
+					glasshub->flash_status = FLASH_ERROR_INVALID_HEX_DIGIT;
+					goto err_out;
+				}
 				glasshub->fw_checksum += glasshub->fw_value & 0xff;
 #if DEBUG_FLASH_MODE
 				dev_dbg(&glasshub->i2c_client->dev, "%s SREC byte count %u\n",
@@ -1088,7 +1113,10 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 				break;
 
 			case FW_STATE_ADDR_0:
-				if (convert_hex(buf[i], &glasshub->fw_value)) goto err_out;
+				if (convert_hex(buf[i], &glasshub->fw_value)) {
+					glasshub->flash_status = FLASH_ERROR_INVALID_HEX_DIGIT;
+					goto err_out;
+				}
 				glasshub->fw_checksum += glasshub->fw_value & 0xff;
 #if DEBUG_FLASH_MODE
 				dev_dbg(&glasshub->i2c_client->dev, "%s SREC address %04xh\n",
@@ -1101,7 +1129,10 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 				break;
 
 			case FW_STATE_BYTE_LO:
-				if (convert_hex(buf[i], &glasshub->fw_value)) goto err_out;
+				if (convert_hex(buf[i], &glasshub->fw_value)) {
+					glasshub->flash_status = FLASH_ERROR_INVALID_HEX_DIGIT;
+					goto err_out;
+				}
 				glasshub->fw_checksum += glasshub->fw_value & 0xff;
 
 				/* validate address */
@@ -1111,6 +1142,7 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 							"%s Address out of range: address %u count=%u\n",
 							__FUNCTION__, glasshub->fw_value,
 							glasshub->fw_count);
+					glasshub->flash_status = FLASH_ERROR_ADDRESS_RANGE;
 					goto err_out;
 				}
 
@@ -1134,13 +1166,17 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 				break;
 
 			case FW_STATE_CHECKSUM_LO:
-				if (convert_hex(buf[i], &glasshub->fw_value)) goto err_out;
+				if (convert_hex(buf[i], &glasshub->fw_value)) {
+					glasshub->flash_status = FLASH_ERROR_INVALID_HEX_DIGIT;
+					goto err_out;
+				}
 				if (glasshub->fw_value != (~glasshub->fw_checksum & 0xff)) {
 					dev_err(&glasshub->i2c_client->dev,
 							"%s SREC checksum mismatch %02xh != %02xh\n",
 							__FUNCTION__,
 							(unsigned)~glasshub->fw_checksum & 0xff,
 							(unsigned)glasshub->fw_value);
+					glasshub->flash_status = FLASH_ERROR_SREC_CHECKSUM_ERROR;
 					goto err_out;
 				}
 #if DEBUG_FLASH_MODE
@@ -1205,6 +1241,7 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 
 			glasshub->fw_state = FW_STATE_START;
 			set_bit(FLAG_FLASH_MODE, &glasshub->flags);
+			glasshub->flash_status = FLASH_STATUS_READY;
 		}
 	} else {
 		/* exit flash, write code to device */
@@ -1212,7 +1249,10 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 
 			/* put device into bootloader mode */
 			rc = reset_device_l(glasshub, 0);
-			if (rc)  goto ExitFlashMode;
+			if (rc)  {
+				glasshub->flash_status = FLASH_ERROR_DEVICE_RESET_ERROR;
+				goto ExitFlashMode;
+			}
 
 			/* here's where we flash the image if it has dirty bits */
 			if (glasshub->fw_image) {
@@ -1221,7 +1261,7 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 				uint8_t checksum;
 
 				/* bootloader version 3 does not support checksum */
-				int oldBoot = (glasshub->bootloaderVersion < 4) ? 1 : 0;
+				int oldBoot = (glasshub->bootloader_version < 4) ? 1 : 0;
 
 #if DEBUG_FLASH_MODE
 				dev_info(&glasshub->i2c_client->dev,
@@ -1269,6 +1309,7 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 							dev_err(&glasshub->i2c_client->dev,
 									"%s Unable to flash glasshub device\n",
 									__FUNCTION__);
+							glasshub->flash_status = FLASH_ERROR_I2C_DEVICE_COMM;
 							goto ExitFlashMode;
 						}
 
@@ -1276,10 +1317,17 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 						if (!oldBoot) {
 							buffer[0] = CMD_FLASH_STATUS;
 							rc = _i2c_read(glasshub, buffer, 1, buffer, 1);
-							if (rc || (buffer[0] != 0)) {
+							if (rc) {
 								dev_err(&glasshub->i2c_client->dev,
-										"%s Error flashing firmware\n",
+										"%s Error reading flash status\n",
 										__FUNCTION__);
+								glasshub->flash_status = FLASH_ERROR_I2C_DEVICE_COMM;
+								goto ExitFlashMode;
+							} else if (buffer[0] != 0) {
+								dev_err(&glasshub->i2c_client->dev,
+										"%s Device rejected packet: %u\n",
+										__FUNCTION__, buffer[0]);
+								glasshub->flash_status = FLASH_ERROR_DEV_REJECTED_PKT;
 								goto ExitFlashMode;
 							}
 						}
@@ -1289,6 +1337,7 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 				dev_info(&glasshub->i2c_client->dev,
 						"%s: %d code page(s) flashed\n",
 						__FUNCTION__, pagesFlashed);
+				glasshub->flash_status = pagesFlashed ? FLASH_STATUS_OK : FLASH_ERROR_NO_PAGES_FLASHED;
 			}
 ExitFlashMode:
 			clear_bit(FLAG_FLASH_MODE, &glasshub->flags);
@@ -1320,6 +1369,16 @@ static ssize_t irq_show(struct device *dev, struct device_attribute *attr, char 
 	return sprintf(buf, "%d\n", gpio_get_value(glasshub->pdata->gpio_int_no));
 }
 
+/* show state of flash process */
+static ssize_t flash_status_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int temp;
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	temp = glasshub->flash_status;
+	glasshub->flash_status = 0;
+	return sprintf(buf, "%d\n", temp);
+}
+
 static DEVICE_ATTR(update_fw_enable, DEV_MODE_RW, update_fw_enable_show, update_fw_enable_store);
 static DEVICE_ATTR(version, DEV_MODE_RO, version_show, NULL);
 static DEVICE_ATTR(bootloader_version, DEV_MODE_RO, bootloader_version_show, NULL);
@@ -1344,6 +1403,7 @@ static DEVICE_ATTR(detector_bias, DEV_MODE_RW, detector_bias_show, detector_bias
 static DEVICE_ATTR(debug, DEV_MODE_RW, debug_show, debug_store);
 static DEVICE_ATTR(error_code, DEV_MODE_RO, error_code_show, NULL);
 static DEVICE_ATTR(irq, DEV_MODE_RO, irq_show, NULL);
+static DEVICE_ATTR(flash_status, DEV_MODE_RO, flash_status_show, NULL);
 
 static struct attribute *attrs[] = {
 	&dev_attr_passthru_enable.attr,
@@ -1378,6 +1438,7 @@ static struct attribute *bootmode_attrs[] = {
 	&dev_attr_bootloader_version.attr,
 	&dev_attr_version.attr,
 	&dev_attr_update_fw_enable.attr,
+	&dev_attr_flash_status.attr,
 	NULL
 };
 
@@ -1429,13 +1490,13 @@ static int register_device_files(struct glasshub_data *glasshub)
 	unsigned app_version;
 
 	/* check app code version */
-	app_version = ((unsigned) glasshub->appVersionMajor << 8) | glasshub->appVersionMinor;
+	app_version = ((unsigned) glasshub->app_version_major << 8) | glasshub->app_version_minor;
 	if (app_version < MINIMUM_MCU_VERSION) {
 		dev_info(&glasshub->i2c_client->dev,
 				"%s: WARNING: MCU application code is down-rev: %u.%u\n",
 				__FUNCTION__,
-				glasshub->appVersionMajor,
-				glasshub->appVersionMinor);
+				glasshub->app_version_major,
+				glasshub->app_version_minor);
 		dev_info(&glasshub->i2c_client->dev,
 				"%s: All functions except firmware update are disabled\n",
 				__FUNCTION__);
@@ -1594,7 +1655,7 @@ static int glasshub_setup(struct glasshub_data *glasshub) {
 	buffer = CMD_BOOTLOADER_VERSION;
 	rc = _i2c_read(glasshub, &buffer, sizeof(buffer), &buffer, sizeof(buffer));
 	if (rc) goto err_out;
-	glasshub->bootloaderVersion = buffer;
+	glasshub->bootloader_version = buffer;
 
 	/* get app version number */
 	rc = get_app_version_l(glasshub);
@@ -1602,13 +1663,13 @@ static int glasshub_setup(struct glasshub_data *glasshub) {
 
 	/* check bootloader version */
 	/* TODO: Abort on anything less than V3 once we retire Joey devices */
-	if (glasshub->bootloaderVersion < 3) {
+	if (glasshub->bootloader_version < 3) {
 		dev_info(&glasshub->i2c_client->dev,
 				"%s: WARNING: MCU bootloader is down-rev: %u\n",
-				__FUNCTION__, glasshub->bootloaderVersion);
+				__FUNCTION__, glasshub->bootloader_version);
 
 		/* this version is completely borked */
-		if (glasshub->bootloaderVersion == 2) {
+		if (glasshub->bootloader_version == 2) {
 			rc = -EIO;
 			goto err_out;
 		}
