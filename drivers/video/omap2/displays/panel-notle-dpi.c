@@ -31,7 +31,15 @@
 
 #define LOG_TAG         "panel-notle: "
 
-#define REG_DELAY       0xFF
+/*
+ * Special value for LCOS init regs to delay initialization
+ * and enable DISP_ENB.
+ */
+#define REG_DELAY       0x100
+/*
+ * Special value for LCOS init to send gamma table.
+ */
+#define REG_GAMMA       0x200
 #define MAX_BRIGHTNESS  0xFF
 
 /* iCE40 registers */
@@ -77,7 +85,7 @@ enum {
 };
 
 struct init_register_value {
-        u8 reg;
+        u16 reg;
         u8 value;
 };
 
@@ -93,8 +101,28 @@ static const u8 ice40_regs[] = {
   ICE40_LED_BLUE_L,
 };
 
+struct gamma_point {
+  unsigned char red_p;
+  unsigned char green_p;
+  unsigned char blue_p;
+  unsigned char red_n;
+  unsigned char green_n;
+  unsigned char blue_n;
+};
+
+static struct gamma_point gamma_curve[] = {
+  {0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF},
+  {0x62, 0x62, 0x49, 0x9D, 0x9D, 0xB6},
+  {0x80, 0x7B, 0x67, 0x7F, 0x84, 0x98},
+  {0x95, 0x90, 0x79, 0x6A, 0x6F, 0x86},
+  {0xA5, 0xA1, 0x85, 0x5A, 0x5E, 0x7A},
+  {0xB7, 0xB3, 0x90, 0x48, 0x4C, 0x6F},
+  {0xC6, 0xC8, 0x93, 0x39, 0x37, 0x6C},
+  {0xFF, 0xDC, 0xC7, 0x00, 0x23, 0x38},
+};
+
 static struct init_register_value panel_init_regs[] = {
-  { 0x00, 0xC5 },
+  { 0x00, 0x85 },
   { 0x01, 0xC3 },
   { 0x02, 0xC3 },
   { 0x13, 0x45 },
@@ -105,54 +133,7 @@ static struct init_register_value panel_init_regs[] = {
   { 0x18, 0x88 },
   { 0x19, 0x12 },
   { 0x1A, 0xE9 },
-  { 0x21, 0x00 },
-  { 0x22, 0x00 },
-  { 0x23, 0x00 },
-  { 0x24, 0xFF },
-  { 0x25, 0xFF },
-  { 0x26, 0xFF },
-  { 0x27, 0x62 },
-  { 0x28, 0x62 },
-  { 0x29, 0x49 },
-  { 0x2A, 0x9D },
-  { 0x2B, 0x9D },
-  { 0x2C, 0xB6 },
-  { 0x2D, 0x80 },
-  { 0x2E, 0x7B },
-  { 0x2F, 0x67 },
-  { 0x30, 0x7F },
-  { 0x31, 0x84 },
-  { 0x32, 0x98 },
-  { 0x33, 0x95 },
-  { 0x34, 0x90 },
-  { 0x35, 0x79 },
-  { 0x36, 0x6A },
-  { 0x37, 0x6F },
-  { 0x38, 0x86 },
-  { 0x39, 0xA5 },
-  { 0x3A, 0xA1 },
-  { 0x3B, 0x85 },
-  { 0x3C, 0x5A },
-  { 0x3D, 0x5E },
-  { 0x3E, 0x7A },
-  { 0x3F, 0xB7 },
-  { 0x40, 0xB3 },
-  { 0x41, 0x90 },
-  { 0x42, 0x48 },
-  { 0x43, 0x4C },
-  { 0x44, 0x6F },
-  { 0x45, 0xC6 },
-  { 0x46, 0xC8 },
-  { 0x47, 0x93 },
-  { 0x48, 0x39 },
-  { 0x49, 0x37 },
-  { 0x4A, 0x6C },
-  { 0x4B, 0xFF },
-  { 0x4C, 0xDC },
-  { 0x4D, 0xC7 },
-  { 0x4E, 0x00 },
-  { 0x4F, 0x23 },
-  { 0x50, 0x38 },
+  { REG_GAMMA, 0x21 },
   { REG_DELAY, 0x0A },
   { 0x00, 0x80 },
 };
@@ -487,47 +468,6 @@ static ssize_t colormix_store(struct notle_drv_data *notle_data,
 
         return size;
 }
-static ssize_t actel_fpga_config_show(struct notle_drv_data *notle_data,
-                                      char *buf) {
-        struct actel_fpga_config config;
-        if (actel_fpga_read_config(&config)) {
-          return -EIO;
-        }
-        return snprintf(buf, PAGE_SIZE, "0x%x/%d/%d/%d\n",
-                        config.config, config.red,
-                        config.green, config.blue);
-}
-static ssize_t actel_fpga_config_store(struct notle_drv_data *notle_data,
-                                 const char *buf, size_t size) {
-        int config;
-        unsigned int red, green, blue;
-
-        if (sscanf(buf, "0x%x/%u/%u/%u", &config, &red, &green, &blue) != 4) {
-          printk(KERN_ERR LOG_TAG "Failed to actel_fpga_config_store:"
-                 " malformed config: %s\n", buf);
-          return -EINVAL;
-        }
-
-        if (((config & ACTEL_FPGA_CONFIG_MASK) != config) ||
-            (red > 511) || (green > 511) || (blue > 511)) {
-          printk(KERN_ERR LOG_TAG "Failed to actel_fpga_config_store:"
-                 " invalid config: %s\n", buf);
-          return -EINVAL;
-        }
-
-        actel_fpga_config.config = (u8)config;
-        actel_fpga_config.red    = (u16)red;
-        actel_fpga_config.green  = (u16)green;
-        actel_fpga_config.blue   = (u16)blue;
-
-        if (actel_fpga_write_config(&actel_fpga_config)) {
-          printk(KERN_ERR LOG_TAG "Failed to actel_fpga_config_store:"
-                 "i2c write failed\n");
-          return -EIO;
-        }
-
-        return size;
-}
 static ssize_t list_testpatterns(struct notle_drv_data *notle_data, char *buf) {
         int i;
 
@@ -560,20 +500,6 @@ static ssize_t testpattern_store(struct notle_drv_data *notle_data,
         }
 
         switch (version) {
-          case V4_FLY:
-          case V5_GNU:
-                if (notle_data->pattern == TESTPATTERN_NONE) {
-                        actel_fpga_config.config &= ~ACTEL_FPGA_CONFIG_TEST_PATTERN;
-                } else {
-                        actel_fpga_config.config |= ACTEL_FPGA_CONFIG_TEST_PATTERN;
-                }
-
-                if (actel_fpga_write_config(&actel_fpga_config)) {
-                        printk(KERN_ERR LOG_TAG "Failed to testpattern_store: "
-                               "i2c write failed\n");
-                        return -EIO;
-                }
-                break;
           case V6_HOG:
           case V1_EVT1:
           case V1_EVT2:
@@ -592,6 +518,8 @@ static ssize_t testpattern_store(struct notle_drv_data *notle_data,
                 break;
           case V1_DOG:
           case V3_EMU:
+          case V4_FLY:
+          case V5_GNU:
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -993,7 +921,8 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
             case V5_GNU:
               led_config_to_fpga_config(&led_config, &actel_fpga_config);
               if (actel_fpga_write_config(&actel_fpga_config)) {
-                printk(KERN_ERR LOG_TAG "Failed to brightness_store: i2c write failed\n");
+                printk(KERN_ERR LOG_TAG "Failed to brightness_store: "
+                       "i2c write failed\n");
                 return -EIO;
               }
               break;
@@ -1001,24 +930,79 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
             case V1_EVT1:
             case V1_EVT2:
               if (led_config.brightness) {
-                led_config_to_linecuts(notle_data->dssdev, &led_config, &r, &g, &b);
+                led_config_to_linecuts(notle_data->dssdev, &led_config,
+                                       &r, &g, &b);
                 if (ice40_set_backlight(1, r, g, b)) {
-                  printk(KERN_ERR LOG_TAG "Failed to brightness_store: spi write failed\n");
+                  printk(KERN_ERR LOG_TAG "Failed to brightness_store: "
+                         "spi write failed\n");
                 }
               } else {
                 if (ice40_set_backlight(0, -1, -1, -1)) {
-                  printk(KERN_ERR LOG_TAG "Failed to brightness_store: spi write failed\n");
+                  printk(KERN_ERR LOG_TAG "Failed to brightness_store: "
+                         "spi write failed\n");
                 }
               }
               break;
             default:
-              printk(KERN_ERR LOG_TAG "Unsupported Notle version: %d\n", version);
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version: %d\n",
+                     version);
               break;
           }
         }
 
         return size;
 }
+static ssize_t gamma_show(struct notle_drv_data *notle_data, char *buf,
+                          int gamma) {
+        return snprintf(buf, PAGE_SIZE, "%d %d %d %d %d %d\n",
+                        gamma_curve[gamma].red_p,
+                        gamma_curve[gamma].green_p,
+                        gamma_curve[gamma].blue_p,
+                        gamma_curve[gamma].red_n,
+                        gamma_curve[gamma].green_n,
+                        gamma_curve[gamma].blue_n);
+}
+static ssize_t gamma_store(struct notle_drv_data *notle_data, const char *buf,
+                           size_t size, int gamma) {
+        unsigned int r_p, g_p, b_p, r_n, g_n, b_n;
+        if (sscanf(buf, "%u %u %u %u %u %u", &r_p, &g_p, &b_p,
+                   &r_n, &g_n, &b_n) != 6) {
+          printk(KERN_ERR LOG_TAG "Failed to gamma_store, malformed"
+                 " gamma: %s\n", buf);
+          return -EINVAL;
+        }
+
+        if ((r_p | g_p | b_p | r_n | g_n | b_n) & ~0xFF) {
+          printk(KERN_ERR LOG_TAG "Failed to gamma_store, invalid value, "
+                 "expected single bytes: %s\n", buf);
+          return -EINVAL;
+        }
+
+        gamma_curve[gamma].red_p   = (u8)(r_p & 0xFF);
+        gamma_curve[gamma].green_p = (u8)(g_p & 0xFF);
+        gamma_curve[gamma].blue_p  = (u8)(b_p & 0xFF);
+        gamma_curve[gamma].red_n   = (u8)(r_n & 0xFF);
+        gamma_curve[gamma].green_n = (u8)(g_n & 0xFF);
+        gamma_curve[gamma].blue_n  = (u8)(b_n & 0xFF);
+        return size;
+}
+#define GAMMA_SHOW_STORE(x) \
+static ssize_t gamma ## x ## _show(struct notle_drv_data *d, \
+                                   char *buf) { \
+        return gamma_show(d, buf, x - 1); \
+} \
+static ssize_t gamma ## x ## _store(struct notle_drv_data *d, \
+                                    const char *buf, size_t size) { \
+        return gamma_store(d, buf, size, x - 1); \
+}
+GAMMA_SHOW_STORE(1)
+GAMMA_SHOW_STORE(2)
+GAMMA_SHOW_STORE(3)
+GAMMA_SHOW_STORE(4)
+GAMMA_SHOW_STORE(5)
+GAMMA_SHOW_STORE(6)
+GAMMA_SHOW_STORE(7)
+GAMMA_SHOW_STORE(8)
 
 /* Sysfs attribute wrappers for show/store functions */
 struct panel_notle_attribute {
@@ -1043,8 +1027,6 @@ static NOTLE_ATTR(reg_value, S_IRUGO|S_IWUSR,
                   reg_value_show, reg_value_store);
 static NOTLE_ATTR(colormix, S_IRUGO|S_IWUSR,
                   colormix_show, colormix_store);
-static NOTLE_ATTR(actel_fpga_config, S_IRUGO|S_IWUSR,
-                  actel_fpga_config_show, actel_fpga_config_store);
 static NOTLE_ATTR(testpattern, S_IRUGO|S_IWUSR,
                   testpattern_show, testpattern_store);
 static NOTLE_ATTR(testmono, S_IRUGO|S_IWUSR,
@@ -1061,6 +1043,22 @@ static NOTLE_ATTR(mono, S_IRUGO|S_IWUSR,
                   mono_show, mono_store);
 static NOTLE_ATTR(brightness, S_IRUGO|S_IWUSR,
                   brightness_show, brightness_store);
+static NOTLE_ATTR(gamma1, S_IRUGO|S_IWUSR,
+                  gamma1_show, gamma1_store);
+static NOTLE_ATTR(gamma2, S_IRUGO|S_IWUSR,
+                  gamma2_show, gamma2_store);
+static NOTLE_ATTR(gamma3, S_IRUGO|S_IWUSR,
+                  gamma3_show, gamma3_store);
+static NOTLE_ATTR(gamma4, S_IRUGO|S_IWUSR,
+                  gamma4_show, gamma4_store);
+static NOTLE_ATTR(gamma5, S_IRUGO|S_IWUSR,
+                  gamma5_show, gamma5_store);
+static NOTLE_ATTR(gamma6, S_IRUGO|S_IWUSR,
+                  gamma6_show, gamma6_store);
+static NOTLE_ATTR(gamma7, S_IRUGO|S_IWUSR,
+                  gamma7_show, gamma7_store);
+static NOTLE_ATTR(gamma8, S_IRUGO|S_IWUSR,
+                  gamma8_show, gamma8_store);
 
 static struct attribute *panel_notle_sysfs_attrs[] = {
         &panel_notle_attr_reset.attr,
@@ -1071,7 +1069,6 @@ static struct attribute *panel_notle_sysfs_attrs[] = {
         &panel_notle_attr_reg_addr.attr,
         &panel_notle_attr_reg_value.attr,
         &panel_notle_attr_colormix.attr,
-        &panel_notle_attr_actel_fpga_config.attr,
         &panel_notle_attr_testpattern.attr,
         &panel_notle_attr_testmono.attr,
         &panel_notle_attr_forcer.attr,
@@ -1080,6 +1077,14 @@ static struct attribute *panel_notle_sysfs_attrs[] = {
         &panel_notle_attr_cpsel.attr,
         &panel_notle_attr_mono.attr,
         &panel_notle_attr_brightness.attr,
+        &panel_notle_attr_gamma1.attr,
+        &panel_notle_attr_gamma2.attr,
+        &panel_notle_attr_gamma3.attr,
+        &panel_notle_attr_gamma4.attr,
+        &panel_notle_attr_gamma5.attr,
+        &panel_notle_attr_gamma6.attr,
+        &panel_notle_attr_gamma7.attr,
+        &panel_notle_attr_gamma8.attr,
         NULL,
 };
 
@@ -1443,7 +1448,7 @@ static int actel_fpga_write_config(struct actel_fpga_config *config) {
 
 /* Functions to perform actions on the panel and DSS driver */
 static int panel_notle_power_on(struct omap_dss_device *dssdev) {
-        int i, r, g, b;
+        int i, j, r, g, b, gamma_reg;
         struct panel_notle_data *panel_data = get_panel_data(dssdev);
         struct notle_drv_data *drv_data = dev_get_drvdata(&dssdev->dev);
         struct panel_config *panel_config = drv_data->panel_config;
@@ -1490,9 +1495,34 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
             msleep(panel_init_regs[i].value);
             continue;
           }
+          if (panel_init_regs[i].reg == REG_GAMMA) {
+            gamma_reg = panel_init_regs[i].value;
+            for (j = 0; j < (sizeof(gamma_curve) /
+                             sizeof(struct gamma_point)); ++j) {
+              panel_write_register(gamma_reg + (6 * j) + 0,
+                                   gamma_curve[j].red_p);
+              panel_write_register(gamma_reg + (6 * j) + 1,
+                                   gamma_curve[j].green_p);
+              panel_write_register(gamma_reg + (6 * j) + 2,
+                                   gamma_curve[j].blue_p);
+              panel_write_register(gamma_reg + (6 * j) + 3,
+                                   gamma_curve[j].red_n);
+              panel_write_register(gamma_reg + (6 * j) + 4,
+                                   gamma_curve[j].green_n);
+              panel_write_register(gamma_reg + (6 * j) + 5,
+                                   gamma_curve[j].blue_n);
+            }
+            continue;
+          }
 
-          panel_write_register(panel_init_regs[i].reg,
-                               panel_init_regs[i].value);
+          /* Make sure we don't misinterpret any special regs. */
+          if (!(panel_init_regs[i].reg & ~0xFF)) {
+            panel_write_register((u8)(panel_init_regs[i].reg & 0xFF),
+                                 panel_init_regs[i].value);
+          } else {
+            printk(KERN_WARNING LOG_TAG "Unrecognized special register in"
+                   " LCOS initialization: 0x%04x", panel_init_regs[i].reg);
+          }
         }
 
         /* Load defaults */
@@ -1671,28 +1701,28 @@ static int panel_notle_enable(struct omap_dss_device *dssdev) {
 
 #define L3_TPUT 800000 /* MiB/s */
 static int panel_notle_resume(struct omap_dss_device *dssdev) {
-	struct device *dss_dev;
-	int r = -1;
+        struct device *dss_dev;
+        int r = -1;
 
-	/*
-	 * This is a notle optimization.
-	 * Hold L3 constraint to OPP 100 (200Mhz) when display is on
-	 */
-	if (!requested_l3_throughput) {
-		dss_dev = omap_hwmod_name_get_dev("dss_core");
-		if (dss_dev) {
-			r = omap_pm_set_min_bus_tput(&dssdev->dev,
-					 OCP_INITIATOR_AGENT,
-					 L3_TPUT);
+        /*
+         * This is a notle optimization.
+         * Hold L3 constraint to OPP 100 (200Mhz) when display is on
+         */
+        if (!requested_l3_throughput) {
+                dss_dev = omap_hwmod_name_get_dev("dss_core");
+                if (dss_dev) {
+                        r = omap_pm_set_min_bus_tput(&dssdev->dev,
+                                         OCP_INITIATOR_AGENT,
+                                         L3_TPUT);
 
-			if (!r)
-				requested_l3_throughput = 1;
+                        if (!r)
+                                requested_l3_throughput = 1;
 
-		}
+                }
 
-		if (r)
-			printk(KERN_ERR LOG_TAG "Failed to set L3 bus speed\n");
-	}
+                if (r)
+                        printk(KERN_ERR LOG_TAG "Failed to set L3 bus speed\n");
+        }
 
         r = panel_notle_power_on(dssdev);
         if (r)
@@ -1714,14 +1744,14 @@ static int panel_notle_suspend(struct omap_dss_device *dssdev) {
 
         dssdev->state = OMAP_DSS_DISPLAY_SUSPENDED;
 
-	/*
-	 * Release L3 constraint on display off.
-	 */
-	if (requested_l3_throughput) {
-		omap_pm_set_min_bus_tput(&dssdev->dev,
-			OCP_INITIATOR_AGENT, -1);
-		requested_l3_throughput = 0;
-	}
+        /*
+         * Release L3 constraint on display off.
+         */
+        if (requested_l3_throughput) {
+                omap_pm_set_min_bus_tput(&dssdev->dev,
+                        OCP_INITIATOR_AGENT, -1);
+                requested_l3_throughput = 0;
+        }
 
 
         return 0;
