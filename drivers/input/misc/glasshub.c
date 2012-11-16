@@ -212,6 +212,7 @@ struct glasshub_data {
 	uint8_t fw_checksum;
 	struct mutex device_lock;
 	long long irq_timestamp;
+	unsigned long sample_count;
 	volatile unsigned long flags;
 	uint8_t don_doff_state;
 	uint8_t bootloader_version;
@@ -543,6 +544,7 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 		/* read value */
 		rc = _i2c_read_reg(glasshub, REG16_PROX_DATA, &value);
 		if (rc) goto Error;
+		++glasshub->sample_count;
 
 		/* Buffer up data (and drop data that exceeds our buffer
 		 * length). Note that when the high bit is set, there is
@@ -1379,6 +1381,13 @@ static ssize_t flash_status_show(struct device *dev, struct device_attribute *at
 	return sprintf(buf, "%d\n", temp);
 }
 
+/* show count of received samples */
+static ssize_t sample_count_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	return sprintf(buf, "%lu\n", glasshub->sample_count);
+}
+
 static DEVICE_ATTR(update_fw_enable, DEV_MODE_RW, update_fw_enable_show, update_fw_enable_store);
 static DEVICE_ATTR(version, DEV_MODE_RO, version_show, NULL);
 static DEVICE_ATTR(bootloader_version, DEV_MODE_RO, bootloader_version_show, NULL);
@@ -1404,6 +1413,7 @@ static DEVICE_ATTR(debug, DEV_MODE_RW, debug_show, debug_store);
 static DEVICE_ATTR(error_code, DEV_MODE_RO, error_code_show, NULL);
 static DEVICE_ATTR(irq, DEV_MODE_RO, irq_show, NULL);
 static DEVICE_ATTR(flash_status, DEV_MODE_RO, flash_status_show, NULL);
+static DEVICE_ATTR(sample_count, DEV_MODE_RO, sample_count_show, NULL);
 
 static struct attribute *attrs[] = {
 	&dev_attr_passthru_enable.attr,
@@ -1427,6 +1437,7 @@ static struct attribute *attrs[] = {
 	&dev_attr_debug.attr,
 	&dev_attr_error_code.attr,
 	&dev_attr_irq.attr,
+	&dev_attr_sample_count.attr,
 	NULL
 };
 
