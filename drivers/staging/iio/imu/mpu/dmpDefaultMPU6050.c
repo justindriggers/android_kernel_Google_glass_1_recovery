@@ -25,51 +25,54 @@
 #include "dmpKey.h"
 #include "dmpmap.h"
 
-#define GLU_CHECK_STATE_1       (1227)
-#define GLU_CHECK_STATE_0       (1177)
-#define CFG_27                  (2851)
-#define GLU_CHECK_STATE_2       (1203)
-#define CFG_20                  (2270)
-#define CFG_23                  (2854)
-#define CFG_FIFO_ON_EVENT       (2800)
-#define CFG_ORIENT_IRQ_1        (2725)
-#define X_GRT_Y_TMP             (1510)
-#define END_ORIENT_1            (1901)
+#define GLU_CHECK_STATE_1       (1295)
+#define GLU_CHECK_STATE_0       (1241)
+#define CFG_27                  (2935)
+#define GLU_CHECK_STATE_2       (1268)
+#define CFG_20                  (2354)
+#define CFG_23                  (2938)
+#define CFG_FIFO_ON_EVENT       (2884)
+#define CFG_ORIENT_IRQ_1        (2809)
+#define X_GRT_Y_TMP             (1594)
+#define END_ORIENT_1            (1985)
 #define CFG_DR_INT              (1029)
-#define CFG_16                  (2855)
+#define FCFG_3                  (1082)
+#define CFG_16                  (2939)
 #define CFG_AUTH                (1035)
 #define FCFG_1                  (1062)
-#define SKIP_X_GRT_Y_TMP        (1511)
-#define SKIP_END_COMPARE        (1587)
-#define FCFG_3                  (1302)
+#define SKIP_X_GRT_Y_TMP        (1595)
+#define SKIP_END_COMPARE        (1671)
+#define GLU_END_0               (1239)
 #define FCFG_2                  (1066)
-#define GLU_END_2               (1221)
-#define GLU_END_3               (1243)
-#define FCFG_7                  (1076)
-#define FCFG_6                  (1320)
-#define GLU_END_4               (1260)
-#define NO_ORIENT_INTERRUPT     (1917)
-#define GLU_END_5               (1270)
-#define CFG_8                   (2829)
-#define CFG_15                  (2837)
-#define GLU_END_1               (1197)
-#define END_COMPARE_Y_X_TMP     (1559)
-#define CFG_6                   (2858)
-#define CFG_7                   (1413)
-#define END_COMPARE_Y_X         (1636)
-#define END_COMPARE_Y_X_TMP2    (1607)
-#define CFG_LP_QUAT             (2823)
-#define END_ORIENT              (1930)
-#define GLU_STATE_2             (1213)
-#define GLU_STATE_0             (1188)
-#define GLU_STATE_1             (1236)
-#define CFG_MOTION_BIAS         (1416)
-#define X_GRT_Y                 (1560)
-#define TEMPLABEL               (2370)
-#define NOT_TIME_MINUS_1        (1720)
-#define CFG_DISPLAY_ORIENT_INT  (1898)
-#define END_COMPARE_Y_X_TMP3    (1586)
-#define X_GRT_Y_TMP2            (1531)
+#define GLU_END_2               (1286)
+#define GLU_END_3               (1311)
+#define FCFG_7                  (1073)
+#define FCFG_6                  (1404)
+#define GLU_END_6               (1361)
+#define GLU_END_4               (1328)
+#define NO_ORIENT_INTERRUPT     (2001)
+#define GLU_END_5               (1351)
+#define GLU_STATE_2_TRIGGERED   (1352)
+#define CFG_8                   (2913)
+#define CFG_15                  (2921)
+#define GLU_END_1               (1262)
+#define END_COMPARE_Y_X_TMP     (1643)
+#define CFG_6                   (2942)
+#define CFG_7                   (1497)
+#define END_COMPARE_Y_X         (1720)
+#define END_COMPARE_Y_X_TMP2    (1691)
+#define CFG_LP_QUAT             (2907)
+#define END_ORIENT              (2014)
+#define GLU_STATE_2             (1278)
+#define GLU_STATE_0             (1253)
+#define GLU_STATE_1             (1304)
+#define CFG_MOTION_BIAS         (1500)
+#define X_GRT_Y                 (1644)
+#define TEMPLABEL               (2454)
+#define NOT_TIME_MINUS_1        (1804)
+#define CFG_DISPLAY_ORIENT_INT  (1982)
+#define END_COMPARE_Y_X_TMP3    (1670)
+#define X_GRT_Y_TMP2            (1615)
 #define D_0_22                  (22+512)
 #define D_0_24                  (24+512)
 
@@ -155,6 +158,13 @@
 #define D_GLU_LPF_GAIN          (45 * 16 + 8)
 #define D_GLU_ONE_MINUS_LPF_GAIN (45 * 16 + 12)
 #define D_GLU_ROLL_THRESHOLD    (46 * 16 + 12)
+// new data for spec v4
+#define D_GLU_GYRO_BIAS_LPF_GAIN              (60 * 16 + 4)
+#define D_GLU_ONE_MINUS_GYRO_BIAS_LPF_GAIN    (60 * 16 + 8)
+#define D_GLU_RELATIVE_LOOK_UP_LEAK_GAIN      (56 * 16 + 8)
+#define D_GLU_RELATIVE_ANGLE_THRESHOLD        (58 * 16 + 12)
+#define D_GLU_HORIZONTAL_THRESHOLD_SQUARED    (58 * 16 + 8)
+#define D_GLU_VERSION                         (56 * 16 + 12)
 
 #define D_AUTH_OUT               (992)
 #define D_AUTH_IN                (996)
@@ -183,11 +193,21 @@
 #define D_HOST_NO_MOT          (976)
 
 static const struct tKeyLabel dmpTConfig[] = {
+	//{KEY_GLU_CHECK_STATE_1,         GLU_CHECK_STATE_1},
+	//{KEY_GLU_CHECK_STATE_0,         GLU_CHECK_STATE_0},
+	//{KEY_GLU_CHECK_STATE_2,         GLU_CHECK_STATE_2},
 	{KEY_CFG_27,                    CFG_27},
 	{KEY_CFG_20,                    CFG_20},
 	{KEY_CFG_23,                    CFG_23},
 	{KEY_CFG_FIFO_ON_EVENT,         CFG_FIFO_ON_EVENT},
 	{KEY_CFG_ORIENT_IRQ_1,          CFG_ORIENT_IRQ_1},
+	/*{KEY_GLU_END_1,                 GLU_END_1},
+	{KEY_GLU_END_2,                 GLU_END_2},
+	{KEY_GLU_END_3,                 GLU_END_3},
+	{KEY_GLU_END_4,                 GLU_END_4},
+	{KEY_GLU_STATE_0,               GLU_STATE_0},
+	{KEY_GLU_STATE_1,               GLU_STATE_1},
+	{KEY_GLU_STATE_2,               GLU_STATE_2},*/
 	{KEY_X_GRT_Y_TMP,               X_GRT_Y_TMP},
 	{KEY_CFG_DR_INT,                CFG_DR_INT},
 	{KEY_CFG_AUTH,                  CFG_AUTH},
@@ -210,6 +230,7 @@ static const struct tKeyLabel dmpTConfig[] = {
 	{KEY_END_COMPARE_Y_X,           END_COMPARE_Y_X},
 	{KEY_CFG_LP_QUAT,               CFG_LP_QUAT},
 	{KEY_END_ORIENT,                END_ORIENT},
+	//{KEY_CFG_FLICK_IN,              CFG_FLICK_IN},
 	{KEY_CFG_7,                     CFG_7},
 	{KEY_CFG_MOTION_BIAS,           CFG_MOTION_BIAS},
 	{KEY_X_GRT_Y,                   X_GRT_Y},
@@ -232,7 +253,6 @@ static const struct tKeyLabel dmpTConfig[] = {
 	{KEY_D_1_92,               D_1_92},
 	{KEY_D_1_160,               D_1_160},
 	{KEY_D_1_176,               D_1_176},
-	{KEY_D_1_178,               D_1_178},
 	{KEY_D_1_218,               D_1_218},
 	{KEY_D_1_232,               D_1_232},
 	{KEY_D_1_250,               D_1_250},
@@ -244,7 +264,7 @@ static const struct tKeyLabel dmpTConfig[] = {
 	{KEY_DMP_SH_TH_X,           DMP_SH_TH_X},
 	{KEY_DMP_SH_TH_Z,           DMP_SH_TH_Z},
 	{KEY_DMP_ORIENT,            DMP_ORIENT},
-	{KEY_D_AUTH_OUT,            D_AUTH_OUT},
+	{KEY_D_AUTH_OUT,            D_AUTH_OUT},              
 	{KEY_D_AUTH_IN,             D_AUTH_IN},
 	{KEY_D_AUTH_A,              D_AUTH_A},
 	{KEY_D_AUTH_B,              D_AUTH_B},
@@ -274,6 +294,14 @@ static const struct tKeyLabel dmpTConfig[] = {
 	{KEY_D_GLU_LPF_GAIN,                  D_GLU_LPF_GAIN},
 	{KEY_D_GLU_ONE_MINUS_LPF_GAIN,        D_GLU_ONE_MINUS_LPF_GAIN},
 	{KEY_D_GLU_ROLL_THRESHOLD,          D_GLU_ROLL_THRESHOLD},
+	// new keys for spec 4
+	{KEY_D_GLU_GYRO_BIAS_LPF_GAIN,                    D_GLU_GYRO_BIAS_LPF_GAIN},
+	{KEY_D_GLU_ONE_MINUS_GYRO_BIAS_LPF_GAIN,          D_GLU_ONE_MINUS_GYRO_BIAS_LPF_GAIN},
+	{KEY_D_GLU_RELATIVE_LOOK_UP_LEAK_GAIN,            D_GLU_RELATIVE_LOOK_UP_LEAK_GAIN},
+	{KEY_D_GLU_RELATIVE_ANGLE_THRESHOLD,              D_GLU_RELATIVE_ANGLE_THRESHOLD},
+	{KEY_D_GLU_HORIZONTAL_THRESHOLD_SQUARED,          D_GLU_HORIZONTAL_THRESHOLD_SQUARED},
+	{KEY_D_GLU_VERSION,                               D_GLU_VERSION},
+	// end new keys for spec 4
 	{KEY_D_PEDSTD_BP_B, D_PEDSTD_BP_B},
 	{KEY_D_PEDSTD_HP_A, D_PEDSTD_HP_A},
 	{KEY_D_PEDSTD_HP_B, D_PEDSTD_HP_B},
