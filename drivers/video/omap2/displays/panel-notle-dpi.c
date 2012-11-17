@@ -1153,16 +1153,6 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
                                    (panel_data->blue_max_mw * MAX_BRIGHTNESS)))) /
                                  10000;
 
-        /* Disable any channels that are explicitly at zero percent */
-        if (!led->red_percent) *red_linecut = total_lines;
-        if (!led->green_percent) *green_linecut = total_lines;
-        if (!led->blue_percent) *blue_linecut = total_lines;
-
-        /* Set to full-brightness any channels that overflowed */
-        if (*red_linecut < 0) *red_linecut = 0;
-        if (*green_linecut < 0) *green_linecut = 0;
-        if (*blue_linecut < 0) *blue_linecut = 0;
-
         /*
          * This will cause a slight color shift at very dim brightness values,
          * but the altnerative is to cause a sudden color shift by dropping
@@ -1176,6 +1166,16 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
           *green_linecut = dssdev->panel.timings.y_res - 3;
         if (*blue_linecut > dssdev->panel.timings.y_res - 3)
           *blue_linecut = dssdev->panel.timings.y_res - 3;
+
+        /* Disable any channels that are explicitly at zero percent */
+        if (!led->red_percent) *red_linecut = total_lines;
+        if (!led->green_percent) *green_linecut = total_lines;
+        if (!led->blue_percent) *blue_linecut = total_lines;
+
+        /* Set to full-brightness any channels that overflowed */
+        if (*red_linecut < 0) *red_linecut = 0;
+        if (*green_linecut < 0) *green_linecut = 0;
+        if (*blue_linecut < 0) *blue_linecut = 0;
 
         if (red != *red_linecut || green != *green_linecut || blue != *blue_linecut) {
           printk(KERN_INFO LOG_TAG "Linecuts truncated: %i/%i/%i -> %i/%i/%i"
