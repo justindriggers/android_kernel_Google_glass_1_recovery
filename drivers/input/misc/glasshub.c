@@ -164,39 +164,52 @@
 /*
  * Basic theory of operation:
  *
- * The glass hub device comes up in bootloader mode. This mode supports only 3 commands:
+ * The glass hub device comes up in bootloader mode. This mode supports only 5 commands:
  *
  * BOOT		Jump to the application code stored in flash
  * FLASH	Download a 64-byte page of firmware to flash
- * VERSION	Returns the 2-byte application version
+ * FLASH_STATUS	Report status of last flash operation
+ * APP_VERSION	Returns the 2-byte application version
+ * BOOT_VERSION	Returns the 1-byte bootloader version
  *
- * In theory, it is possible to flash the bootloader code in place, but only if there
- * are no changes in the return code. In practice, if it becomes necessary to update
- * the bootloader, the best solution is to flash a temporary bootloader as application
- * code, boot it, and then flash the main bootloader from the temporary bootloader.
- * There is a risk that a failure during the bootloader flash could "brick" the MCU.
- * In that case, it will be necessary to attach a SWIM connector and use the debugger
+ * It is now possible to flash the bootloader by loading special application
+ * code. It reports a version number of 255.xxx which allows the driver to
+ * identify it as special code to flash the bootloader. Flash operation
+ * proceeds as normal except that at the point where the firmware image is to
+ * be flashed, the driver boots into the special application code. Flashing
+ * takes place as usual, the driver then resets into the new bootloader code
+ * and reads the bootloader version. To enable this process from user space,
+ * first download the special bootloader app code, then write a 1 to the
+ * fw_update_enable sysfs node, download the bootloader app code, then write
+ * a 255 to the fw_update_enable node. It is this last step that tells the
+ * driver code that you want to write bootloader code instead of app code.
+ * There is some risk that this operation could result in a bricked device,
+ * since a failure to write the boot code is unrecoverable. In this case,
+ * it will be necessary to attach a SWIM connector and use the debugger
  * to flash a new bootloader image.
  *
- * The application code can be flashed by a simple script. First, write a 1 to the
- * enable_fw_update sysfs node. The driver will allocate a block of memory to save the
- * firmware image and clear the dirty bits for each page of code. Next, write the .S19
- * the .S19 application code image in text format (e.g. "cat") to the update_fw_data
- * sysfs node. The driver will validate the checksum of each line and store it in the
- * binary code buffer, setting a dirty bit for each 64-byte page of code it touches.
- * Be aware that it doesn't backfill missing data, i.e. if you touch a single byte on
- * a page, the rest of the page will be written with zeroes. Thus, it's always a good
- * idea to flash the entire image each time. Finally, write a 0 to the enable_fw_update
- * sysfs node. This will cause the driver to write each dirty page to the device. Note
- * that the concept of a flash programming mode is purely an artifact of the driver
- * and not something the device itself enforces or is even aware of.
+ * The application code can be flashed by a simple script. First, write a 1
+ * to the enable_fw_update sysfs node. The driver will allocate a block of
+ * memory to save the firmware image and clear the dirty bits for each page
+ * of code. Next, write the .S19 the .S19 application code image in text
+ * format (e.g. "cat") to the update_fw_data sysfs node. The driver will
+ * validate the checksum of each line and store it in the binary code buffer,
+ * setting a dirty bit for each 64-byte page of code it touches. Be aware
+ * that it doesn't backfill missing data, i.e. if you touch a single byte on
+ * a page, the rest of the page will be written with zeroes. Thus, it's
+ * always a good idea to flash the entire image each time. Finally, write a 0
+ * to the enable_fw_update sysfs node. This will cause the driver to write
+ * each dirty page to the device. Note that the concept of a flash
+ * programming mode is purely an artifact of the driver and not something the
+ * device itself enforces or is even aware of.
  *
- * For normal operation, the driver will automatically boot the device to start running
- * application code the first time it receives any command that requires the application
- * code. From the application code, a RESET command will cause the device to return to the
- * bootloader. It is possible that a bug in the application code will make it impossible
- * to return to the bootloader. In this case, it may be necessary to power-down the
- * device to force it back into the bootloader. This allows for recovery in case there
+ * For normal operation, the driver will automatically boot the device to
+ * start running application code the first time it receives any command that
+ * requires the application code. From the application code, a RESET command
+ * will cause the device to return to the bootloader. It is possible that a
+ * bug in the application code will make it impossible to return to the
+ * bootloader. In this case, it may be necessary to power-down the device to
+ * force it back into the bootloader. This allows for recovery in case there
  * is a serious bug in the application code.
  */
 
