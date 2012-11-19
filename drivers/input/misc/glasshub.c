@@ -47,6 +47,9 @@
 /* minimum MCU version for this driver */
 #define MINIMUM_MCU_VERSION	9
 
+/* special app code to flash the bootloader */
+#define BOOTLOADER_FLASHER	0xff
+
 /* number of retries */
 #define NUMBER_OF_I2C_RETRIES	3
 
@@ -414,10 +417,14 @@ int boot_device_l(struct glasshub_data *glasshub)
 
 	if (test_bit(FLAG_DEVICE_BOOTED, &glasshub->flags)) goto err_out;
 
-	/* don't allow boot from flash mode */
-	if (test_bit(FLAG_FLASH_MODE, &glasshub->flags)) {
-		rc = -ENODEV;
-		goto err_out;
+	/* don't allow boot from flash mode, unless boot flasher app
+	 * code has been loaded.
+	 */
+	if (glasshub->app_version_major != BOOTLOADER_FLASHER) {
+		if (test_bit(FLAG_FLASH_MODE, &glasshub->flags)) {
+			rc = -ENODEV;
+			goto err_out;
+		}
 	}
 
 	/* tell glass hub to boot */
@@ -432,6 +439,9 @@ int boot_device_l(struct glasshub_data *glasshub)
 				__FUNCTION__);
 		goto err_out;
 	}
+
+	/* if special boot flasher code, don't do anything else */
+	if (glasshub->app_version_major == BOOTLOADER_FLASHER) return rc;
 
 	/* verify part ID */
 	if (_check_part_id(glasshub)) {
@@ -1010,7 +1020,9 @@ static void exit_flash_mode_l(struct glasshub_data *glasshub)
 	get_app_version_l(glasshub);
 
 	/* register run mode sysfs files */
-	register_device_files(glasshub);
+	if (glasshub->app_version_major != BOOTLOADER_FLASHER) {
+		register_device_files(glasshub);
+	}
 }
 
 /* sysfs node to download device firmware to be flashed */
@@ -1206,6 +1218,8 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 {
 	unsigned long value = 0;
 	int rc = 0;
+	int bootflasher = 0;
+	int old_boot;
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 
 	if (kstrtoul(buf, 10, &value)) {
@@ -1218,9 +1232,18 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 
 	mutex_lock(&glasshub->device_lock);
 
+	/* bootloader version 3 does not support checksum */
+	old_boot = (glasshub->bootloader_version < 4) ? 1 : 0;
+
+	/* handle special bootflasher case */
+	if ((value == BOOTLOADER_FLASHER) && (glasshub->app_version_major == BOOTLOADER_FLASHER)) {
+		bootflasher = 1;
+		old_boot = 0;
+		value = 0;
+	}
+
 	/* enable firmware flash */
 	if (value) {
-
 		if (!test_bit(FLAG_FLASH_MODE, &glasshub->flags)) {
 			/* allocate memory and clear dirty bits */
 			if (!glasshub->fw_image) {
@@ -1246,6 +1269,7 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 			glasshub->flash_status = FLASH_STATUS_READY;
 		}
 	} else {
+
 		/* exit flash, write code to device */
 		if (test_bit(FLAG_FLASH_MODE, &glasshub->flags)) {
 
@@ -1256,14 +1280,20 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 				goto ExitFlashMode;
 			}
 
+			/* if flashing boot code, boot into application code */
+			if (bootflasher) {
+				rc = boot_device_l(glasshub);
+				if (rc) {
+					glasshub->flash_status = FLASH_ERROR_DEVICE_RESET_ERROR;
+					goto ExitFlashMode;
+				}
+			}
+
 			/* here's where we flash the image if it has dirty bits */
 			if (glasshub->fw_image) {
 				int pagesFlashed = 0;
 				int page;
 				uint8_t checksum;
-
-				/* bootloader version 3 does not support checksum */
-				int oldBoot = (glasshub->bootloader_version < 4) ? 1 : 0;
 
 #if DEBUG_FLASH_MODE
 				dev_info(&glasshub->i2c_client->dev,
@@ -1306,7 +1336,7 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 #endif
 						/* don't send checksum for older bootloader version */
 						rc = _i2c_write_mult(glasshub, buffer,
-								sizeof(buffer) - oldBoot);
+								sizeof(buffer) - old_boot);
 						if (rc) {
 							dev_err(&glasshub->i2c_client->dev,
 									"%s Unable to flash glasshub device\n",
@@ -1316,7 +1346,7 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 						}
 
 						/* new bootloader: check status for error */
-						if (!oldBoot) {
+						if (!old_boot) {
 							buffer[0] = CMD_FLASH_STATUS;
 							rc = _i2c_read(glasshub, buffer, 1, buffer, 1);
 							if (rc) {
@@ -1342,6 +1372,25 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 				glasshub->flash_status = pagesFlashed ? FLASH_STATUS_OK : FLASH_ERROR_NO_PAGES_FLASHED;
 			}
 ExitFlashMode:
+			if (bootflasher) {
+				uint8_t buffer[1];
+
+				/* put device back into bootloader mode */
+				rc = reset_device_l(glasshub, 1);
+				if (rc)  {
+					glasshub->flash_status = FLASH_ERROR_DEVICE_RESET_ERROR;
+					goto ExitFlashMode;
+				}
+
+				/* get new bootloader version */
+				buffer[0] = CMD_BOOTLOADER_VERSION;
+				rc = _i2c_read(glasshub, buffer, 1, buffer, 1);
+				if (rc) {
+					glasshub->flash_status = FLASH_ERROR_DEVICE_RESET_ERROR;
+					goto ExitFlashMode;
+				}
+				glasshub->bootloader_version = buffer[0];
+			}
 			clear_bit(FLAG_FLASH_MODE, &glasshub->flags);
 		}
 	}
@@ -1500,8 +1549,13 @@ static int register_device_files(struct glasshub_data *glasshub)
 	int rc = 0;
 	unsigned app_version;
 
+	/* if special boot flasher, don't register sysfs files */
+	if (glasshub->app_version_major == BOOTLOADER_FLASHER) return rc;
+
 	/* check app code version */
 	app_version = ((unsigned) glasshub->app_version_major << 8) | glasshub->app_version_minor;
+
+	/* make sure we have a supported firmware build on the MCU */
 	if (app_version < MINIMUM_MCU_VERSION) {
 		dev_info(&glasshub->i2c_client->dev,
 				"%s: WARNING: MCU application code is down-rev: %u.%u\n",
@@ -1750,8 +1804,10 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 		goto err_out;
 	}
 
-	/* create sysfs files, etc. */
-	register_device_files(glasshub);
+	/* create sysfs files unless running the special bootflasher app */
+	if (glasshub->app_version_major != BOOTLOADER_FLASHER) {
+		register_device_files(glasshub);
+	}
 
 	/* set misc driver */
 	mutex_init(&glasshub_user_lock);
