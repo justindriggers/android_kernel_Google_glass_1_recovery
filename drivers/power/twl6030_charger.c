@@ -743,18 +743,18 @@ static void twl6030_monitor_work(struct work_struct *work)
 	if (!battery) {
 		printk(KERN_ERR "%s: Failed to get battery power supply supplicant for charger\n",
 				__func__);
-		return;
+		goto done;
 	}
 
 	if (!battery->get_property) {
 		printk(KERN_ERR "%s: bettery power supply has null get_property method\n", __func__);
-		return ;
+		goto done;
 	}
 
 	ret = battery->get_property(battery, POWER_SUPPLY_PROP_CAPACITY, &val);
 	if (ret) {
 		printk(KERN_ERR "%s: Failed to read battery capacity: %d\n", __func__, ret);
-		return;
+		goto done;
 	}
 	capacity = val.intval;
 
@@ -806,6 +806,7 @@ static void twl6030_monitor_work(struct work_struct *work)
 		twl6030_start_usb_charger(di, 500);
 	}
 
+done:
 	twl6030_determine_charge_state(di);
 }
 
