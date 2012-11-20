@@ -248,6 +248,12 @@ static struct glasshub_data_user *glasshub_user_rd_ptr = NULL;
 static struct mutex glasshub_user_lock;
 static atomic_t glasshub_opened = ATOMIC_INIT(0);
 
+/*
+ * Kernel FIFO for timestamped prox data
+ */
+static DECLARE_WAIT_QUEUE_HEAD(prox_read_wait);
+static DECLARE_KFIFO(prox_fifo, struct glasshub_data_user, PROX_QUEUE_SZ);
+
 static void unregister_device_files(struct glasshub_data *glasshub);
 static int register_device_files(struct glasshub_data *glasshub);
 
@@ -582,7 +588,7 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 		if (value & 0x8000) break;
 	}
 
-	/* pass prox data to user space */
+	/* pass prox data to misc device driver */
 	if (proxCount) {
 		mutex_lock(&glasshub_user_lock);
 
@@ -602,6 +608,24 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 		/* wake up user space */
 		wake_up_interruptible(&glasshub_read_wait);
 		mutex_unlock(&glasshub_user_lock);
+	}
+
+	/* pass prox data to sysfs file */
+	if (proxCount) {
+
+		/* backdate timestamps */
+		timestamp = glasshub->irq_timestamp - (proxCount - 1) * PROX_INTERVAL;
+
+		for (i = 0; i < proxCount; i++) {
+			struct glasshub_data_user rec;
+			rec.value = data[i];
+			rec.timestamp = timestamp;
+			kfifo_put(&prox_fifo, &rec);
+		}
+
+		/* wake up user space */
+		wake_up_interruptible(&prox_read_wait);
+		sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "prox");
 	}
 
 	mutex_unlock(&glasshub->device_lock);
@@ -716,6 +740,24 @@ static ssize_t proxmin_show(struct device *dev, struct device_attribute *attr, c
 static ssize_t proxraw_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return show_reg(dev, buf, REG16_PROX_RAW);
+}
+
+/* show prox data */
+static ssize_t prox_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct glasshub_data_user rec = { 0, 0 };
+
+	/* wait for data in FIFO */
+	while (kfifo_is_empty(&prox_fifo)) {
+		wait_event_interruptible(prox_read_wait, !kfifo_is_empty(&prox_fifo));
+	}
+
+	/* read from FIFO */
+	if (kfifo_get(&prox_fifo, &rec) != 0) {
+		return sprintf(buf, "%lld %u\n", rec.timestamp, rec.value);
+	} else {
+		return sprintf(buf, "read error\n");
+	}
 }
 
 /* show raw IR value */
@@ -1456,6 +1498,7 @@ static DEVICE_ATTR(bootloader_version, DEV_MODE_RO, bootloader_version_show, NUL
 static DEVICE_ATTR(passthru_enable, DEV_MODE_RW, passthru_enable_show, passthru_enable_store);
 static DEVICE_ATTR(proxraw, DEV_MODE_RO, proxraw_show, NULL);
 static DEVICE_ATTR(proxmin, DEV_MODE_RO, proxmin_show, NULL);
+static DEVICE_ATTR(prox, DEV_MODE_RO, prox_show, NULL);
 static DEVICE_ATTR(vis, DEV_MODE_RO, vis_show, NULL);
 static DEVICE_ATTR(ir, DEV_MODE_RO, ir_show, NULL);
 static DEVICE_ATTR(don_doff_enable, DEV_MODE_RW, don_doff_enable_show, don_doff_enable_store);
@@ -1481,6 +1524,7 @@ static struct attribute *attrs[] = {
 	&dev_attr_passthru_enable.attr,
 	&dev_attr_proxraw.attr,
 	&dev_attr_proxmin.attr,
+	&dev_attr_prox.attr,
 	&dev_attr_ir.attr,
 	&dev_attr_vis.attr,
 	&dev_attr_don_doff_enable.attr,
@@ -1808,6 +1852,9 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 	/* store driver data into device private structure */
 	dev_set_drvdata(&i2c_client->dev, glasshub);
 	glasshub_private = glasshub;
+
+	/* initialize prox data KFIFO */
+	INIT_KFIFO(prox_fifo);
 
 	/* create bootmode sysfs files */
 	rc = sysfs_create_group(&glasshub->i2c_client->dev.kobj, &bootmode_attr_group);
