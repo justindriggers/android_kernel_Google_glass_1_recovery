@@ -620,6 +620,7 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 			struct glasshub_data_user rec;
 			rec.value = data[i];
 			rec.timestamp = timestamp;
+			timestamp += PROX_INTERVAL;
 			kfifo_put(&prox_fifo, &rec);
 		}
 
