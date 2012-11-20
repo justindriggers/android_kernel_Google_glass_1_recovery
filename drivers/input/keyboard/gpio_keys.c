@@ -324,6 +324,15 @@ static void gpio_keys_report_event(struct gpio_button_data *bdata)
 	unsigned int type = button->type ?: EV_KEY;
 	int state = (gpio_get_value_cansleep(button->gpio) ? 1 : 0) ^ button->active_low;
 
+	if (button->last_state == state) {
+		/* Synthesize a new state here because we are here
+		   due to an interrupt while suspended.  However, the
+		   present value does not reflect the value that generated
+		   the interrupt due to the time required to resume power
+		   and read this pin. */
+		state = (state ^ 1);
+	}
+
 	if (type == EV_ABS) {
 		if (state)
 			input_event(input, type, button->code, button->value);
@@ -422,6 +431,8 @@ static int __devinit gpio_keys_setup_key(struct platform_device *pdev,
 		goto fail3;
 	}
 
+	/* Initialize last state before suspend to invalid value */
+	button->last_state = -1;
 	return 0;
 
 fail3:
@@ -594,6 +605,8 @@ static int gpio_keys_suspend(struct device *dev)
 			if (button->wakeup) {
 				int irq = gpio_to_irq(button->gpio);
 				enable_irq_wake(irq);
+				/* Store the last state before suspending */
+				button->last_state = (gpio_get_value_cansleep(button->gpio) ? 1 : 0) ^ button->active_low;
 			}
 		}
 	}
@@ -614,6 +627,9 @@ static int gpio_keys_resume(struct device *dev)
 		if (button->wakeup && device_may_wakeup(&pdev->dev)) {
 			int irq = gpio_to_irq(button->gpio);
 			disable_irq_wake(irq);
+			/* Set last state before suspend to invalid value 
+			 * since we are now resumed */
+			button->last_state = -1;
 		}
 
 		gpio_keys_report_event(&ddata->data[i]);
