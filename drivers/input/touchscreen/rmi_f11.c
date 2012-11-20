@@ -22,7 +22,8 @@
  *#############################################################################
  */
 
-#define DEBUG_GESTURES 1
+// #define DEBUG_SYNTH_KEY
+#define DEBUG_GESTURES
 
 #ifdef CONFIG_WAKELOCK
 #include <linux/wakelock.h>
@@ -171,7 +172,14 @@
 
 #define REL_BYTES_PER_FINGER 2
 
-#define NUM_SYNTH_KEYS_PER_SUSPEND 1
+#define NUM_SYNTH_KEYS_PER_SUSPEND 100000
+
+/* Offsets added to differentiate gesture information from real information */
+#define GESTURE_OFFSET_X 100
+#define GESTURE_OFFSET_Y 100
+#define GESTURE_MT_MAJOR 15
+#define GESTURE_MT_MINOR 15
+#define GESTURE_PRESSURE 1
 
 /* Android 4.0 specified multitouch should not send empty
    MT configs on each finger leaving the touchpad.  If so,
@@ -193,14 +201,14 @@ struct f11_instance_data {
 	unsigned char gesture_data_offset;
 	unsigned char *finger_data_buffer;
 	int last_finger_down_count;
-#define NUM_SYNTH_KEYS_PER_SUSPEND 1
         bool suspended;
         int last_finger_pressed_count;
         int synth_events_sent;
         unsigned int movement_seq_cnt;
         unsigned int last_suspend_cnt;
         u8 finger_tracker[8];
-
+        /* Mask events until all fingers have left touchpad */
+	int mask_events;
 #ifdef CONFIG_WAKELOCK
         struct wake_lock wakelock;
 #endif
@@ -675,13 +683,16 @@ static enum finger_state get_finger_state(unsigned char finger,
 
 static int send_synth_key(struct f11_instance_data *f11, int finger_pressed_count)
 {
-        if (f11->suspended && (f11->last_suspend_cnt != get_suspend_cnt())
-            && finger_pressed_count == 0 && (f11->synth_events_sent < NUM_SYNTH_KEYS_PER_SUSPEND)
-            && !wake_lock_active(&f11->wakelock))
-        {
-                return 1;
-        }
-        return 0;
+#ifdef DEBUG_SYNTH_KEY
+	printk(KERN_INFO "%s suspended:%d last_cnt:%d curr_cnt:%d finger_pressed_cnt:%d events_sent:%d wake_lock:%d\n",
+	       __func__, f11->suspended,  f11->last_suspend_cnt, get_suspend_cnt(), finger_pressed_count, f11->synth_events_sent,
+	       wake_lock_active(&f11->wakelock));
+#endif  /* DEBUG_SYNTH_KEY */
+
+	if (f11->suspended) {
+		return 1;
+	}
+	return 0;
 }
 
 /*
@@ -758,62 +769,99 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 		       (signed char)(f11->finger_data_buffer[f11->data11_offset]),
 		       f11->finger_data_buffer[f11->data8_offset],
 		       f11->finger_data_buffer[f11->data9_offset]);
+	}
+#endif  /* DEBUG_GESTURES */
 
-		/* Send up a flick gesture as a relative input event */
+	/* If we had events masked but no longer have a wakelock, then
+	 * lets re-enable event generation */
+	if ((f11->mask_events == 1) && !wake_lock_active(&f11->wakelock)) {
+		f11->mask_events = 0;
+		pr_info("%s Wakelock not set but event mask is clearing mask events:%d\n", __func__, f11->mask_events);
+	}
+
+	/* Only report events if we have not masked them.   Implied within
+	 * this logic is that if finger count is zero then no absolute or
+	 * relative reports will be generated anyway.  If finger count
+	 * is non-zero then we'll use the mask_events flags to determine
+	 * to send real touch events. */
+	if (!f11->mask_events) {
+		if (instance_data->sensor_info->has_absolute)
+			handle_absolute_reports(rmifninfo);
+
+		if (instance_data->sensor_info->has_relative &&
+				instance_data->rel_report_enabled)
+			handle_relative_report(rmifninfo);
+	}
+
+	if (send_synth_key(f11, finger_down_count)) {
+		int flag = f11->finger_data_buffer[f11->data8_offset];
 		if (flag & HAS_FLICK_MASK) {
-			input_report_rel(function_device->input, REL_X,
-			                 (int8_t)(f11->finger_data_buffer[f11->data10_offset]));
-			input_report_rel(function_device->input, REL_Y,
-			                 (int8_t)(f11->finger_data_buffer[f11->data11_offset]));
+#if defined(ABS_MT_PRESSURE)
+			/* We have to supply the minimum values required to get event through
+			   Android InputEvent layer */
+			input_report_abs(function_device->input, ABS_MT_PRESSURE, GESTURE_PRESSURE);
+#endif
+			/* Add extreme offset to indicate it's not a real touchpad point */
+			input_report_abs(function_device->input, ABS_MT_POSITION_X,
+			                 GESTURE_OFFSET_X + (int8_t)(f11->finger_data_buffer[f11->data10_offset]));
+
+			/* Add extreme offset to indicate it's not a real touchpad point */
+			input_report_abs(function_device->input, ABS_MT_POSITION_Y,
+			                 GESTURE_OFFSET_Y + (int8_t)(f11->finger_data_buffer[f11->data11_offset]));
+			/* Use extreme major and minor id to indicate it's not a real finger */
+			input_report_abs(function_device->input, ABS_MT_TOUCH_MAJOR, GESTURE_MT_MAJOR);
+			input_report_abs(function_device->input, ABS_MT_TOUCH_MINOR, GESTURE_MT_MINOR);
+
+			/* Close out multi touch sequence and entire motion sequence */
+			input_mt_sync(function_device->input);
 			input_sync(function_device->input); /* sync after groups of events */
+
+			/* If there are no fingers, and last time through there were no fingers, we
+			 * need to send an empty mt sync packet with empty mt sync to indicate all fingers
+			 * have left the touchpad.  We send the sync at the end of this routine. */
+			if ((finger_down_count == 0) && (instance_data->last_finger_down_count == 0)) {
+				input_mt_sync(function_device->input);
+			}
+
+			/* Keep track of count of synthesized keys per suspend cycle. */
+			f11->synth_events_sent++;
+
+			/* Mask any further finger events, if any, until all fingers have left
+			 * the touchpad. */
+			// f11->mask_events = 1;
+
+			pr_info("%s Created synthesized movement event cnt:%d masking events:%d\n",
+			        __func__, f11->synth_events_sent, f11->mask_events);
+
+			wake_lock_timeout(&f11->wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
 		}
 	}
-#endif
-	if (instance_data->sensor_info->has_absolute)
-		handle_absolute_reports(rmifninfo);
 
-	if (instance_data->sensor_info->has_relative &&
-			instance_data->rel_report_enabled)
-		handle_relative_report(rmifninfo);
+	/* CMM Debugging logging */
+	if (f11->last_finger_down_count == 0 && finger_down_count != 0) {
+		pr_info("%s Starting movement sequence cnt:%d mask_events:%d\n", __func__,
+		        f11->movement_seq_cnt, f11->mask_events);
+	}
+	if (f11->last_finger_down_count != 0 && finger_down_count == 0) {
+		pr_info("%s Ending movement sequence cnt:%d mask_events:%d\n", __func__,
+		        f11->movement_seq_cnt, f11->mask_events);
+		f11->movement_seq_cnt = 0;
+	}
+	if (f11->last_finger_down_count == 0 && finger_down_count == 0) {
+		pr_info("%s Extraneous event mask_events:%d\n", __func__, f11->mask_events);
+	} else {
+		f11->movement_seq_cnt++;
+	}
 
-        if (send_synth_key(f11, finger_down_count)) {
-#if defined(ABS_MT_PRESSURE)
-                /* We have to supply the minimum values required to get event through
-                   Android InputEvent layer */
-                input_report_abs(function_device->input, ABS_MT_PRESSURE, 1);
-#endif
-                input_mt_sync(function_device->input);
-                input_sync(function_device->input); /* sync after groups of events */
-
-                input_mt_sync(function_device->input);
-                input_sync(function_device->input); /* sync after groups of events */
-
-                /* Keep track of count of synthesized keys per suspend cycle. */
-                f11->synth_events_sent++;
-
-                pr_info("%s Created synthesized movement event cnt:%d\n",
-                        __func__, f11->synth_events_sent);
-                return;
-        }
-
-        /* CMM Debugging logging */
-        if (f11->last_finger_down_count == 0 && finger_down_count != 0) {
-                pr_info("%s Starting movement sequence cnt:%d\n", __func__, f11->movement_seq_cnt);
-        }
-        if (f11->last_finger_down_count != 0 && finger_down_count == 0) {
-                pr_info("%s Ending movement sequence cnt:%d\n", __func__, f11->movement_seq_cnt);
-                f11->movement_seq_cnt = 0;
-        }
-        if (f11->last_finger_down_count == 0 && finger_down_count == 0) {
-                pr_info("%s Extraneous event\n", __func__);
-        } else {
-                f11->movement_seq_cnt++;
-        }
-
-        if (finger_down_count) {
-                wake_lock_timeout(&f11->wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
-        } else {
-	        /* An empty report sync will be consumed by the input layer.
+	if (finger_down_count) {
+		wake_lock_timeout(&f11->wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
+	} else {
+		/* No fingers so unmask events */
+		if (f11->mask_events == 1) {
+			f11->mask_events = 0;
+			pr_info("%s Clearing mask events:%d\n", __func__, f11->mask_events);
+		}
+		/* An empty report sync will be consumed by the input layer.
 	         * So to get an empty report sync passed the input layer
 	         * we will provide an empty config sync.  Only do this if the
 	         * previous run through here had finger data.
@@ -1166,11 +1214,6 @@ int FN_11_init(struct rmi_function_device *function_device)
 	set_bit(EV_ABS, function_device->input->evbit);
 	set_bit(EV_SYN, function_device->input->evbit);
 
-        /* NOTE(CMM)_Gesture detection kludge */
-        set_bit(EV_REL, function_device->input->evbit);
-        set_bit(REL_X, function_device->input->relbit);
-        set_bit(REL_Y, function_device->input->relbit);
-
 #ifdef CONFIG_WAKELOCK
         wake_lock_init(&f11->wakelock, WAKE_LOCK_SUSPEND, "touchpad_wakelock");
 #endif
@@ -1316,26 +1359,34 @@ error_exit:
 }
 EXPORT_SYMBOL(FN_11_detect);
 
+/*
+ *  suspend handler for F11, this will be invoked in
+ *  early suspend routine from sensor device.
+ */
 int FN_11_suspend(struct rmi_function_info *rmifninfo)
 {
-        struct f11_instance_data *instance = rmifninfo->fndata;
-        instance->suspended = 1;
+	struct f11_instance_data *instance = rmifninfo->fndata;
+	instance->suspended = 1;
 	instance->last_suspend_cnt = get_suspend_cnt();
-        instance->synth_events_sent = 0;
-        dev_info(&rmifninfo->function_device->dev, "%s Suspended touchpad\n", __FUNCTION__);
-        return 0;
+	instance->synth_events_sent = 0;
+	dev_info(&rmifninfo->function_device->dev, "%s Suspended touchpad\n", __FUNCTION__);
+	return 0;
 }
 EXPORT_SYMBOL(FN_11_suspend);
 
 /*
- *  resume handler for F01, this will be invoked in
- *  resume routine from sensor
+ *  resume handler for F11, this will be invoked in
+ *  late resume routine from sensor device.
  */
 void FN_11_resume(struct rmi_function_info *rmifninfo)
 {
-        struct f11_instance_data *instance = rmifninfo->fndata;
-        instance->suspended = 0;
-        dev_info(&rmifninfo->function_device->dev, "%s Resumed touchpad\n", __FUNCTION__);
+	int mask_events;
+	struct f11_instance_data *instance = rmifninfo->fndata;
+	mask_events = instance->mask_events;
+	instance->suspended = 0;
+	instance->mask_events = 0;
+	dev_info(&rmifninfo->function_device->dev, "%s Resumed touchpad old masking events:%d new masking events:%d\n",
+	         __FUNCTION__, mask_events, instance->mask_events);
 }
 EXPORT_SYMBOL(FN_11_resume);
 
