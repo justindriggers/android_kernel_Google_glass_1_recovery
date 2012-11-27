@@ -805,9 +805,48 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 			input_report_abs(function_device->input, ABS_MT_POSITION_X,
 			                 GESTURE_OFFSET_X + (int8_t)(f11->finger_data_buffer[f11->data10_offset]));
 
-			/* Add extreme offset to indicate it's not a real touchpad point */
+			/* Add well-known gesture offset to indicate it's not a real touchpad point */
 			input_report_abs(function_device->input, ABS_MT_POSITION_Y,
 			                 GESTURE_OFFSET_Y + (int8_t)(f11->finger_data_buffer[f11->data11_offset]));
+			/* Add well-known gesture offset to indicate it's not a real touchpad point */
+			input_report_abs(function_device->input, ABS_MT_TOUCH_MAJOR, GESTURE_MT_MAJOR);
+			input_report_abs(function_device->input, ABS_MT_TOUCH_MINOR, GESTURE_MT_MINOR);
+
+			/* Close out multi touch sequence and entire motion sequence */
+			input_mt_sync(function_device->input);
+			input_sync(function_device->input); /* sync after groups of events */
+
+			/* If there are no fingers, and last time through there were no fingers, we
+			 * need to send an empty mt sync packet with empty mt sync to indicate all fingers
+			 * have left the touchpad.  We send the sync at the end of this routine. */
+			if ((finger_down_count == 0) && (instance_data->last_finger_down_count == 0)) {
+				input_mt_sync(function_device->input);
+			}
+
+			/* Keep track of count of synthesized keys per suspend cycle. */
+			f11->synth_events_sent++;
+
+			/* Mask any further finger events, if any, until all fingers have left
+			 * the touchpad. */
+			// f11->mask_events = 1;
+
+			pr_info("%s Created synthesized flick movement event cnt:%d masking events:%d\n",
+			        __func__, f11->synth_events_sent, f11->mask_events);
+
+			wake_lock_timeout(&f11->wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
+		}
+		if (flag & HAS_SINGLE_TAP_MASK) {
+#if defined(ABS_MT_PRESSURE)
+			/* We have to supply the minimum values required to get event through
+			   Android InputEvent layer */
+			input_report_abs(function_device->input, ABS_MT_PRESSURE, GESTURE_PRESSURE);
+#endif
+			/* Add well-known gesture offset to indicate it's not a real touchpad point */
+			input_report_abs(function_device->input, ABS_MT_POSITION_X, GESTURE_OFFSET_X);
+
+			/* Add well-known gesture offset to indicate it's not a real touchpad point */
+			input_report_abs(function_device->input, ABS_MT_POSITION_Y, GESTURE_OFFSET_Y);
+
 			/* Use extreme major and minor id to indicate it's not a real finger */
 			input_report_abs(function_device->input, ABS_MT_TOUCH_MAJOR, GESTURE_MT_MAJOR);
 			input_report_abs(function_device->input, ABS_MT_TOUCH_MINOR, GESTURE_MT_MINOR);
@@ -830,7 +869,7 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 			 * the touchpad. */
 			// f11->mask_events = 1;
 
-			pr_info("%s Created synthesized movement event cnt:%d masking events:%d\n",
+			pr_info("%s Created synthesized tap movement event cnt:%d masking events:%d\n",
 			        __func__, f11->synth_events_sent, f11->mask_events);
 
 			wake_lock_timeout(&f11->wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
