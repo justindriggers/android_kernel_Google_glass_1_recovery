@@ -440,12 +440,4 @@ extern u32 omap3_prm_vcvp_rmw(u32 mask, u32 bits, u8 offset);
  */
 #define OMAP_LOGICRETSTATE_MASK				(1 << 2)
 
-
-/*
- * MAX_MODULE_HARDRESET_WAIT: Maximum microseconds to wait for an OMAP
- * submodule to exit hardreset
- */
-#define MAX_MODULE_HARDRESET_WAIT		10000
-
-
 #endif

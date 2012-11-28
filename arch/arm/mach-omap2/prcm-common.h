@@ -402,7 +402,7 @@
  * MAX_MODULE_HARDRESET_WAIT: Maximum microseconds to wait for an OMAP
  * submodule to exit hardreset
  */
-#define MAX_MODULE_HARDRESET_WAIT		10000
+#define MAX_MODULE_HARDRESET_WAIT		1000
 
 # ifndef __ASSEMBLER__
 extern void __iomem *prm_base;
