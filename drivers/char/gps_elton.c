@@ -366,6 +366,9 @@ static int gps_elton_suspend(struct platform_device *pdev, pm_message_t state) {
 		if (gpio_get_value(gps_elton_data->platform_data->gpio_awake) == 1) {
 			_toggle_power(gps_elton_data);
 			was_awake = 1;
+			if (gpio_get_value(gps_elton_data->platform_data->gpio_awake) == 1) {
+				dev_err(&pdev->dev, "Unable to toggle GPS chip to sleep");
+			}
 		}
 	}
 
@@ -386,7 +389,13 @@ static int gps_elton_resume(struct platform_device *pdev) {
 		 * ensure that the GPS chip awake polling routine finds it
 		 * still hibernating.  */
 		atomic_set(&gps_elton_data->uart_int_cnt, _get_interrupt_count(gps_elton_data->irq_num));
+	} else {
+		// EVT 2.0
+		if (gpio_get_value(gps_elton_data->platform_data->gpio_awake) == 1) {
+			dev_err(&pdev->dev, "Found GPS chip awake during suspend cycle");
+		}
 	}
+
 	return 0;
 }
 
