@@ -17,6 +17,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
+#include <linux/poll.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/gpio.h>
@@ -29,12 +30,6 @@
 /* Used to provide access via misc device */
 #include <linux/miscdevice.h>
 
-/* Used to provide user access to fileops API */
-#include <asm-generic/uaccess.h>
-
-/* download firmware */
-#include <linux/firmware.h>
-
 #include <linux/i2c/glasshub.h>
 
 /* module debug flags */
@@ -42,7 +37,7 @@
 
 /* driver name/version */
 #define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.3"
+#define DRIVER_VERSION "0.4"
 
 /* minimum MCU version for this driver */
 #define MINIMUM_MCU_VERSION	9
@@ -239,20 +234,11 @@ struct glasshub_data {
 struct glasshub_data *glasshub_private = NULL;
 
 /*
- * Filesystem API is implemented with the kernel fifo.
- */
-static DECLARE_WAIT_QUEUE_HEAD(glasshub_read_wait);
-static struct glasshub_data_user glasshub_fifo_buffer[PROX_QUEUE_SZ];
-static struct glasshub_data_user *glasshub_user_wr_ptr = NULL;
-static struct glasshub_data_user *glasshub_user_rd_ptr = NULL;
-static struct mutex glasshub_user_lock;
-static atomic_t glasshub_opened = ATOMIC_INIT(0);
-
-/*
  * Kernel FIFO for timestamped prox data
  */
 static DECLARE_WAIT_QUEUE_HEAD(prox_read_wait);
 static DECLARE_KFIFO(prox_fifo, struct glasshub_data_user, PROX_QUEUE_SZ);
+static atomic_t glasshub_opened = ATOMIC_INIT(0);
 
 static void unregister_device_files(struct glasshub_data *glasshub);
 static int register_device_files(struct glasshub_data *glasshub);
@@ -580,7 +566,7 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 		 * no more data. This mechanism saves us from doing another
 		 * I2C bus transfer to check the status register.
 		 */
-		if (proxCount < PROX_QUEUE_SZ) {
+		if (atomic_read(&glasshub_opened) && (proxCount < PROX_QUEUE_SZ)) {
 			data[proxCount++] = (uint16_t) value & 0x7fff;
 		}
 
@@ -589,28 +575,6 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 	}
 
 	/* pass prox data to misc device driver */
-	if (proxCount) {
-		mutex_lock(&glasshub_user_lock);
-
-		/* backdate timestamps */
-		timestamp = glasshub->irq_timestamp - (proxCount - 1) * PROX_INTERVAL;
-
-		for (i = 0; i < proxCount; i++) {
-			glasshub_user_wr_ptr->value = data[i];
-			glasshub_user_wr_ptr->timestamp = timestamp;
-			timestamp += PROX_INTERVAL;
-			glasshub_user_wr_ptr++;
-			if (glasshub_user_wr_ptr == (glasshub_fifo_buffer + PROX_QUEUE_SZ)) {
-				glasshub_user_wr_ptr = glasshub_fifo_buffer;
-			}
-		}
-
-		/* wake up user space */
-		wake_up_interruptible(&glasshub_read_wait);
-		mutex_unlock(&glasshub_user_lock);
-	}
-
-	/* pass prox data to sysfs file */
 	if (proxCount) {
 
 		/* backdate timestamps */
@@ -626,7 +590,6 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 
 		/* wake up user space */
 		wake_up_interruptible(&prox_read_wait);
-		sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "prox");
 	}
 
 	mutex_unlock(&glasshub->device_lock);
@@ -1564,42 +1527,110 @@ static struct attribute_group bootmode_attr_group = {
 	.attrs = bootmode_attrs,
 };
 
-/* register prox device */
-static int register_ps_device(struct glasshub_data *glasshub)
+/* prox sensor open fops */
+static int glasshub_open(struct inode *inode, struct file *file)
 {
-	int rc;
-
-	glasshub->ps_input_dev = input_allocate_device();
-	if (!glasshub->ps_input_dev) {
-		dev_err(&glasshub->i2c_client->dev, "%s: Failed to allocate prox input device\n",
-				__func__);
-		return -ENOMEM;
+	if (atomic_xchg(&glasshub_opened, 1) != 0) {
+		return -EBUSY;
 	}
-
-	glasshub->ps_input_dev->name = "glasshub_ps";
-	set_bit(EV_ABS, glasshub->ps_input_dev->evbit);
-	input_set_abs_params(glasshub->ps_input_dev, ABS_DISTANCE, PS_MIN_VALUE, PS_MAX_VALUE, 0, 0);
-
-	rc = input_register_device(glasshub->ps_input_dev);
-	if (rc < 0) {
-		dev_err(&glasshub->i2c_client->dev, "%s: Failed to register prox input device \n",
-				__func__);
-		goto free_device;
-	}
-	return rc;
-
-free_device:
-	input_free_device(glasshub->ps_input_dev);
-
-	return rc;
+	file->private_data = (void*)glasshub_private;
+	return 0;
 }
 
-/* unregister prox device */
-static void unregister_ps_device(struct glasshub_data *glasshub)
+/* prox sensor release fops */
+static int glasshub_release(struct inode *inode, struct file *file)
 {
-	input_unregister_device(glasshub->ps_input_dev);
-	input_free_device(glasshub->ps_input_dev);
+	struct glasshub_data *glasshub = (struct glasshub_data *)file->private_data;
+	if (atomic_xchg(&glasshub_opened, 0) == 0) {
+		dev_err(&glasshub->i2c_client->dev, "%s: Device has not been opened\n", __func__);
+		return -EINVAL;
+	}
+	return 0;
 }
+
+/* prox sensor read function */
+static ssize_t glasshub_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
+{
+	struct glasshub_data *glasshub = (struct glasshub_data *)file->private_data;
+	unsigned int copied = 0;
+	int rc = 0;
+
+	/* validate parameters */
+	if (count == 0)
+		return 0;
+	if (count < sizeof(struct glasshub_data_user)) {
+		dev_err(&glasshub->i2c_client->dev,
+				"%s: Invalid data size\n", __func__);
+		return -EINVAL;
+	}
+
+	/* read from FIFO, blocking if no data */
+	while (1) {
+		if (mutex_lock_interruptible(&glasshub->device_lock)) {
+			dev_err(&glasshub->i2c_client->dev,
+					"%s: Unable to acquire device mutex\n", __func__);
+			return -EAGAIN;
+		}
+		rc = kfifo_to_user(&prox_fifo, buf, sizeof(struct glasshub_data_user), &copied);
+		if ((rc < 0) || (copied > 0)) break;
+		mutex_unlock(&glasshub->device_lock);
+		rc = wait_event_interruptible(prox_read_wait, !kfifo_is_empty(&prox_fifo));
+	}
+
+	mutex_unlock(&glasshub->device_lock);
+	return copied ? copied : rc;
+}
+
+static int glasshub_flush(struct file *file, fl_owner_t id)
+{
+	struct glasshub_data *glasshub = (struct glasshub_data *)file->private_data;
+	if (mutex_lock_interruptible(&glasshub->device_lock)) {
+		dev_err(&glasshub->i2c_client->dev,
+				"%s: Unable to acquire device mutex\n", __func__);
+		return -EAGAIN;
+	}
+	kfifo_reset(&prox_fifo);
+	mutex_unlock(&glasshub->device_lock);
+	return 0;
+}
+
+static unsigned int glasshub_poll(struct file *file, struct poll_table_struct *poll_table)
+{
+	struct glasshub_data *glasshub = (struct glasshub_data *)file->private_data;
+	unsigned int ret = 0;
+
+	if (mutex_lock_interruptible(&glasshub->device_lock)) {
+		dev_err(&glasshub->i2c_client->dev,
+				"%s: Unable to acquire device mutex\n", __func__);
+		ret |= POLLERR;
+		goto Exit;
+	}
+
+	if (kfifo_len(&prox_fifo)) {
+		ret |= POLLIN|POLLRDNORM;
+	} else {
+		poll_wait(file, &prox_read_wait, poll_table);
+	}
+	mutex_unlock(&glasshub->device_lock);
+
+Exit:
+	return ret;
+}
+
+static const struct file_operations glasshub_fops = {
+	.owner = THIS_MODULE,
+	.open = glasshub_open,
+	.release = glasshub_release,
+	.read = glasshub_read,
+	.flush = glasshub_flush,
+	.poll = glasshub_poll,
+};
+
+struct miscdevice glasshub_misc = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "glasshub",
+	.fops = &glasshub_fops
+};
 
 /* register device files */
 static int register_device_files(struct glasshub_data *glasshub)
@@ -1634,10 +1665,16 @@ static int register_device_files(struct glasshub_data *glasshub)
 	if (rc) {
 		dev_err(&glasshub->i2c_client->dev, "%s Unable to create sysfs class files\n",
 				__FUNCTION__);
+		goto Exit;
 	}
 
-	/* register input devices */
-	register_ps_device(glasshub);
+	/* register misc driver for prox data */
+	rc = misc_register(&glasshub_misc);
+	if (rc) {
+		dev_err(&glasshub->i2c_client->dev, "%s Unable to create misc driver\n",
+				__FUNCTION__);
+		goto Exit;
+	}
 
 Exit:
 	return rc;
@@ -1649,123 +1686,11 @@ static void unregister_device_files(struct glasshub_data *glasshub)
 	/* are sysfs files created? */
 	if (test_and_clear_bit(FLAG_SYSFS_CREATED, &glasshub->flags)) {
 		sysfs_remove_group(&glasshub->i2c_client->dev.kobj,&attr_group);
-		unregister_ps_device(glasshub);
+
+		/* deregister misc driver for prox data */
+		misc_deregister(&glasshub_misc);
 	}
 }
-
-/* prox sensor open fops */
-static int glasshub_open(struct inode *inode, struct file *file)
-{
-	struct i2c_client *client;
-
-	if (atomic_read(&glasshub_opened)) {
-		return -EBUSY;
-	}
-	atomic_set(&glasshub_opened, 1);
-
-	file->private_data = (void*)glasshub_private;
-	client = glasshub_private->i2c_client;
-
-	/* Set the read pointer equal to the write pointer */
-	if (mutex_lock_interruptible(&glasshub_user_lock)) {
-		dev_err(&client->dev, "%s: Unable to set read pointer\n", __func__);
-		return -EAGAIN;
-	}
-
-	glasshub_user_rd_ptr = glasshub_user_wr_ptr;
-	mutex_unlock(&glasshub_user_lock);
-	return 0;
-}
-
-/* prox sensor release fops */
-static int glasshub_release(struct inode *inode, struct file *file)
-{
-	struct glasshub_data *glasshub = (struct glasshub_data *)file->private_data;
-	struct i2c_client *client = glasshub->i2c_client;
-
-	if (!atomic_read(&glasshub_opened)) {
-		dev_err(&client->dev, "%s: Device has not been opened\n", __func__);
-		return -EBUSY;
-	}
-	atomic_set(&glasshub_opened, 0);
-	return 0;
-}
-
-/* prox sensor IOCTL */
-static long glasshub_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
-{
-	return -ENOSYS;
-}
-
-/* prox sensor read function */
-static ssize_t glasshub_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
-{
-	int rc = 0;
-	struct glasshub_data *glasshub = (struct glasshub_data *)file->private_data;
-	struct i2c_client *client = glasshub->i2c_client;
-
-	if (count == 0)
-		return 0;
-
-	if (count < sizeof(struct glasshub_data_user))
-		return -EINVAL;
-
-	if (count > PROX_QUEUE_SZ * sizeof(struct glasshub_data_user))
-		count = PROX_QUEUE_SZ * sizeof(struct glasshub_data_user);
-
-	if (mutex_lock_interruptible(&glasshub_user_lock)) {
-			dev_err(&client->dev, "%s: Unable to acquire user read lock\n", __func__);
-		return -EAGAIN;
-	}
-
-	if (glasshub_user_rd_ptr == glasshub_user_wr_ptr) {
-		mutex_unlock(&glasshub_user_lock);
-		if (file->f_flags & O_NONBLOCK) {
-			return -EAGAIN;
-		}
-		wait_event_interruptible(glasshub_read_wait,
-				glasshub_user_rd_ptr != glasshub_user_wr_ptr);
-		if (mutex_lock_interruptible(&glasshub_user_lock)) {
-			dev_err(&client->dev, "%s: Unable to acquire user read lock after sleep\n",
-					__func__);
-			return -EAGAIN;
-		}
-	}
-
-	while (glasshub_user_rd_ptr != glasshub_user_wr_ptr && count >=
-			sizeof(struct glasshub_data_user)) {
-		if (copy_to_user(buf, glasshub_user_rd_ptr,
-						 sizeof(struct glasshub_data_user))) {
-			rc = -EFAULT;
-			break;
-		}
-		rc += sizeof(struct glasshub_data_user);
-		buf += sizeof(struct glasshub_data_user);
-		count -= sizeof(struct glasshub_data_user);
-
-		glasshub_user_rd_ptr++;
-		if (glasshub_user_rd_ptr == (glasshub_fifo_buffer + PROX_QUEUE_SZ)) {
-			glasshub_user_rd_ptr = glasshub_fifo_buffer;
-		}
-	}
-
-	mutex_unlock(&glasshub_user_lock);
-	return rc;
-}
-
-static const struct file_operations glasshub_fops = {
-	.owner = THIS_MODULE,
-	.open = glasshub_open,
-	.release = glasshub_release,
-	.unlocked_ioctl = glasshub_ioctl,
-	.read = glasshub_read,
-};
-
-struct miscdevice glasshub_misc = {
-	.minor = MISC_DYNAMIC_MINOR,
-	.name = "glasshub",
-	.fops = &glasshub_fops
-};
 
 static int glasshub_setup(struct glasshub_data *glasshub) {
 	int rc = 0;
@@ -1867,15 +1792,13 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 
 	/* create sysfs files unless running the special bootflasher app */
 	if (glasshub->app_version_major != BOOTLOADER_FLASHER) {
-		register_device_files(glasshub);
+		rc = register_device_files(glasshub);
+		if (rc) {
+			dev_err(&glasshub->i2c_client->dev, "%s Unable to create sysfs class files\n",
+					__FUNCTION__);
+			goto err_out;
+		}
 	}
-
-	/* set misc driver */
-	mutex_init(&glasshub_user_lock);
-	glasshub_user_wr_ptr = glasshub_fifo_buffer;
-	glasshub_user_rd_ptr = glasshub_fifo_buffer;
-	misc_register(&glasshub_misc);
-
 	return 0;
 
 err_out:
