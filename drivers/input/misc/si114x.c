@@ -1164,10 +1164,9 @@ static int si114x_open(struct inode *inode, struct file *file)
 {
 	struct i2c_client *client;
 
-	if (atomic_read(&si114x_opened)) {
+	if (atomic_xchg(&si114x_opened, 1) == 1) {
 		return -EBUSY;
 	}
-	atomic_set(&si114x_opened, 1);
 
 	file->private_data = (void*)si114x_private;
 	client = si114x_private->client;
@@ -1193,11 +1192,10 @@ static int si114x_release(struct inode *inode, struct file *file)
 	struct si114x_data *si114x = (struct si114x_data *)file->private_data;
 	struct i2c_client *client = si114x->client;
 
-	if (!atomic_read(&si114x_opened)) {
+	if (atomic_xchg(&si114x_opened, 0) == 0) {
 		dev_err(&client->dev, "%s: Device has not been opened\n", __func__);
 		return -EBUSY;
 	}
-	atomic_set(&si114x_opened, 0);
 
 	dev_info(&client->dev, "%s: Closed device\n", __func__);
 	return 0;
