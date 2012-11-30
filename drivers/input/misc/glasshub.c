@@ -1527,6 +1527,18 @@ static struct attribute_group bootmode_attr_group = {
 	.attrs = bootmode_attrs,
 };
 
+static int flush_prox_fifo(struct glasshub_data *glasshub)
+{
+	if (mutex_lock_interruptible(&glasshub->device_lock)) {
+		dev_err(&glasshub->i2c_client->dev,
+				"%s: Unable to acquire device mutex\n", __func__);
+		return -EAGAIN;
+	}
+	kfifo_reset(&prox_fifo);
+	mutex_unlock(&glasshub->device_lock);
+	return 0;
+}
+
 /* prox sensor open fops */
 static int glasshub_open(struct inode *inode, struct file *file)
 {
@@ -1534,7 +1546,7 @@ static int glasshub_open(struct inode *inode, struct file *file)
 		return -EBUSY;
 	}
 	file->private_data = (void*)glasshub_private;
-	return 0;
+	return flush_prox_fifo(glasshub_private);
 }
 
 /* prox sensor release fops */
@@ -1581,17 +1593,13 @@ static ssize_t glasshub_read(struct file *file, char __user *buf, size_t count, 
 	return copied ? copied : rc;
 }
 
-static int glasshub_flush(struct file *file, fl_owner_t id)
+static loff_t glasshub_llseek(struct file *file, loff_t offset, int whence)
 {
-	struct glasshub_data *glasshub = (struct glasshub_data *)file->private_data;
-	if (mutex_lock_interruptible(&glasshub->device_lock)) {
-		dev_err(&glasshub->i2c_client->dev,
-				"%s: Unable to acquire device mutex\n", __func__);
-		return -EAGAIN;
+	if ((offset == 0) && (whence == SEEK_END)) {
+		struct glasshub_data *glasshub = (struct glasshub_data *)file->private_data;
+		return flush_prox_fifo(glasshub);
 	}
-	kfifo_reset(&prox_fifo);
-	mutex_unlock(&glasshub->device_lock);
-	return 0;
+	return -EINVAL;
 }
 
 static unsigned int glasshub_poll(struct file *file, struct poll_table_struct *poll_table)
@@ -1622,7 +1630,7 @@ static const struct file_operations glasshub_fops = {
 	.open = glasshub_open,
 	.release = glasshub_release,
 	.read = glasshub_read,
-	.flush = glasshub_flush,
+	.llseek = glasshub_llseek,
 	.poll = glasshub_poll,
 };
 
