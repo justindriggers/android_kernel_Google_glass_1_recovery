@@ -264,6 +264,8 @@ struct twl6030_charger_device_info {
 
 	int charge_top_off;
 
+	unsigned int recharge_capacity;
+
 	unsigned long full_jiffies;
 	unsigned long monitor_interval_jiffies;
 
@@ -800,7 +802,7 @@ static void twl6030_monitor_work(struct work_struct *work)
 		}
 	}
 
-	if (di->state == STATE_FULL && capacity < 95) {
+	if (di->state == STATE_FULL && capacity <= di->recharge_capacity) {
 		printk("battery: drained from full to %d%%, charging again\n", capacity);
 		di->state = STATE_USB;
 		twl6030_start_usb_charger(di, 500);
@@ -959,6 +961,30 @@ static ssize_t show_min_vbus(struct device *dev, struct device_attribute *attr,
 	return sprintf(buf, "%u\n", val);
 }
 
+static ssize_t set_recharge_capacity(struct device *dev, struct device_attribute *attr,
+				  const char *buf, size_t count)
+{
+	long val;
+	int status = count;
+	struct twl6030_charger_device_info *di = dev_get_drvdata(dev);
+
+	if ((strict_strtol(buf, 10, &val) < 0) || (val < 0) || (val > 100))
+		return -EINVAL;
+	di->recharge_capacity = val;
+
+	return status;
+}
+
+static ssize_t show_recharge_capacity(struct device *dev, struct device_attribute *attr,
+				  char *buf)
+{
+	unsigned int val;
+	struct twl6030_charger_device_info *di = dev_get_drvdata(dev);
+
+	val = di->recharge_capacity;
+	return sprintf(buf, "%u\n", val);
+}
+
 static DEVICE_ATTR(vbus_voltage, S_IRUGO, show_vbus_voltage, NULL);
 static DEVICE_ATTR(id_level, S_IRUGO, show_id_level, NULL);
 static DEVICE_ATTR(regulation_voltage, S_IWUSR | S_IRUGO,
@@ -970,6 +996,8 @@ static DEVICE_ATTR(cin_limit, S_IWUSR | S_IRUGO, show_cin_limit,
 static DEVICE_ATTR(charge_current, S_IWUSR | S_IRUGO, show_charge_current,
 		set_charge_current);
 static DEVICE_ATTR(min_vbus, S_IWUSR | S_IRUGO, show_min_vbus, set_min_vbus);
+static DEVICE_ATTR(recharge_capacity, S_IWUSR | S_IRUGO, show_recharge_capacity,
+		set_recharge_capacity);
 
 static struct attribute *twl6030_charger_attributes[] = {
 	&dev_attr_vbus_voltage.attr,
@@ -979,6 +1007,7 @@ static struct attribute *twl6030_charger_attributes[] = {
 	&dev_attr_cin_limit.attr,
 	&dev_attr_charge_current.attr,
 	&dev_attr_min_vbus.attr,
+	&dev_attr_recharge_capacity.attr,
 	NULL,
 };
 
@@ -1019,6 +1048,7 @@ static int __devinit twl6030_charger_probe(struct platform_device *pdev)
 
 	di->state = STATE_BATTERY;
 	di->charge_top_off = 0;
+	di->recharge_capacity = 94;
 	di->monitor_interval_jiffies =
 		msecs_to_jiffies(pdata->monitor_interval_seconds * 1000);
 
