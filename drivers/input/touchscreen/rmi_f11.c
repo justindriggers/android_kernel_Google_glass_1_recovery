@@ -835,7 +835,7 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 
 			wake_lock_timeout(&f11->wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
 		}
-		if (flag & HAS_SINGLE_TAP_MASK) {
+		if (flag & (HAS_SINGLE_TAP_MASK | HAS_DOUBLE_TAP_MASK)) {
 #if defined(ABS_MT_PRESSURE)
 			/* We have to supply the minimum values required to get event through
 			   Android InputEvent layer */
@@ -869,8 +869,9 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 			 * the touchpad. */
 			// f11->mask_events = 1;
 
-			pr_info("%s Created synthesized tap movement event cnt:%d masking events:%d\n",
-			        __func__, f11->synth_events_sent, f11->mask_events);
+			pr_info("%s Created synthesized %s movement event cnt:%d masking events:%d\n",
+			        __func__, (flag & HAS_SINGLE_TAP_MASK)?"single tap":"double tap",
+			        f11->synth_events_sent, f11->mask_events);
 
 			wake_lock_timeout(&f11->wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
 		}
