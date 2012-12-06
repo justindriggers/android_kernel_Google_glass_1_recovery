@@ -64,9 +64,6 @@
 #define DEF_ST_TRY_TIMES            2
 #define DEF_ST_COMPASS_RESULT_SHIFT 2
 #define DEF_ST_ACCEL_RESULT_SHIFT   1
-#define DEF_ST_OTP0_THRESH          60
-#define DEF_ST_ABS_THRESH           20
-#define DEF_ST_TOR                  2
 
 #define DEF_ST_COMPASS_WAIT_MIN     (10 * 1000)
 #define DEF_ST_COMPASS_WAIT_MAX     (15 * 1000)
@@ -571,9 +568,8 @@ static int inv_check_3500_gyro_self_test(struct inv_mpu_iio_s *st,
 	}
 	for (i = 0; i < 3; i++) {
 		if (gst_otp[i] == 0) {
-			if (abs(gst[i]) * DEF_ST_TOR < DEF_ST_OTP0_THRESH *
-							OFFSET_PRECISION *
-							DEF_GYRO_SCALE)
+			if (abs(gst[i]) * 4 < 60 * 2 * OFFSET_PRECISION *
+					DEF_GYRO_SCALE)
 				ret_val |= (1 << i);
 		} else {
 			if (abs(gst[i]/gst_otp[i] - OFFSET_PRECISION) >
@@ -581,10 +577,8 @@ static int inv_check_3500_gyro_self_test(struct inv_mpu_iio_s *st,
 				ret_val |= (1 << i);
 		}
 	}
-	/* check for absolute value passing criterion. Using DEF_ST_TOR
-	 * for certain degree of tolerance */
 	for (i = 0; i < 3; i++) {
-		if (abs(reg_avg[i]) > DEF_ST_TOR * DEF_ST_ABS_THRESH *
+		if (abs(reg_avg[i]) * 4 > 20 * 2 *
 		    OFFSET_PRECISION * DEF_GYRO_SCALE)
 			ret_val |= (1 << i);
 	}
@@ -642,10 +636,8 @@ static int inv_check_6050_gyro_self_test(struct inv_mpu_iio_s *st,
 				ret_val |= 1 << i;
 		}
 	}
-	/* check for absolute value passing criterion. Using DEF_ST_TOR
-	 * for certain degree of tolerance */
 	for (i = 0; i < 3; i++) {
-		if (abs(reg_avg[i]) > DEF_ST_TOR * DEF_ST_ABS_THRESH *
+		if (abs(reg_avg[i]) * 4 > 20 * 2 *
 		    OFFSET_PRECISION * DEF_GYRO_SCALE)
 			ret_val |= (1 << i);
 	}
@@ -878,7 +870,7 @@ AKM_fail:
 static int inv_power_up_self_test(struct inv_mpu_iio_s *st)
 {
 	int result;
-	result = inv_i2c_single_write(st, st->reg.pwr_mgmt_1, INV_CLK_PLL_X);
+	result = inv_i2c_single_write(st, st->reg.pwr_mgmt_1, INV_CLK_PLL);
 	if (result)
 		return result;
 	msleep(POWER_UP_TIME);

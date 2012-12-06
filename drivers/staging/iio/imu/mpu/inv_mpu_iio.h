@@ -170,7 +170,6 @@ struct inv_chip_config_s {
 	u32 quaternion_on:1;
 	u32 display_orient_on:1;
 	u32 normal_compass_measure:1;
-	u32 glu_version4_on:1;
 	u16 lpa_freq;
 	u16  prog_start_addr;
 	u16 fifo_rate;
@@ -204,14 +203,6 @@ enum inv_channel_num {
 	INV_CHANNEL_NUM_GYRO_ACCL = 7,
 	INV_CHANNEL_NUM_GYRO_ACCL_QUANTERNION = 11,
 	INV_CHANNEL_NUM_GYRO_ACCL_QUANTERNION_MAGN = 14,
-};
-
-enum inv_clock_sel_e {
-	INV_CLK_INTERNAL = 0,
-	INV_CLK_PLL_X,
-	INV_CLK_PLL_Y,
-	INV_CLK_PLL_Z,
-	NUM_CLK
 };
 
 /**
@@ -268,8 +259,6 @@ struct inv_mpu_slave;
  *  @sl_handle:         Handle to I2C port.
  *  @irq_dur_ns:        duration between each irq.
  *  @last_isr_time:     last isr time.
- *  @pll:               clock value for one axis turned on.
- *  @axis:              select which axis to turn on.
  */
 struct inv_mpu_iio_s {
 #define TIMESTAMP_FIFO_SIZE 16
@@ -313,8 +302,6 @@ struct inv_mpu_iio_s {
 	void *sl_handle;
 	u32 irq_dur_ns;
 	u64 last_isr_time;
-	enum inv_clock_sel_e pll;
-	u8  axis;
 #ifdef CONFIG_INV_TESTING
 	unsigned long i2c_readcount;
 	unsigned long i2c_writecount;
@@ -479,9 +466,6 @@ struct inv_mpu_slave {
 #define REG_PWR_MGMT_2          0x6C
 #define BIT_PWR_ACCL_STBY		0x38
 #define BIT_PWR_GYRO_STBY		0x07
-#define BIT_PWR_GYRO_X_ON               0x03
-#define BIT_PWR_GYRO_Y_ON               0x05
-#define BIT_PWR_GYRO_Z_ON               0x06
 #define BIT_LPA_FREQ			0xC0
 
 #define REG_BANK_SEL            0x6D
@@ -515,8 +499,8 @@ struct inv_mpu_slave {
 #define DMP_PRECISION                   1000
 #define DMP_MAX_DIVIDER                 4
 #define DMP_MAX_MIN_TAPS                4
-#define DMP_IMAGE_CRC_VALUE             0x130bd18d
-#define DMP_IMAGE_SIZE                  2962
+#define DMP_IMAGE_CRC_VALUE             0xd48bc453
+#define DMP_IMAGE_SIZE                  2878
 
 #define BYTES_FOR_DMP            16
 #define QUATERNION_BYTES         16
@@ -573,7 +557,6 @@ struct inv_mpu_slave {
 #define MAX_ACCEL_OFFSET                      0x3FFF
 #define MIN_ACCEL_OFFSET                      -16384
 #define OFFSET_PRECISION                      1000
-#define DMP_1_REPRESENTATION                  (1 << 30)
 
 /* GLU related defines */
 #define GLU_INT_STATUS                        0x10
@@ -689,11 +672,6 @@ enum MPU_IIO_ATTR_ADDR {
 	ATTR_DMP_GLU_LEVEL,
 	ATTR_DMP_GLU_TRIGGER,
 	ATTR_DMP_GLU_ROLL,
-	ATTR_DMP_GLU_GYRO_BIAS_LPF_GAIN,
-	ATTR_DMP_GLU_RELATIVE_LOOK_UP_LEAK_GAIN,
-	ATTR_DMP_GLU_RELATIVE_ANGLE_THRESHOLD,
-	ATTR_DMP_GLU_HORIZONTAL_THRESHOLD_SQUARED,
-	ATTR_DMP_GLU_VERSION4_ON,
 	ATTR_DMP_TAP_THRESHOLD,
 	ATTR_DMP_TAP_MIN_COUNT,
 	ATTR_DMP_TAP_ON,
@@ -737,6 +715,12 @@ enum inv_fsr_e {
 	INV_FSR_1000DPS,
 	INV_FSR_2000DPS,
 	NUM_FSR
+};
+
+enum inv_clock_sel_e {
+	INV_CLK_INTERNAL = 0,
+	INV_CLK_PLL,
+	NUM_CLK
 };
 
 ssize_t inv_dmp_firmware_write(struct file *fp, struct kobject *kobj,

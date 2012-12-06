@@ -219,7 +219,7 @@ static int inv_switch_engine(struct inv_mpu_iio_s *st, bool en, u32 mask)
 		/* only gyro on needs sensor up time */
 		msleep(SENSOR_UP_TIME);
 		/* after gyro is on & stable, switch internal clock to PLL */
-		mgmt_1 |= INV_CLK_PLL_X;
+		mgmt_1 |= INV_CLK_PLL;
 		result = inv_i2c_single_write(st, reg->pwr_mgmt_1,
 						mgmt_1);
 		if (result)
@@ -799,58 +799,6 @@ static ssize_t inv_reg_dump_show(struct device *dev,
 	return bytes_printed;
 }
 
-static int inv_turn_on_one_axis_gyro(struct inv_mpu_iio_s *st, bool en)
-{
-	struct inv_reg_map_s *reg;
-	u8 data, mgmt_1;
-	int result;
-
-	if (st->chip_config.gyro_enable)
-		return 0;
-	reg = &st->reg;
-	/* switch clock needs to be careful. Only when gyro is on, can
-	   clock source be switched to gyro. Otherwise, it must be set to
-	   internal clock */
-	result = inv_i2c_read(st, reg->pwr_mgmt_1, 1, &mgmt_1);
-	if (result)
-		return result;
-	mgmt_1 &= ~BIT_CLK_MASK;
-
-	if (!en) {
-		/* turning off gyro requires switch to internal clock first.
-		   Then turn off gyro engine */
-		mgmt_1 |= INV_CLK_INTERNAL;
-		result = inv_i2c_single_write(st, reg->pwr_mgmt_1,
-						mgmt_1);
-		if (result)
-			return result;
-	}
-
-	result = inv_i2c_read(st, reg->pwr_mgmt_2, 1, &data);
-	if (result)
-		return result;
-	data &= (~BIT_PWR_GYRO_STBY);
-	if (en)
-		data |= st->axis;
-	else
-		data |= BIT_PWR_GYRO_STBY;
-	result = inv_i2c_single_write(st, reg->pwr_mgmt_2, data);
-	if (result)
-		return result;
-
-	if (en) {
-		/* only gyro on needs sensor up time */
-		msleep(SENSOR_UP_TIME);
-		/* after gyro is on & stable, switch internal clock to PLL */
-		mgmt_1 |= st->pll;
-		result = inv_i2c_single_write(st, reg->pwr_mgmt_1,
-						mgmt_1);
-		if (result)
-			return result;
-	}
-
-	return 0;
-}
 /**
  * inv_attr_store() -  calling this function will store current
  *                        dmp parameter settings
@@ -871,7 +819,6 @@ static ssize_t inv_dmp_attr_store(struct device *dev,
 	if (abs(val) > INT_MAX)
 		return -EINVAL;
 	data = (int)val;
-
 	switch (this_attr->address) {
 	case ATTR_DMP_GLU_OUTLIER_MAX:
 		WRITE_BE32_KEY_TO_MEM(KEY_D_GLU_MAX_ACCEL_THRESHOLD)
@@ -887,31 +834,6 @@ static ssize_t inv_dmp_attr_store(struct device *dev,
 		break;
 	case ATTR_DMP_GLU_ROLL:
 		WRITE_BE32_KEY_TO_MEM(KEY_D_GLU_ROLL_THRESHOLD)
-		break;
-	case ATTR_DMP_GLU_GYRO_BIAS_LPF_GAIN:
-		WRITE_BE32_KEY_TO_MEM(KEY_D_GLU_GYRO_BIAS_LPF_GAIN)
-		data = DMP_1_REPRESENTATION - data;
-		WRITE_BE32_KEY_TO_MEM(KEY_D_GLU_ONE_MINUS_GYRO_BIAS_LPF_GAIN)
-		break;
-	case ATTR_DMP_GLU_RELATIVE_LOOK_UP_LEAK_GAIN:
-		WRITE_BE32_KEY_TO_MEM(KEY_D_GLU_RELATIVE_LOOK_UP_LEAK_GAIN)
-		break;
-	case ATTR_DMP_GLU_RELATIVE_ANGLE_THRESHOLD: {
-		const int angle_multi = 46851;
-
-		data = data * angle_multi;
-		WRITE_BE32_KEY_TO_MEM(KEY_D_GLU_RELATIVE_ANGLE_THRESHOLD)
-		break;
-	}
-	case ATTR_DMP_GLU_HORIZONTAL_THRESHOLD_SQUARED:
-		WRITE_BE32_KEY_TO_MEM(KEY_D_GLU_HORIZONTAL_THRESHOLD_SQUARED)
-		break;
-	case ATTR_DMP_GLU_VERSION4_ON:
-		WRITE_BE32_KEY_TO_MEM(KEY_D_GLU_VERSION)
-		result = inv_turn_on_one_axis_gyro(st, !!data);
-		if (result)
-			return result;
-		st->chip_config.glu_version4_on = !!data;
 		break;
 	case ATTR_DMP_TAP_THRESHOLD: {
 		const char ax[] = {INV_TAP_AXIS_X, INV_TAP_AXIS_Y,
@@ -972,7 +894,6 @@ static ssize_t inv_dmp_attr_store(struct device *dev,
 							ONE_K_HZ;
 			if (st->compass_dmp_divider > 0)
 				st->compass_dmp_divider -= 1;
-			st->compass_counter = 0;
 		}
 		st->chip_config.dmp_output_rate = data;
 		break;
@@ -1002,7 +923,6 @@ static int inv_read_dmp(struct inv_mpu_iio_s *st, int key, int *data)
 
 	if (!st->chip_config.firmware_loaded)
 		return -EPERM;
-
 	result = mpu_memory_read(st->sl_handle, st->i2c_addr,
 				inv_dmp_get_address(key), 4, d);
 	if (result)
@@ -1051,38 +971,6 @@ static ssize_t inv_attr_show(struct device *dev,
 		if (result)
 			return result;
 		return sprintf(buf, "%d\n", data);
-	case ATTR_DMP_GLU_GYRO_BIAS_LPF_GAIN:
-		result = inv_read_dmp(st, KEY_D_GLU_GYRO_BIAS_LPF_GAIN, &data);
-		if (result)
-			return result;
-		return sprintf(buf, "%d\n", data);
-	case ATTR_DMP_GLU_RELATIVE_LOOK_UP_LEAK_GAIN:
-		result = inv_read_dmp(st,
-			KEY_D_GLU_RELATIVE_LOOK_UP_LEAK_GAIN, &data);
-		if (result)
-			return result;
-		return sprintf(buf, "%d\n", data);
-	case ATTR_DMP_GLU_RELATIVE_ANGLE_THRESHOLD: {
-		const int angle_multi = 46851;
-
-		result = inv_read_dmp(st,
-			KEY_D_GLU_RELATIVE_ANGLE_THRESHOLD, &data);
-		if (result)
-			return result;
-		return sprintf(buf, "%d\n", (data +
-				(angle_multi >> 1))/angle_multi);
-	}
-	case ATTR_DMP_GLU_HORIZONTAL_THRESHOLD_SQUARED:
-		result = inv_read_dmp(st,
-			KEY_D_GLU_HORIZONTAL_THRESHOLD_SQUARED, &data);
-		if (result)
-			return result;
-		return sprintf(buf, "%d\n", data);
-	case ATTR_DMP_GLU_VERSION4_ON:
-		result = inv_read_dmp(st, KEY_D_GLU_VERSION, &data);
-		if (result)
-			return result;
-		return sprintf(buf, "%d\n", !!data);
 	case ATTR_DMP_TAP_THRESHOLD:
 		return sprintf(buf, "%d\n", st->tap.thresh);
 	case ATTR_DMP_TAP_MIN_COUNT:
@@ -1320,12 +1208,6 @@ static int inv_gyro_enable(struct inv_mpu_iio_s *st,
 		clear_bit(INV_MPU_SCAN_GYRO_Z, ring->scan_mask);
 	}
 	st->chip_config.gyro_enable = en;
-
-	if (st->chip_config.glu_version4_on && (!en)) {
-		result = inv_turn_on_one_axis_gyro(st, true);
-		if (result)
-			return result;
-	}
 
 	return 0;
 }
@@ -1570,19 +1452,6 @@ static IIO_DEVICE_ATTR(glu_trigger, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_GLU_TRIGGER);
 static IIO_DEVICE_ATTR(glu_roll, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_GLU_ROLL);
-static IIO_DEVICE_ATTR(glu_gyro_bias_lpf_gain, S_IRUGO | S_IWUGO, inv_attr_show,
-	inv_dmp_attr_store, ATTR_DMP_GLU_GYRO_BIAS_LPF_GAIN);
-static IIO_DEVICE_ATTR(glu_relative_lookup_leak_gain, S_IRUGO | S_IWUGO,
-	inv_attr_show,
-	inv_dmp_attr_store, ATTR_DMP_GLU_RELATIVE_LOOK_UP_LEAK_GAIN);
-static IIO_DEVICE_ATTR(glu_relative_angle_threshold, S_IRUGO | S_IWUGO,
-	inv_attr_show,
-	inv_dmp_attr_store, ATTR_DMP_GLU_RELATIVE_ANGLE_THRESHOLD);
-static IIO_DEVICE_ATTR(glu_horizontal_threshold_squared, S_IRUGO | S_IWUGO,
-	inv_attr_show,
-	inv_dmp_attr_store, ATTR_DMP_GLU_HORIZONTAL_THRESHOLD_SQUARED);
-static IIO_DEVICE_ATTR(glu_version4_on, S_IRUGO | S_IWUGO, inv_attr_show,
-	inv_dmp_attr_store, ATTR_DMP_GLU_VERSION4_ON);
 static IIO_DEVICE_ATTR(dmp_on, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_dmp_attr_store, ATTR_DMP_ON);
 static IIO_DEVICE_ATTR(dmp_int_on, S_IRUGO | S_IWUGO, inv_attr_show,
@@ -1650,11 +1519,6 @@ static const struct attribute *inv_mpu6050_attributes[] = {
 	&iio_dev_attr_glu_level.dev_attr.attr,
 	&iio_dev_attr_glu_trigger.dev_attr.attr,
 	&iio_dev_attr_glu_roll.dev_attr.attr,
-	&iio_dev_attr_glu_gyro_bias_lpf_gain.dev_attr.attr,
-	&iio_dev_attr_glu_relative_lookup_leak_gain.dev_attr.attr,
-	&iio_dev_attr_glu_relative_angle_threshold.dev_attr.attr,
-	&iio_dev_attr_glu_horizontal_threshold_squared.dev_attr.attr,
-	&iio_dev_attr_glu_version4_on.dev_attr.attr,
 	&iio_dev_attr_dmp_on.dev_attr.attr,
 	&iio_dev_attr_dmp_int_on.dev_attr.attr,
 	&iio_dev_attr_dmp_event_int_on.dev_attr.attr,
@@ -1964,35 +1828,6 @@ static int inv_create_dmp_sysfs(struct iio_dev *ind)
 	return result;
 }
 
-static int check_axis_from_orientation_matrix(struct inv_mpu_iio_s *st)
-{
-	u8 *m, i;
-	m = st->plat_data.orientation;
-
-	for (i = 0; i < 3; i++) {
-		if (m[i] != 0) {
-			switch (i) {
-			case 0:
-				st->pll = INV_CLK_PLL_X;
-				st->axis = BIT_PWR_GYRO_X_ON;
-			break;
-			case 1:
-				st->pll = INV_CLK_PLL_Y;
-				st->axis = BIT_PWR_GYRO_Y_ON;
-			break;
-			case 2:
-				st->pll = INV_CLK_PLL_Z;
-				st->axis = BIT_PWR_GYRO_Z_ON;
-			break;
-			default:
-			break;
-			}
-		}
-	}
-
-	return 0;
-}
-
 /**
  *  inv_mpu_probe() - probe function.
  */
@@ -2019,7 +1854,6 @@ static int inv_mpu_probe(struct i2c_client *client,
 	st->i2c_addr = client->addr;
 	st->plat_data =
 		*(struct mpu_platform_data *)dev_get_platdata(&client->dev);
-	check_axis_from_orientation_matrix(st);
 	/* power is turned on inside check chip type*/
 	result = inv_check_chip_type(st, id);
 	if (result)
