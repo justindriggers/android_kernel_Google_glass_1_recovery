@@ -50,6 +50,8 @@
 #define DISPC_IRQ_FRAMEDONETV		(1 << 24)
 #define DISPC_IRQ_WBINCOMPLETE		(1 << 26)
 
+#define OMAP_DSS_GAMMA_TABLE_SIZE   256
+
 struct omap_dss_device;
 struct omap_overlay_manager;
 
@@ -483,8 +485,13 @@ struct omap_overlay_manager_info {
 
 	struct omapdss_ovl_cb cb;
 
+	/* TODO(jscarr) move these, they should not be written so often */
 	bool cpr_enable;
 	struct omap_dss_cpr_coefs cpr_coefs;
+
+	bool gamma_enable;
+	bool gamma_table_dirty;
+	u32 *gamma_table;
 };
 
 struct omap_overlay_manager {

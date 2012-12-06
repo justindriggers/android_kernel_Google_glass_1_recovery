@@ -376,8 +376,81 @@ static void notle_disable_panel(void) {
         }
 };
 
+/*
+ * Gamma table where output = input ^ gamma
+ * Format of entries is 0xiirrggbb (ii is the index)
+ * Hardware and image experiments determined that our default
+ * gamma should be set at 1.3
+ */
+static u32 gamma_13[OMAP_DSS_GAMMA_TABLE_SIZE] = {
+    0x00000000, 0x01000000, 0x02000000, 0x03000000,
+    0x04010101, 0x05010101, 0x06010101, 0x07020202,
+    0x08020202, 0x09030303, 0x0a030303, 0x0b040404,
+    0x0c040404, 0x0d050505, 0x0e050505, 0x0f060606,
+    0x10060606, 0x11070707, 0x12080808, 0x13080808,
+    0x14090909, 0x15090909, 0x160a0a0a, 0x170b0b0b,
+    0x180b0b0b, 0x190c0c0c, 0x1a0d0d0d, 0x1b0d0d0d,
+    0x1c0e0e0e, 0x1d0f0f0f, 0x1e0f0f0f, 0x1f101010,
+    0x20111111, 0x21111111, 0x22121212, 0x23131313,
+    0x24141414, 0x25141414, 0x26151515, 0x27161616,
+    0x28161616, 0x29171717, 0x2a181818, 0x2b191919,
+    0x2c191919, 0x2d1a1a1a, 0x2e1b1b1b, 0x2f1c1c1c,
+    0x301d1d1d, 0x311d1d1d, 0x321e1e1e, 0x331f1f1f,
+    0x34202020, 0x35212121, 0x36212121, 0x37222222,
+    0x38232323, 0x39242424, 0x3a252525, 0x3b262626,
+    0x3c262626, 0x3d272727, 0x3e282828, 0x3f292929,
+    0x402a2a2a, 0x412b2b2b, 0x422b2b2b, 0x432c2c2c,
+    0x442d2d2d, 0x452e2e2e, 0x462f2f2f, 0x47303030,
+    0x48313131, 0x49323232, 0x4a333333, 0x4b333333,
+    0x4c343434, 0x4d353535, 0x4e363636, 0x4f373737,
+    0x50383838, 0x51393939, 0x523a3a3a, 0x533b3b3b,
+    0x543c3c3c, 0x553d3d3d, 0x563e3e3e, 0x573f3f3f,
+    0x583f3f3f, 0x59404040, 0x5a414141, 0x5b424242,
+    0x5c434343, 0x5d444444, 0x5e454545, 0x5f464646,
+    0x60474747, 0x61484848, 0x62494949, 0x634a4a4a,
+    0x644b4b4b, 0x654c4c4c, 0x664d4d4d, 0x674e4e4e,
+    0x684f4f4f, 0x69505050, 0x6a515151, 0x6b525252,
+    0x6c535353, 0x6d545454, 0x6e555555, 0x6f565656,
+    0x70575757, 0x71585858, 0x72595959, 0x735a5a5a,
+    0x745b5b5b, 0x755c5c5c, 0x765d5d5d, 0x775e5e5e,
+    0x785f5f5f, 0x79606060, 0x7a616161, 0x7b626262,
+    0x7c636363, 0x7d646464, 0x7e656565, 0x7f676767,
+    0x80686868, 0x81696969, 0x826a6a6a, 0x836b6b6b,
+    0x846c6c6c, 0x856d6d6d, 0x866e6e6e, 0x876f6f6f,
+    0x88707070, 0x89717171, 0x8a727272, 0x8b737373,
+    0x8c747474, 0x8d767676, 0x8e777777, 0x8f787878,
+    0x90797979, 0x917a7a7a, 0x927b7b7b, 0x937c7c7c,
+    0x947d7d7d, 0x957e7e7e, 0x967f7f7f, 0x97818181,
+    0x98828282, 0x99838383, 0x9a848484, 0x9b858585,
+    0x9c868686, 0x9d878787, 0x9e888888, 0x9f898989,
+    0xa08b8b8b, 0xa18c8c8c, 0xa28d8d8d, 0xa38e8e8e,
+    0xa48f8f8f, 0xa5909090, 0xa6919191, 0xa7939393,
+    0xa8949494, 0xa9959595, 0xaa969696, 0xab979797,
+    0xac989898, 0xad999999, 0xae9b9b9b, 0xaf9c9c9c,
+    0xb09d9d9d, 0xb19e9e9e, 0xb29f9f9f, 0xb3a0a0a0,
+    0xb4a2a2a2, 0xb5a3a3a3, 0xb6a4a4a4, 0xb7a5a5a5,
+    0xb8a6a6a6, 0xb9a8a8a8, 0xbaa9a9a9, 0xbbaaaaaa,
+    0xbcababab, 0xbdacacac, 0xbeadadad, 0xbfafafaf,
+    0xc0b0b0b0, 0xc1b1b1b1, 0xc2b2b2b2, 0xc3b3b3b3,
+    0xc4b5b5b5, 0xc5b6b6b6, 0xc6b7b7b7, 0xc7b8b8b8,
+    0xc8b9b9b9, 0xc9bbbbbb, 0xcabcbcbc, 0xcbbdbdbd,
+    0xccbebebe, 0xcdc0c0c0, 0xcec1c1c1, 0xcfc2c2c2,
+    0xd0c3c3c3, 0xd1c4c4c4, 0xd2c6c6c6, 0xd3c7c7c7,
+    0xd4c8c8c8, 0xd5c9c9c9, 0xd6cbcbcb, 0xd7cccccc,
+    0xd8cdcdcd, 0xd9cecece, 0xdacfcfcf, 0xdbd1d1d1,
+    0xdcd2d2d2, 0xddd3d3d3, 0xded4d4d4, 0xdfd6d6d6,
+    0xe0d7d7d7, 0xe1d8d8d8, 0xe2d9d9d9, 0xe3dbdbdb,
+    0xe4dcdcdc, 0xe5dddddd, 0xe6dedede, 0xe7e0e0e0,
+    0xe8e1e1e1, 0xe9e2e2e2, 0xeae4e4e4, 0xebe5e5e5,
+    0xece6e6e6, 0xede7e7e7, 0xeee9e9e9, 0xefeaeaea,
+    0xf0ebebeb, 0xf1ececec, 0xf2eeeeee, 0xf3efefef,
+    0xf4f0f0f0, 0xf5f2f2f2, 0xf6f3f3f3, 0xf7f4f4f4,
+    0xf8f5f5f5, 0xf9f7f7f7, 0xfaf8f8f8, 0xfbf9f9f9,
+    0xfcfbfbfb, 0xfdfcfcfc, 0xfefdfdfd, 0xffffffff
+};
+
 /* Using the panel-notle-dpi driver, we only specify enable/disable. */
-static struct panel_notle_data panel_notle = {
+static struct panel_notle_data panel_notle_preevt2 = {
         .platform_enable          = notle_enable_dpi,
         .platform_disable         = notle_disable_dpi,
         .panel_enable             = notle_enable_panel,
@@ -386,8 +459,33 @@ static struct panel_notle_data panel_notle = {
         .green_max_mw             = 192,
         .blue_max_mw              = 96,
         .limit_mw                 = 80,
+        .red_percent              = 1667,
+        .green_percent            = 5416,
+        .blue_percent             = 2917,
+        .cpr_enable               = 0,
+        .gamma_table              = NULL,
+        .gamma_enable             = 0,
 };
 
+static struct panel_notle_data panel_notle = {
+        .platform_enable          = notle_enable_dpi,
+        .platform_disable         = notle_disable_dpi,
+        .panel_enable             = notle_enable_panel,
+        .panel_disable            = notle_disable_panel,
+        .red_max_mw               = 63,
+        .green_max_mw             = 96,
+        .blue_max_mw              = 96,
+        .limit_mw                 = 76,
+        .red_percent              = 2863,
+        .green_percent            = 3333,
+        .blue_percent             = 2052,
+        .cpr_enable               = 1,
+        .cpr_coefs                = {
+            159, 17, 32, 48, 166, 22, 18, -3, 239
+        },
+        .gamma_table              = gamma_13,
+        .gamma_enable             = 1,
+};
 
 // gpio line set in board specific code
 struct omap_dss_device panel_notle_device = {
@@ -2158,9 +2256,12 @@ static void __init notle_init(void)
         }
 #endif
 
+        if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
+            panel_notle_device.data = &panel_notle_preevt2;
+        }
         err = notle_dpi_init();
         if (!err) {
-            panel_notle.notle_version = NOTLE_VERSION;
+            ((struct panel_notle_data *)panel_notle_device.data)->notle_version = NOTLE_VERSION;
             omap_display_init(&panel_notle_dss_data);
         } else {
             pr_err("DPI initialization failed: %d\n", err);

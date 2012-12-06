@@ -1640,6 +1640,27 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
         drv_data->enabled = 0;
 }
 
+static void panel_notle_version_config(int version,
+                                       struct omap_dss_device *dssdev)
+{
+    struct panel_notle_data *panel_data = get_panel_data(dssdev);
+    struct omap_overlay_manager_info *info;
+
+    /* set up configuration from board file that is version specific */
+    led_config.red_percent = panel_data->red_percent;
+    led_config.green_percent = panel_data->green_percent;
+    led_config.blue_percent = panel_data->blue_percent;
+
+    info = &dssdev->manager->info;
+    info->cpr_enable = panel_data->cpr_enable;
+    info->cpr_coefs = panel_data->cpr_coefs;
+    info->gamma_enable = panel_data->gamma_enable;
+    if (panel_data->gamma_table != NULL) {
+        memcpy(info->gamma_table, panel_data->gamma_table, OMAP_DSS_GAMMA_TABLE_SIZE*sizeof(u32));
+        info->gamma_table_dirty = true;
+    }
+}
+
 static int panel_notle_probe(struct omap_dss_device *dssdev) {
         int r;
         struct panel_config *panel_config = &notle_config;
@@ -1649,6 +1670,7 @@ static int panel_notle_probe(struct omap_dss_device *dssdev) {
         dev_dbg(&dssdev->dev, "probe\n");
 
         version = panel_data->notle_version;
+        panel_notle_version_config(version, dssdev);
 
         dssdev->panel.config = panel_config->config;
         dssdev->panel.timings = panel_config->timings;

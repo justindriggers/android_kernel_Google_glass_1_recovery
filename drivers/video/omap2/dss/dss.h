@@ -465,6 +465,7 @@ void dispc_set_channel_out(enum omap_plane plane,
 void dispc_set_wb_channel_out(enum omap_plane plane);
 
 void dispc_enable_gamma_table(bool enable);
+void dispc_set_gamma_table(enum omap_channel channel, u32 *table);
 int dispc_setup_plane(enum omap_plane plane,
 		      u32 paddr, u16 screen_width,
 		      u16 pos_x, u16 pos_y,

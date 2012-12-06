@@ -39,6 +39,13 @@ struct panel_notle_data {
         int green_max_mw;
         int blue_max_mw;
         int limit_mw;
+        unsigned red_percent;
+        unsigned green_percent;
+        unsigned blue_percent;
+        struct omap_dss_cpr_coefs cpr_coefs;
+        bool cpr_enable;
+        u32 *gamma_table;
+        bool gamma_enable;
 };
 
 #endif /* __OMAP_PANEL_NOTLE_H */

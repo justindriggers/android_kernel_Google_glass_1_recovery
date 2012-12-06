@@ -408,6 +408,100 @@ static ssize_t manager_cpr_coef_store(struct omap_overlay_manager *mgr,
 	return size;
 }
 
+static ssize_t manager_gamma_table_show(struct omap_overlay_manager *mgr,
+		char *buf)
+{
+	struct omap_overlay_manager_info info;
+	u32 *p;
+	size_t left, n;
+	int i;
+
+	left = PAGE_SIZE;
+
+	mgr->get_manager_info(mgr, &info);
+	p = info.gamma_table;
+	for (i = 0; i < OMAP_DSS_GAMMA_TABLE_SIZE; i++) {
+		n = snprintf(buf, left, "0x%08x\n", *p++);
+		buf += n;
+		left -= n;
+	}
+	return PAGE_SIZE - left;
+}
+
+static ssize_t manager_gamma_table_store(struct omap_overlay_manager *mgr,
+		const char *buf, size_t size)
+{
+	struct omap_overlay_manager_info info;
+	u32 entry;
+	char *start, *end;
+	size_t left;
+	int r, index;
+
+	mgr->get_manager_info(mgr, &info);
+
+	// extract the entries
+	start = (char *)buf;
+	left = size;
+	while (left) {
+		entry = simple_strtoul(start, &end, 0);
+		if (end == start)
+			break;
+		left -= ((end - start) + 1);
+		start = end + 1;
+		index = entry >> 24;
+		info.gamma_table[index] = entry;
+	}
+	info.gamma_table_dirty = true;
+
+	r = mgr->set_manager_info(mgr, &info);
+	if (r)
+		return r;
+
+	r = mgr->apply(mgr);
+	if (r)
+		return r;
+
+	return size;
+}
+
+static ssize_t manager_gamma_enable_show(struct omap_overlay_manager *mgr,
+		char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", mgr->info.gamma_enable);
+}
+
+static ssize_t manager_gamma_enable_store(struct omap_overlay_manager *mgr,
+		const char *buf, size_t size)
+{
+	struct omap_overlay_manager_info info;
+	int v;
+	int r;
+	bool enable;
+
+	r = kstrtoint(buf, 0, &v);
+	if (r)
+		return r;
+
+	enable = !!v;
+
+	mgr->get_manager_info(mgr, &info);
+
+	if (info.gamma_enable == enable)
+		return size;
+
+	info.gamma_enable = enable;
+
+	r = mgr->set_manager_info(mgr, &info);
+	if (r)
+		return r;
+
+	r = mgr->apply(mgr);
+	if (r)
+		return r;
+
+	return size;
+}
+
 struct manager_attribute {
 	struct attribute attr;
 	ssize_t (*show)(struct omap_overlay_manager *, char *);
@@ -441,6 +535,12 @@ static MANAGER_ATTR(cpr_enable, S_IRUGO|S_IWUSR,
 static MANAGER_ATTR(cpr_coef, S_IRUGO|S_IWUSR,
 		manager_cpr_coef_show,
 		manager_cpr_coef_store);
+static MANAGER_ATTR(gamma_enable, S_IRUGO|S_IWUSR,
+		manager_gamma_enable_show,
+		manager_gamma_enable_store);
+static MANAGER_ATTR(gamma_table, S_IRUGO|S_IWUSR,
+		manager_gamma_table_show,
+		manager_gamma_table_store);
 
 
 static struct attribute *manager_sysfs_attrs[] = {
@@ -454,6 +554,8 @@ static struct attribute *manager_sysfs_attrs[] = {
 	&manager_attr_alpha_blending_enabled.attr,
 	&manager_attr_cpr_enable.attr,
 	&manager_attr_cpr_coef.attr,
+	&manager_attr_gamma_enable.attr,
+	&manager_attr_gamma_table.attr,
 	NULL
 };
 
@@ -616,6 +718,9 @@ struct manager_cache_data {
 
 	bool cpr_enable;
 	struct omap_dss_cpr_coefs cpr_coefs;
+	bool gamma_enable;
+	u32 *gamma_table;
+	bool gamma_table_dirty;
 	bool skip_init;
 };
 
@@ -1223,6 +1328,9 @@ static void configure_manager(enum omap_channel channel)
 		dispc_enable_cpr(channel, c->cpr_enable);
 		dispc_set_cpr_coef(channel, &c->cpr_coefs);
 	}
+	dispc_enable_gamma_table(c->gamma_enable);
+	if (c->gamma_table_dirty)
+		dispc_set_gamma_table(channel, c->gamma_table);
 }
 
 /* configure_dispc() tries to write values from cache to shadow registers.
@@ -2089,6 +2197,12 @@ static int omap_dss_mgr_apply(struct omap_overlay_manager *mgr)
 	mc->alpha_enabled = mgr->info.alpha_enabled;
 	mc->cpr_coefs = mgr->info.cpr_coefs;
 	mc->cpr_enable = mgr->info.cpr_enable;
+	mc->gamma_table = mgr->info.gamma_table;
+	mc->gamma_table_dirty = mgr->info.gamma_table_dirty;
+	if (mgr->info.gamma_table_dirty) {
+		mgr->info.gamma_table_dirty = false;
+	}
+	mc->gamma_enable = mgr->info.gamma_enable;
 
 	mc->manual_upd_display =
 		dssdev->caps & OMAP_DSS_DISPLAY_CAP_MANUAL_UPDATE;
@@ -2401,6 +2515,7 @@ static void omap_dss_mgr_get_info(struct omap_overlay_manager *mgr,
 
 static int dss_mgr_enable(struct omap_overlay_manager *mgr)
 {
+	mgr->info.gamma_table_dirty = true;  /* trigger reload of table */
 	dispc_enable_channel(mgr->id, mgr->device->type, 1);
 	return 0;
 }
@@ -2417,6 +2532,27 @@ static void omap_dss_add_overlay_manager(struct omap_overlay_manager *manager)
 	list_add_tail(&manager->list, &manager_list);
 	if (manager->id < ARRAY_SIZE(mgrs))
 		mgrs[manager->id] = manager;
+}
+
+/*
+ * Create a identity gamma table, only create gamma for LCD2
+ */
+static void omap_dss_init_gamma_table(struct omap_overlay_manager *mgr)
+{
+	int i;
+	u32 *p;
+
+	if (mgr->id != OMAP_DSS_OVL_MGR_LCD2)
+		return;
+
+	p = kzalloc(OMAP_DSS_GAMMA_TABLE_SIZE*sizeof(u32), GFP_KERNEL);
+	BUG_ON(p == NULL);
+
+	mgr->info.gamma_table = p;
+	for (i = 0; i < OMAP_DSS_GAMMA_TABLE_SIZE; i++) {
+		*p++ = (i << 24) | (i << 16) | (i <<8) | i;
+	}
+	mgr->info.gamma_table_dirty = true;
 }
 
 int dss_init_overlay_managers(struct platform_device *pdev)
@@ -2474,6 +2610,8 @@ int dss_init_overlay_managers(struct platform_device *pdev)
 		dss_overlay_setup_dispc_manager(mgr);
 
 		omap_dss_add_overlay_manager(mgr);
+
+		omap_dss_init_gamma_table(mgr);
 
 		r = kobject_init_and_add(&mgr->kobj, &manager_ktype,
 				&pdev->dev.kobj, "manager%d", i);
@@ -2533,6 +2671,8 @@ void dss_uninit_overlay_managers(struct platform_device *pdev)
 		list_del(&mgr->list);
 		kobject_del(&mgr->kobj);
 		kobject_put(&mgr->kobj);
+		if (mgr->info.gamma_table)
+			kfree(mgr->info.gamma_table);
 		kfree(mgr);
 	}
 

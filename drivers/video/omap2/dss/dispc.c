@@ -1316,18 +1316,32 @@ void dispc_set_burst_size(enum omap_plane plane,
 	dispc_write_reg(DISPC_OVL_ATTRIBUTES(plane), val);
 }
 
+/*
+ * NOTE:  Warning the hardware is strange
+ * LCD1 gamma always on, TV & LCD2 share single enable bit
+ * Not possible to enable/disable per channel
+ */
 void dispc_enable_gamma_table(bool enable)
 {
-	/*
-	 * This is partially implemented to support only disabling of
-	 * the gamma table.
-	 */
-	if (enable) {
-		DSSWARN("Gamma table enabling for TV not yet supported");
+	REG_FLD_MOD(DISPC_CONFIG, enable, 9, 9);
+}
+
+/*
+ * write entire table
+ * implement partial table write if needed later
+ * table1 is for LCD2 NOT table2!!
+ */
+void dispc_set_gamma_table(enum omap_channel channel, u32 *table)
+{
+	int i;
+
+	if (channel != OMAP_DSS_CHANNEL_LCD2) {
 		return;
 	}
 
-	REG_FLD_MOD(DISPC_CONFIG, enable, 9, 9);
+	for (i = 0; i < 256; i++) {
+		dispc_write_reg(DISPC_GAMMA_TABLE1, *table++);
+	}
 }
 
 void dispc_set_zorder(enum omap_plane plane,
