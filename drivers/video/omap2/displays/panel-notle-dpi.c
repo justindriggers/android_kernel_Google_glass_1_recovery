@@ -65,7 +65,7 @@
 #define ICE40_LED_BLUE_H   0x15
 #define ICE40_LED_BLUE_L   0x16
 
-#define ICE40_LCOS       0x30
+#define ICE40_LCOS       0x03
 #define ICE40_LCOS_DISP_ENB     0x01
 
 typedef enum {
