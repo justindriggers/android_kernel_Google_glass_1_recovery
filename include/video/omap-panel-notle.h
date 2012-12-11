@@ -46,6 +46,8 @@ struct panel_notle_data {
         bool cpr_enable;
         u32 *gamma_table;
         bool gamma_enable;
+        int gpio_fpga_cdone;
+        int gpio_fpga_creset_b;
 };
 
 #endif /* __OMAP_PANEL_NOTLE_H */

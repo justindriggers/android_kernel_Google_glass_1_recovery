@@ -51,6 +51,8 @@ enum {
     GPIO_GPS_AWAKE_INDEX,
     GPIO_LCD_RST_N_INDEX,
     GPIO_DISP_ENB_INDEX,
+    GPIO_FPGA_CDONE_INDEX,
+    GPIO_FPGA_CRESET_B_INDEX,
     GPIO_CAM_PWDN_INDEX,
     GPIO_CAMERA_INDEX,
     GPIO_TOUCHPAD_INT_N_INDEX,
@@ -79,6 +81,8 @@ enum {
 #define GPIO_LCD_RST_N_EVT1             53
 #define GPIO_LCD_RST_N_EVT2             94
 #define GPIO_DISP_ENB                   84
+#define GPIO_FPGA_CDONE                 85
+#define GPIO_FPGA_CRESET_B              87
 #define GPIO_BT_RST_N_EVT1              151
 #define GPIO_BT_RST_N_EVT2              113
 #define GPIO_CAM_PWDN_EVT1              91

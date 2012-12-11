@@ -146,6 +146,8 @@ static int notle_gpio_board_evt2[GPIO_MAX_INDEX] = {
     [GPIO_GPS_RESET_N_INDEX] = GPIO_GPS_RESET_N_EVT2,
     [GPIO_GPS_AWAKE_INDEX] = GPIO_GPS_AWAKE_EVT2,
     [GPIO_LCD_RST_N_INDEX] = GPIO_LCD_RST_N_EVT2,
+    [GPIO_FPGA_CDONE_INDEX] = GPIO_FPGA_CDONE,
+    [GPIO_FPGA_CRESET_B_INDEX] = GPIO_FPGA_CRESET_B,
     [GPIO_BT_RST_N_INDEX] = GPIO_BT_RST_N_EVT2,
     [GPIO_CAM_PWDN_INDEX] = GPIO_CAM_PWDN_EVT2,
     [GPIO_TOUCHPAD_INT_N_INDEX] = GPIO_TOUCHPAD_INT_N_EVT2,
@@ -523,7 +525,6 @@ int __init notle_dpi_init(void)
 {
         int r;
 
-        panel_notle_device.reset_gpio = notle_get_gpio(GPIO_LCD_RST_N_INDEX);
         if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
             r = gpio_request_one(GPIO_DISP_ENB, GPIOF_OUT_INIT_LOW, "disp_enable");
             if (r) {
@@ -532,6 +533,7 @@ int __init notle_dpi_init(void)
             }
         }
 
+        panel_notle_device.reset_gpio = notle_get_gpio(GPIO_LCD_RST_N_INDEX);
         r = gpio_request_one(panel_notle_device.reset_gpio,
                              GPIOF_OUT_INIT_HIGH, "panel_reset");
         if (r) {
@@ -540,6 +542,35 @@ int __init notle_dpi_init(void)
                     gpio_free(GPIO_DISP_ENB);
                 }
                 return r;
+        }
+
+        if (NOTLE_VERSION == V1_EVT2) {
+                struct panel_notle_data *panel_data = &panel_notle;
+
+                panel_data->gpio_fpga_cdone = notle_get_gpio(GPIO_FPGA_CDONE_INDEX);
+                r = gpio_request_one(panel_data->gpio_fpga_cdone,
+                                     GPIOF_IN, "fpga_cdone");
+                if (r) {
+                        pr_err("Failed to get fpga_cdone GPIO\n");
+                        gpio_free(panel_notle_device.reset_gpio);
+                        if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
+                            gpio_free(GPIO_DISP_ENB);
+                        }
+                        return r;
+                }
+
+                panel_data->gpio_fpga_creset_b = notle_get_gpio(GPIO_FPGA_CRESET_B_INDEX);
+                r = gpio_request_one(panel_data->gpio_fpga_creset_b,
+                                     GPIOF_OUT_INIT_HIGH, "fpga_creset_b");
+                if (r) {
+                        pr_err("Failed to get fpga_creset_b GPIO\n");
+                        gpio_free(panel_data->gpio_fpga_cdone);
+                        gpio_free(panel_notle_device.reset_gpio);
+                        if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
+                            gpio_free(GPIO_DISP_ENB);
+                        }
+                        return r;
+                }
         }
 
         if (NOTLE_VERSION == V1_HOG || NOTLE_VERSION == V1_EVT1 ||
@@ -1893,8 +1924,8 @@ static struct omap_board_mux evt2_board_mux[] __initdata = {
     OMAP4_MUX(C2C_DATA14,           OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // PROX_INT
     OMAP4_MUX(ABE_DMIC_DIN2,        OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN),    // CAMERA, TOP_SW
     OMAP4_MUX(DPM_EMU2,             OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // SOC_INT
-    OMAP4_MUX(USBB1_ULPITLL_STP,    OMAP_MUX_MODE7 ),                   // FPGA_CDONE
-    OMAP4_MUX(USBB1_ULPITLL_NXT,    OMAP_MUX_MODE7 ),                   // FPGA_CRESET_B
+    OMAP4_MUX(USBB1_ULPITLL_STP,    OMAP_MUX_MODE3 | OMAP_PIN_INPUT),   // FPGA_CDONE
+    OMAP4_MUX(USBB1_ULPITLL_NXT,    OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // FPGA_CRESET_B
     OMAP4_MUX(USBB1_ULPITLL_DAT7,   OMAP_MUX_MODE7 ),                   // FPGA_CBSEL1
 	{ .reg_offset = OMAP_MUX_TERMINATOR },
 };
