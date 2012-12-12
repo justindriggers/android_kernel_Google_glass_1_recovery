@@ -37,10 +37,10 @@
 
 /* driver name/version */
 #define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.4"
+#define DRIVER_VERSION "0.5"
 
 /* minimum MCU version for this driver */
-#define MINIMUM_MCU_VERSION	9
+#define MINIMUM_MCU_VERSION	12
 
 /* special app code to flash the bootloader */
 #define BOOTLOADER_FLASHER	0xff
@@ -102,6 +102,7 @@
 #define FLAG_DEVICE_BOOTED		1
 #define FLAG_FLASH_MODE			2
 #define FLAG_SYSFS_CREATED		3
+#define FLAG_PASSTHRU_STARTED		4
 
 /* flags for device permissions */
 #define DEV_MODE_RO (S_IRUSR | S_IRGRP)
@@ -143,6 +144,10 @@
 /* number of samples in prox data buffer */
 #define PROX_QUEUE_SZ			64
 #define PROX_INTERVAL			(1000000000LL / 32)
+
+/* interval for averaging sample rate, must be power-of-two */
+#define PROX_AVERAGING_INTERVAL		32
+#define PROX_AVERAGING_SHIFT		5
 
 /* values for flash_status */
 #define FLASH_STATUS_OK			0
@@ -223,6 +228,10 @@ struct glasshub_data {
 	uint8_t fw_checksum;
 	struct mutex device_lock;
 	long long irq_timestamp;
+	long long last_timestamp;
+	long long start_timestamp;
+	unsigned long count_for_average;
+	unsigned long average_delta;
 	unsigned long sample_count;
 	volatile unsigned long flags;
 	uint8_t don_doff_state;
@@ -523,11 +532,12 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 	int rc = 0;
 	uint8_t status;
 	uint16_t data[PROX_QUEUE_SZ];
-	int proxCount = 0;
+	int prox_count = 0;
 	int i;
-	u64 timestamp;
+	long long timestamp;
 
 	/* clear in-service flag */
+	timestamp = glasshub->irq_timestamp;
 	clear_bit(FLAG_WAKE_THREAD, &glasshub->flags);
 
 	mutex_lock(&glasshub->device_lock);
@@ -566,8 +576,8 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 		 * no more data. This mechanism saves us from doing another
 		 * I2C bus transfer to check the status register.
 		 */
-		if (atomic_read(&glasshub_opened) && (proxCount < PROX_QUEUE_SZ)) {
-			data[proxCount++] = (uint16_t) value & 0x7fff;
+		if (atomic_read(&glasshub_opened) && (prox_count < PROX_QUEUE_SZ)) {
+			data[prox_count++] = (uint16_t) value & 0x7fff;
 		}
 
 		/* check for end of data */
@@ -575,18 +585,51 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 	}
 
 	/* pass prox data to misc device driver */
-	if (proxCount) {
+	if (prox_count) {
 
-		/* backdate timestamps */
-		timestamp = glasshub->irq_timestamp - (proxCount - 1) * PROX_INTERVAL;
+		/* if passthru enabled, backdate timestamps */
+		if (test_and_clear_bit(FLAG_PASSTHRU_STARTED, &glasshub->flags)) {
+			glasshub->last_timestamp = timestamp - prox_count * glasshub->average_delta;
+			glasshub->start_timestamp = 0;
+		}
 
-		for (i = 0; i < proxCount; i++) {
+		for (i = 0; i < prox_count; i++) {
 			struct glasshub_data_user rec;
 			rec.value = data[i];
-			rec.timestamp = timestamp;
-			timestamp += PROX_INTERVAL;
+			glasshub->last_timestamp += glasshub->average_delta;
+			rec.timestamp = glasshub->last_timestamp;
 			kfifo_put(&prox_fifo, &rec);
 		}
+
+		/* calculate average sample rate */
+		if (prox_count == 1) {
+			long long drift;
+			if (glasshub->start_timestamp == 0) {
+				glasshub->start_timestamp = timestamp;
+				glasshub->count_for_average = 0;
+			} else {
+				if (++glasshub->count_for_average == PROX_AVERAGING_INTERVAL) {
+					glasshub->average_delta = (timestamp - glasshub->start_timestamp)
+						>> PROX_AVERAGING_SHIFT;
+					glasshub->start_timestamp = timestamp;
+					glasshub->count_for_average = 0;
+				}
+
+				/* check for drift */
+				drift = timestamp - glasshub->last_timestamp;
+				if ((drift < -PROX_INTERVAL) || (drift > PROX_INTERVAL)) {
+					dev_warn(&glasshub->i2c_client->dev,
+							"Proximity data drift exceeds one sample: %lld\n",
+							drift);
+					glasshub->last_timestamp = glasshub->last_timestamp + (drift >> 5);
+				}
+			}
+
+
+		} else {
+			glasshub->start_timestamp = 0;
+		}
+
 
 		/* wake up user space */
 		wake_up_interruptible(&prox_read_wait);
@@ -618,13 +661,14 @@ static ssize_t show_reg(struct device *dev, char *buf, uint8_t reg)
 
 /* common routine to set an I2C register from userspace */
 static ssize_t store_reg(struct device *dev, const char *buf, size_t count,
-		uint8_t reg, uint16_t min, uint16_t max)
+		uint8_t reg, uint16_t min, uint16_t max, unsigned long *pValue)
 {
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 	unsigned long value = 0;
 	if (!kstrtoul(buf, 10, &value)) {
 		value = (value < min) ? min : value;
 		value = (value > max) ? max : value;
+		if (pValue) *pValue = value;
 		mutex_lock(&glasshub->device_lock);
 		if (boot_device_l(glasshub) == 0) {
 			_i2c_write_reg(glasshub, reg, value);
@@ -664,7 +708,7 @@ static ssize_t don_doff_enable_show(struct device *dev, struct device_attribute 
 static ssize_t don_doff_enable_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_ENABLE_DON_DOFF, 0, 1);
+	return store_reg(dev, buf, count, REG_ENABLE_DON_DOFF, 0, 1, NULL);
 }
 
 /* show prox passthrough mode */
@@ -677,7 +721,15 @@ static ssize_t passthru_enable_show(struct device *dev, struct device_attribute 
 static ssize_t passthru_enable_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_ENABLE_PASSTHRU, 0, 1);
+	ssize_t ret;
+	unsigned long value;
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+
+	ret = store_reg(dev, buf, count, REG_ENABLE_PASSTHRU, 0, 1, &value);
+	if (value) {
+		set_bit(FLAG_PASSTHRU_STARTED, &glasshub->flags);
+	}
+	return ret;
 }
 
 /* read prox value */
@@ -704,24 +756,6 @@ static ssize_t proxmin_show(struct device *dev, struct device_attribute *attr, c
 static ssize_t proxraw_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return show_reg(dev, buf, REG16_PROX_RAW);
-}
-
-/* show prox data */
-static ssize_t prox_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	struct glasshub_data_user rec = { 0, 0 };
-
-	/* wait for data in FIFO */
-	while (kfifo_is_empty(&prox_fifo)) {
-		wait_event_interruptible(prox_read_wait, !kfifo_is_empty(&prox_fifo));
-	}
-
-	/* read from FIFO */
-	if (kfifo_get(&prox_fifo, &rec) != 0) {
-		return sprintf(buf, "%lld %u\n", rec.timestamp, rec.value);
-	} else {
-		return sprintf(buf, "read error\n");
-	}
 }
 
 /* show raw IR value */
@@ -751,7 +785,7 @@ static ssize_t don_doff_threshold_show(struct device *dev, struct device_attribu
 static ssize_t don_doff_threshold_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG16_DON_DOFF_THRESH, 1, 5000);
+	return store_reg(dev, buf, count, REG16_DON_DOFF_THRESH, 1, 5000, NULL);
 }
 
 /* show don/doff hysteresis value */
@@ -765,7 +799,7 @@ static ssize_t don_doff_hysteresis_show(struct device *dev, struct device_attrib
 static ssize_t don_doff_hysteresis_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_DON_DOFF_HYSTERESIS, 1, 255);
+	return store_reg(dev, buf, count, REG_DON_DOFF_HYSTERESIS, 1, 255, NULL);
 }
 
 /* show IR LED drive value */
@@ -778,7 +812,7 @@ static ssize_t led_drive_show(struct device *dev, struct device_attribute *attr,
 static ssize_t led_drive_store(struct device *dev, struct device_attribute *attr, const char *buf,
 		size_t count)
 {
-	return store_reg(dev, buf, count, REG_LED_DRIVE, 0, 7);
+	return store_reg(dev, buf, count, REG_LED_DRIVE, 0, 7, NULL);
 }
 
 /* calibrate IR LED drive levels */
@@ -929,7 +963,7 @@ static ssize_t wink_enable_show(struct device *dev, struct device_attribute *att
 static ssize_t wink_enable_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_ENABLE_WINK, 0, 1);
+	return store_reg(dev, buf, count, REG_ENABLE_WINK, 0, 1, NULL);
 }
 
 /* show wink inhibit period */
@@ -942,7 +976,7 @@ static ssize_t wink_inhibit_show(struct device *dev, struct device_attribute *at
 static ssize_t wink_inhibit_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_WINK_INHIBIT, 1, 255);
+	return store_reg(dev, buf, count, REG_WINK_INHIBIT, 1, 255, NULL);
 }
 
 /* show detector gain */
@@ -955,7 +989,7 @@ static ssize_t detector_gain_show(struct device *dev, struct device_attribute *a
 static ssize_t detector_gain_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_DETECTOR_GAIN, 0x01, 0x80);
+	return store_reg(dev, buf, count, REG_DETECTOR_GAIN, 0x01, 0x80, NULL);
 }
 
 /* show detector bias */
@@ -968,7 +1002,7 @@ static ssize_t detector_bias_show(struct device *dev, struct device_attribute *a
 static ssize_t detector_bias_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG16_DETECTOR_BIAS, 1, 5000);
+	return store_reg(dev, buf, count, REG16_DETECTOR_BIAS, 1, 5000, NULL);
 }
 
 /* show last error code from device */
@@ -987,7 +1021,7 @@ static ssize_t debug_show(struct device *dev, struct device_attribute *attr, cha
 static ssize_t debug_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_DEBUG, 0, 255);
+	return store_reg(dev, buf, count, REG_DEBUG, 0, 255, NULL);
 }
 
 /* sysfs node for updating device firmware */
@@ -1462,7 +1496,6 @@ static DEVICE_ATTR(bootloader_version, DEV_MODE_RO, bootloader_version_show, NUL
 static DEVICE_ATTR(passthru_enable, DEV_MODE_RW, passthru_enable_show, passthru_enable_store);
 static DEVICE_ATTR(proxraw, DEV_MODE_RO, proxraw_show, NULL);
 static DEVICE_ATTR(proxmin, DEV_MODE_RO, proxmin_show, NULL);
-static DEVICE_ATTR(prox, DEV_MODE_RO, prox_show, NULL);
 static DEVICE_ATTR(vis, DEV_MODE_RO, vis_show, NULL);
 static DEVICE_ATTR(ir, DEV_MODE_RO, ir_show, NULL);
 static DEVICE_ATTR(don_doff_enable, DEV_MODE_RW, don_doff_enable_show, don_doff_enable_store);
@@ -1488,7 +1521,6 @@ static struct attribute *attrs[] = {
 	&dev_attr_passthru_enable.attr,
 	&dev_attr_proxraw.attr,
 	&dev_attr_proxmin.attr,
-	&dev_attr_prox.attr,
 	&dev_attr_ir.attr,
 	&dev_attr_vis.attr,
 	&dev_attr_don_doff_enable.attr,
@@ -1568,8 +1600,7 @@ static ssize_t glasshub_read(struct file *file, char __user *buf, size_t count, 
 	int rc = 0;
 
 	/* validate parameters */
-	if (count == 0)
-		return 0;
+	count = (count / sizeof(struct glasshub_data_user)) * sizeof(struct glasshub_data_user);
 	if (count < sizeof(struct glasshub_data_user)) {
 		dev_err(&glasshub->i2c_client->dev,
 				"%s: Invalid data size\n", __func__);
@@ -1583,7 +1614,7 @@ static ssize_t glasshub_read(struct file *file, char __user *buf, size_t count, 
 					"%s: Unable to acquire device mutex\n", __func__);
 			return -EAGAIN;
 		}
-		rc = kfifo_to_user(&prox_fifo, buf, sizeof(struct glasshub_data_user), &copied);
+		rc = kfifo_to_user(&prox_fifo, buf, count, &copied);
 		if ((rc < 0) || (copied > 0)) break;
 		mutex_unlock(&glasshub->device_lock);
 		rc = wait_event_interruptible(prox_read_wait, !kfifo_is_empty(&prox_fifo));
@@ -1767,6 +1798,7 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 	/* initialize data structure */
 	glasshub->i2c_client = i2c_client;
 	glasshub->flags = 0;
+	glasshub->average_delta = PROX_INTERVAL;
 	mutex_init(&glasshub->device_lock);
 
 	/* Set platform defaults */
