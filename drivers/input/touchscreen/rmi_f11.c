@@ -201,7 +201,6 @@ struct f11_instance_data {
 	unsigned char gesture_data_offset;
 	unsigned char *finger_data_buffer;
 	int last_finger_down_count;
-	int last_gesture_flag;
         bool suspended;
         int last_finger_pressed_count;
         int synth_events_sent;
@@ -682,27 +681,15 @@ static enum finger_state get_finger_state(unsigned char finger,
 	return (buffer[finger_byte] >> finger_shift) & FINGER_STATE_MASK;
 }
 
-/*
- * Determines if we are actively in early suspend state, a.k.a. screen-off state.
- * Returns: 1 Early suspend is currently active
- *          0 Early suspend is not active.
- */
-static int early_suspend_active(struct f11_instance_data *f11)
+static int send_synth_key(struct f11_instance_data *f11, int finger_pressed_count)
 {
-	if (f11->suspended) {
-		return 1;
-	}
-	return 0;
-}
+#ifdef DEBUG_SYNTH_KEY
+	printk(KERN_INFO "%s suspended:%d last_cnt:%d curr_cnt:%d finger_pressed_cnt:%d events_sent:%d wake_lock:%d\n",
+	       __func__, f11->suspended,  f11->last_suspend_cnt, get_suspend_cnt(), finger_pressed_count, f11->synth_events_sent,
+	       wake_lock_active(&f11->wakelock));
+#endif  /* DEBUG_SYNTH_KEY */
 
-/*
- * Determines if we immediately came from a suspend state.
- * Returns: 1 We just came from a suspend state.
- *          0 We did not just come from a suspend state.
- */
-static int from_suspend_active(struct f11_instance_data *f11)
-{
-	if (f11->last_suspend_cnt != get_suspend_cnt()) {
+	if (f11->suspended) {
 		return 1;
 	}
 	return 0;
@@ -719,8 +706,6 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 {
 	/* number of touch points - fingers down in this case */
 	int finger_down_count = 0;
-	/* Gesture flag mask for this iteration */
-	int gesture_flag = 0;
 	int finger;
 	struct rmi_function_device *function_device =
 			rmifninfo->function_device;
@@ -808,100 +793,88 @@ void FN_11_inthandler(struct rmi_function_info *rmifninfo,
 			handle_relative_report(rmifninfo);
 	}
 
-	/* See what gestures, if any, were reported during this event. */
-	gesture_flag = f11->finger_data_buffer[f11->data8_offset];
-	if (gesture_flag) {
-		if (early_suspend_active(f11)) {
-			/* If we have an interesting gesture, but no previous early tap
-			 *  and we've not come from suspend state then reject this gesture.
-			 */
-			if (gesture_flag & (HAS_FLICK_MASK|HAS_SINGLE_TAP_MASK|HAS_DOUBLE_TAP_MASK)
-			    && !((f11->last_gesture_flag & HAS_EARLY_TAP_MASK))) {
-				pr_info("%s Rejecting gesture with no previous early tap\n", __func__);
-			} else {
-				if (gesture_flag & HAS_FLICK_MASK) {
+	if (send_synth_key(f11, finger_down_count)) {
+		int flag = f11->finger_data_buffer[f11->data8_offset];
+		if (flag & HAS_FLICK_MASK) {
 #if defined(ABS_MT_PRESSURE)
-					/* We have to supply the minimum values required to get event through
-					   Android InputEvent layer */
-					input_report_abs(function_device->input, ABS_MT_PRESSURE, GESTURE_PRESSURE);
+			/* We have to supply the minimum values required to get event through
+			   Android InputEvent layer */
+			input_report_abs(function_device->input, ABS_MT_PRESSURE, GESTURE_PRESSURE);
 #endif
-					/* Add extreme offset to indicate it's not a real touchpad point */
-					input_report_abs(function_device->input, ABS_MT_POSITION_X,
-					                 GESTURE_OFFSET_X + (int8_t)(f11->finger_data_buffer[f11->data10_offset]));
+			/* Add extreme offset to indicate it's not a real touchpad point */
+			input_report_abs(function_device->input, ABS_MT_POSITION_X,
+			                 GESTURE_OFFSET_X + (int8_t)(f11->finger_data_buffer[f11->data10_offset]));
 
-					/* Add well-known gesture offset to indicate it's not a real touchpad point */
-					input_report_abs(function_device->input, ABS_MT_POSITION_Y,
-					                 GESTURE_OFFSET_Y + (int8_t)(f11->finger_data_buffer[f11->data11_offset]));
-					/* Add well-known gesture offset to indicate it's not a real touchpad point */
-					input_report_abs(function_device->input, ABS_MT_TOUCH_MAJOR, GESTURE_MT_MAJOR);
-					input_report_abs(function_device->input, ABS_MT_TOUCH_MINOR, GESTURE_MT_MINOR);
+			/* Add well-known gesture offset to indicate it's not a real touchpad point */
+			input_report_abs(function_device->input, ABS_MT_POSITION_Y,
+			                 GESTURE_OFFSET_Y + (int8_t)(f11->finger_data_buffer[f11->data11_offset]));
+			/* Add well-known gesture offset to indicate it's not a real touchpad point */
+			input_report_abs(function_device->input, ABS_MT_TOUCH_MAJOR, GESTURE_MT_MAJOR);
+			input_report_abs(function_device->input, ABS_MT_TOUCH_MINOR, GESTURE_MT_MINOR);
 
-					/* Close out multi touch sequence and entire motion sequence */
-					input_mt_sync(function_device->input);
-					input_sync(function_device->input); /* sync after groups of events */
+			/* Close out multi touch sequence and entire motion sequence */
+			input_mt_sync(function_device->input);
+			input_sync(function_device->input); /* sync after groups of events */
 
-					/* If there are no fingers, and last time through there were no fingers, we
-					 * need to send an empty mt sync packet with empty mt sync to indicate all fingers
-					 * have left the touchpad.  We send the sync at the end of this routine. */
-					if ((finger_down_count == 0) && (instance_data->last_finger_down_count == 0)) {
-						input_mt_sync(function_device->input);
-					}
-
-					/* Keep track of count of synthesized keys per suspend cycle. */
-					f11->synth_events_sent++;
-
-					/* Mask any further finger events, if any, until all fingers have left
-					 * the touchpad. */
-					// f11->mask_events = 1;
-
-					pr_info("%s Created synthesized flick movement event cnt:%d masking events:%d\n",
-					        __func__, f11->synth_events_sent, f11->mask_events);
-
-					wake_lock_timeout(&f11->wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
-				}
-				if (gesture_flag & (HAS_SINGLE_TAP_MASK | HAS_DOUBLE_TAP_MASK)) {
-#if defined(ABS_MT_PRESSURE)
-					/* We have to supply the minimum values required to get event through
-					   Android InputEvent layer */
-					input_report_abs(function_device->input, ABS_MT_PRESSURE, GESTURE_PRESSURE);
-#endif
-					/* Add well-known gesture offset to indicate it's not a real touchpad point */
-					input_report_abs(function_device->input, ABS_MT_POSITION_X, GESTURE_OFFSET_X);
-
-					/* Add well-known gesture offset to indicate it's not a real touchpad point */
-					input_report_abs(function_device->input, ABS_MT_POSITION_Y, GESTURE_OFFSET_Y);
-
-					/* Use extreme major and minor id to indicate it's not a real finger */
-					input_report_abs(function_device->input, ABS_MT_TOUCH_MAJOR, GESTURE_MT_MAJOR);
-					input_report_abs(function_device->input, ABS_MT_TOUCH_MINOR, GESTURE_MT_MINOR);
-
-					/* Close out multi touch sequence and entire motion sequence */
-					input_mt_sync(function_device->input);
-					input_sync(function_device->input); /* sync after groups of events */
-
-					/* If there are no fingers, and last time through there were no fingers, we
-					 * need to send an empty mt sync packet with empty mt sync to indicate all fingers
-					 * have left the touchpad.  We send the sync at the end of this routine. */
-					if ((finger_down_count == 0) && (instance_data->last_finger_down_count == 0)) {
-						input_mt_sync(function_device->input);
-					}
-
-					/* Keep track of count of synthesized keys per suspend cycle. */
-					f11->synth_events_sent++;
-
-					/* Mask any further finger events, if any, until all fingers have left
-					 * the touchpad. */
-					// f11->mask_events = 1;
-
-					pr_info("%s Created synthesized %s movement event cnt:%d masking events:%d\n",
-					        __func__, (gesture_flag & HAS_SINGLE_TAP_MASK)?"single tap":"double tap",
-					        f11->synth_events_sent, f11->mask_events);
-
-					wake_lock_timeout(&f11->wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
-				}
+			/* If there are no fingers, and last time through there were no fingers, we
+			 * need to send an empty mt sync packet with empty mt sync to indicate all fingers
+			 * have left the touchpad.  We send the sync at the end of this routine. */
+			if ((finger_down_count == 0) && (instance_data->last_finger_down_count == 0)) {
+				input_mt_sync(function_device->input);
 			}
+
+			/* Keep track of count of synthesized keys per suspend cycle. */
+			f11->synth_events_sent++;
+
+			/* Mask any further finger events, if any, until all fingers have left
+			 * the touchpad. */
+			// f11->mask_events = 1;
+
+			pr_info("%s Created synthesized flick movement event cnt:%d masking events:%d\n",
+			        __func__, f11->synth_events_sent, f11->mask_events);
+
+			wake_lock_timeout(&f11->wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
 		}
-		f11->last_gesture_flag = gesture_flag;
+		if (flag & (HAS_SINGLE_TAP_MASK | HAS_DOUBLE_TAP_MASK)) {
+#if defined(ABS_MT_PRESSURE)
+			/* We have to supply the minimum values required to get event through
+			   Android InputEvent layer */
+			input_report_abs(function_device->input, ABS_MT_PRESSURE, GESTURE_PRESSURE);
+#endif
+			/* Add well-known gesture offset to indicate it's not a real touchpad point */
+			input_report_abs(function_device->input, ABS_MT_POSITION_X, GESTURE_OFFSET_X);
+
+			/* Add well-known gesture offset to indicate it's not a real touchpad point */
+			input_report_abs(function_device->input, ABS_MT_POSITION_Y, GESTURE_OFFSET_Y);
+
+			/* Use extreme major and minor id to indicate it's not a real finger */
+			input_report_abs(function_device->input, ABS_MT_TOUCH_MAJOR, GESTURE_MT_MAJOR);
+			input_report_abs(function_device->input, ABS_MT_TOUCH_MINOR, GESTURE_MT_MINOR);
+
+			/* Close out multi touch sequence and entire motion sequence */
+			input_mt_sync(function_device->input);
+			input_sync(function_device->input); /* sync after groups of events */
+
+			/* If there are no fingers, and last time through there were no fingers, we
+			 * need to send an empty mt sync packet with empty mt sync to indicate all fingers
+			 * have left the touchpad.  We send the sync at the end of this routine. */
+			if ((finger_down_count == 0) && (instance_data->last_finger_down_count == 0)) {
+				input_mt_sync(function_device->input);
+			}
+
+			/* Keep track of count of synthesized keys per suspend cycle. */
+			f11->synth_events_sent++;
+
+			/* Mask any further finger events, if any, until all fingers have left
+			 * the touchpad. */
+			// f11->mask_events = 1;
+
+			pr_info("%s Created synthesized %s movement event cnt:%d masking events:%d\n",
+			        __func__, (flag & HAS_SINGLE_TAP_MASK)?"single tap":"double tap",
+			        f11->synth_events_sent, f11->mask_events);
+
+			wake_lock_timeout(&f11->wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
+		}
 	}
 
 	/* CMM Debugging logging */
@@ -1436,8 +1409,6 @@ int FN_11_suspend(struct rmi_function_info *rmifninfo)
 	instance->suspended = 1;
 	instance->last_suspend_cnt = get_suspend_cnt();
 	instance->synth_events_sent = 0;
-	/* Gesture flag events cannot cross early suspend boundaries. */
-	instance->last_gesture_flag = 0;
 	dev_info(&rmifninfo->function_device->dev, "%s Suspended touchpad\n", __FUNCTION__);
 	return 0;
 }
