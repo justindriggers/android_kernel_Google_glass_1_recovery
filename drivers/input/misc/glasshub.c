@@ -103,6 +103,7 @@
 #define FLAG_FLASH_MODE			2
 #define FLAG_SYSFS_CREATED		3
 #define FLAG_PASSTHRU_STARTED		4
+#define FLAG_DEVICE_DISABLED		5
 
 /* flags for device permissions */
 #define DEV_MODE_RO (S_IRUSR | S_IRGRP)
@@ -429,7 +430,14 @@ int boot_device_l(struct glasshub_data *glasshub)
 	uint8_t temp;
 	int rc = 0;
 
+	/* if already booted, do nothing */
 	if (test_bit(FLAG_DEVICE_BOOTED, &glasshub->flags)) goto err_out;
+
+	/* don't allow boot if disabled */
+	if (test_bit(FLAG_DEVICE_DISABLED, &glasshub->flags)) {
+		rc = -ENODEV;
+		goto err_out;
+	}
 
 	/* don't allow boot from flash mode, unless boot flasher app
 	 * code has been loaded.
@@ -1024,6 +1032,39 @@ static ssize_t debug_store(struct device *dev, struct device_attribute *attr,
 	return store_reg(dev, buf, count, REG_DEBUG, 0, 255, NULL);
 }
 
+/* show disable value */
+static ssize_t disable_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	return sprintf(buf, "%d\n", test_bit(FLAG_DEVICE_DISABLED, &glasshub->flags) ? 1 : 0);
+}
+
+/* write disable value */
+static ssize_t disable_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	unsigned long value = 0;
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+
+	/* parse value */
+	if (kstrtoul(buf, 10, &value)) {
+		goto err_out;
+	}
+
+	/* disable device */
+	if (value) {
+		mutex_lock(&glasshub->device_lock);
+		set_bit(FLAG_DEVICE_DISABLED, &glasshub->flags);
+		reset_device_l(glasshub, 1);
+		mutex_unlock(&glasshub->device_lock);
+	} else {
+		clear_bit(FLAG_DEVICE_DISABLED, &glasshub->flags);
+	}
+
+err_out:
+	return count;
+}
+
 /* sysfs node for updating device firmware */
 static ssize_t update_fw_data_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count);
@@ -1516,6 +1557,7 @@ static DEVICE_ATTR(error_code, DEV_MODE_RO, error_code_show, NULL);
 static DEVICE_ATTR(irq, DEV_MODE_RO, irq_show, NULL);
 static DEVICE_ATTR(flash_status, DEV_MODE_RO, flash_status_show, NULL);
 static DEVICE_ATTR(sample_count, DEV_MODE_RO, sample_count_show, NULL);
+static DEVICE_ATTR(disable, DEV_MODE_RW, disable_show, disable_store);
 
 static struct attribute *attrs[] = {
 	&dev_attr_passthru_enable.attr,
@@ -1538,7 +1580,6 @@ static struct attribute *attrs[] = {
 	&dev_attr_detector_bias.attr,
 	&dev_attr_debug.attr,
 	&dev_attr_error_code.attr,
-	&dev_attr_irq.attr,
 	&dev_attr_sample_count.attr,
 	NULL
 };
@@ -1552,6 +1593,8 @@ static struct attribute *bootmode_attrs[] = {
 	&dev_attr_version.attr,
 	&dev_attr_update_fw_enable.attr,
 	&dev_attr_flash_status.attr,
+	&dev_attr_irq.attr,
+	&dev_attr_disable,
 	NULL
 };
 
