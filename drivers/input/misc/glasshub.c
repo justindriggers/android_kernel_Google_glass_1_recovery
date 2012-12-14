@@ -39,14 +39,17 @@
 #define DEVICE_NAME "glasshub"
 #define DRIVER_VERSION "0.5"
 
-/* minimum MCU version for this driver */
-#define MINIMUM_MCU_VERSION	12
+/* minimum MCU firmware version required for this driver */
+#define MINIMUM_MCU_VERSION		12
+
+/* experimental MCU firmware version */
+#define EXPERIMENTAL_MCU_VERSION	0x8000
 
 /* special app code to flash the bootloader */
-#define BOOTLOADER_FLASHER	0xff
+#define BOOTLOADER_FLASHER		0xff
 
 /* number of retries */
-#define NUMBER_OF_I2C_RETRIES	3
+#define NUMBER_OF_I2C_RETRIES		3
 
 /* 8-bit registers for the glass hub MCU */
 #define REG_RESET			0
@@ -1728,15 +1731,24 @@ static int register_device_files(struct glasshub_data *glasshub)
 
 	/* make sure we have a supported firmware build on the MCU */
 	if (app_version < MINIMUM_MCU_VERSION) {
-		dev_info(&glasshub->i2c_client->dev,
+		dev_warn(&glasshub->i2c_client->dev,
 				"%s: WARNING: MCU application code is down-rev: %u.%u\n",
 				__FUNCTION__,
 				glasshub->app_version_major,
 				glasshub->app_version_minor);
-		dev_info(&glasshub->i2c_client->dev,
+		dev_warn(&glasshub->i2c_client->dev,
 				"%s: All functions except firmware update are disabled\n",
 				__FUNCTION__);
 		goto Exit;
+	}
+
+	/* warn if experimental version */
+	if (app_version >= EXPERIMENTAL_MCU_VERSION) {
+		dev_warn(&glasshub->i2c_client->dev,
+				"%s: WARNING: MCU application code is experimental version: %u.%u\n",
+				__FUNCTION__,
+				glasshub->app_version_major,
+				glasshub->app_version_minor);
 	}
 
 	/* are sysfs files already created? */
