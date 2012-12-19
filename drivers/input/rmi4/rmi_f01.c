@@ -17,23 +17,36 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-/* HACK(CMM) */
-#include <linux/gpio.h>
-/* /HACK */
 #include <linux/kernel.h>
+#include <linux/debugfs.h>
+#include <linux/kconfig.h>
 #include <linux/rmi.h>
 #include <linux/slab.h>
+#include <linux/uaccess.h>
 #include "rmi_driver.h"
 #include "rmi_f01.h"
 
+/**
+ * @reset - set this bit to force a firmware reset of the sensor.
+ */
 union f01_device_commands {
 	struct {
-		u8 reset:1;
-		u8 reserved:1;
-	};
+		bool reset:1;
+		u8 reserved:7;
+	} __attribute__((__packed__));
 	u8 reg;
 };
 
+/**
+ * @ctrl0 - see documentation in rmi_f01.h.
+ * @interrupt_enable - A mask of per-function interrupts on the touch sensor.
+ * @doze_interval - controls the interval between checks for finger presence
+ * when the touch sensor is in doze mode, in units of 10ms.
+ * @wakeup_threshold - controls the capacitance threshold at which the touch
+ * sensor will decide to wake up from that low power state.
+ * @doze_holdoff - controls how long the touch sensor waits after the last
+ * finger lifts before entering the doze state, in units of 100ms.
+ */
 struct f01_device_control {
 	union f01_device_control_0 ctrl0;
 	u8 *interrupt_enable;
@@ -42,38 +55,66 @@ struct f01_device_control {
 	u8 doze_holdoff;
 };
 
+/**
+ * @has_ds4_queries - if true, the query registers relating to Design Studio 4
+ * features are present.
+ * @has_multi_phy - if true, multiple physical communications interfaces are
+ * supported.
+ * @has_guest - if true, a "guest" device is supported.
+ */
 union f01_query_42 {
 	struct {
-		u8 has_ds4_queries:1;
-		u8 has_multi_phy:1;
-		u8 has_guest:1;
+		bool has_ds4_queries:1;
+		bool has_multi_phy:1;
+		bool has_guest:1;
 		u8 reserved:5;
-	};
+	} __attribute__((__packed__));
 	u8 regs[1];
 };
 
+/**
+ * @length - the length of the remaining Query43.* register block, not
+ * including the first register.
+ * @has_package_id_query -  the package ID query data will be accessible from
+ * inside the ProductID query registers.
+ * @has_packrat_query -  the packrat query data will be accessible from inside
+ * the ProductID query registers.
+ * @has_reset_query - the reset pin related registers are valid.
+ * @has_maskrev_query - the silicon mask revision number will be reported.
+ * @has_i2c_control - the register F01_RMI_Ctrl6 will exist.
+ * @has_spi_control - the register F01_RMI_Ctrl7 will exist.
+ * @has_attn_control - the register F01_RMI_Ctrl8 will exist.
+ * @reset_enabled - the hardware reset pin functionality has been enabled
+ * for this device.
+ * @reset_polarity - If this bit reports as ‘0’, it means that the reset state
+ * is active low. A ‘1’ means that the reset state is active high.
+ * @pullup_enabled - If set, it indicates that a built-in weak pull up has
+ * been enabled on the Reset pin; clear means that no pull-up is present.
+ * @reset_pin_number - This field represents which GPIO pin number has been
+ * assigned the reset functionality.
+ */
 union f01_ds4_queries {
 	struct {
 		u8 length:4;
 		u8 reserved_1:4;
 
-		u8 has_package_id_query:1;
-		u8 has_packrat_query:1;
-		u8 has_reset_query:1;
-		u8 has_maskrev_query:1;
+		bool has_package_id_query:1;
+		bool has_packrat_query:1;
+		bool has_reset_query:1;
+		bool has_maskrev_query:1;
 		u8 reserved_2:4;
 
-		u8 has_i2c_control:1;
-		u8 has_spi_control:1;
-		u8 has_attn_control:1;
+		bool has_i2c_control:1;
+		bool has_spi_control:1;
+		bool has_attn_control:1;
 		u8 reserved_3:5;
 
-		u8 reset_enabled:1;
-		u8 reset_polarity:1;
-		u8 pullup_enabled:1;
+		bool reset_enabled:1;
+		bool reset_polarity:1;
+		bool pullup_enabled:1;
 		u8 reserved_4:1;
 		u8 reset_pin_number:4;
-	};
+	} __attribute__((__packed__));
 	u8 regs[4];
 };
 
@@ -94,9 +135,181 @@ struct f01_data {
 #ifdef	CONFIG_PM
 	bool suspended;
 	bool old_nosleep;
-	bool allow_sensor_to_wake;
+#endif
+
+#ifdef	CONFIG_RMI4_DEBUG
+	struct dentry *debugfs_interrupt_enable;
 #endif
 };
+
+#ifdef	CONFIG_RMI4_DEBUG
+struct f01_debugfs_data {
+	bool done;
+	struct rmi_function_container *fc;
+};
+
+static int f01_debug_open(struct inode *inodep, struct file *filp)
+{
+	struct f01_debugfs_data *data;
+	struct rmi_function_container *fc = inodep->i_private;
+
+	data = devm_kzalloc(&fc->dev, sizeof(struct f01_debugfs_data),
+		GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+
+	data->fc = fc;
+	filp->private_data = data;
+	return 0;
+}
+
+static ssize_t interrupt_enable_read(struct file *filp, char __user *buffer,
+				     size_t size, loff_t *offset) {
+	int i;
+	int len;
+	int total_len = 0;
+	char local_buf[size];
+	char *current_buf = local_buf;
+	struct f01_debugfs_data *data = filp->private_data;
+	struct f01_data *f01 = data->fc->data;
+
+	if (data->done)
+		return 0;
+
+	data->done = 1;
+
+	/* loop through each irq value and copy its
+	 * string representation into buf */
+	for (i = 0; i < f01->irq_count; i++) {
+		int irq_reg;
+		int irq_shift;
+		int interrupt_enable;
+
+		irq_reg = i / 8;
+		irq_shift = i % 8;
+		interrupt_enable =
+		    ((f01->device_control.interrupt_enable[irq_reg]
+			>> irq_shift) & 0x01);
+
+		/* get next irq value and write it to buf */
+		len = snprintf(current_buf, size - total_len,
+			"%u ", interrupt_enable);
+		/* bump up ptr to next location in buf if the
+		 * snprintf was valid.  Otherwise issue an error
+		 * and return. */
+		if (len > 0) {
+			current_buf += len;
+			total_len += len;
+		} else {
+			dev_err(&data->fc->dev, "Failed to build interrupt_enable buffer, code = %d.\n",
+						len);
+			return snprintf(local_buf, size, "unknown\n");
+		}
+	}
+	len = snprintf(current_buf, size - total_len, "\n");
+	if (len > 0)
+		total_len += len;
+	else
+		dev_warn(&data->fc->dev, "%s: Failed to append carriage return.\n",
+			 __func__);
+
+	if (copy_to_user(buffer, local_buf, total_len))
+		return -EFAULT;
+
+	return total_len;
+}
+
+static ssize_t interrupt_enable_write(struct file *filp,
+		const char __user *buffer, size_t size, loff_t *offset) {
+	int retval;
+	char buf[size];
+	char *local_buf = buf;
+	int i;
+	int irq_count = 0;
+	int irq_reg = 0;
+	struct f01_debugfs_data *data = filp->private_data;
+	struct f01_data *f01 = data->fc->data;
+
+	retval = copy_from_user(buf, buffer, size);
+	if (retval)
+		return -EFAULT;
+
+	for (i = 0; i < f01->irq_count && *local_buf != 0;
+	     i++, local_buf += 2) {
+		int irq_shift;
+		int interrupt_enable;
+		int result;
+
+		irq_reg = i / 8;
+		irq_shift = i % 8;
+
+		/* get next interrupt mapping value and store and bump up to
+		 * point to next item in local_buf */
+		result = sscanf(local_buf, "%u", &interrupt_enable);
+		if ((result != 1) ||
+			(interrupt_enable != 0 && interrupt_enable != 1)) {
+			dev_err(&data->fc->dev, "Interrupt enable[%d] is not a valid value 0x%x.\n",
+				i, interrupt_enable);
+			return -EINVAL;
+		}
+		if (interrupt_enable == 0) {
+			f01->device_control.interrupt_enable[irq_reg] &=
+				(1 << irq_shift) ^ 0xFF;
+		} else
+			f01->device_control.interrupt_enable[irq_reg] |=
+				(1 << irq_shift);
+		irq_count++;
+	}
+
+	/* Make sure the irq count matches */
+	if (irq_count != f01->irq_count) {
+		dev_err(&data->fc->dev, "Interrupt enable count of %d doesn't match device count of %d.\n",
+			 irq_count, f01->irq_count);
+		return -EINVAL;
+	}
+
+	/* write back to the control register */
+	retval = rmi_write_block(data->fc->rmi_dev, f01->interrupt_enable_addr,
+			f01->device_control.interrupt_enable,
+			f01->num_of_irq_regs);
+	if (retval < 0) {
+		dev_err(&data->fc->dev, "Could not write interrupt_enable mask to %#06x\n",
+			f01->interrupt_enable_addr);
+		return retval;
+	}
+
+	return size;
+}
+
+static const struct file_operations interrupt_enable_fops = {
+	.owner = THIS_MODULE,
+	.open = f01_debug_open,
+	.read = interrupt_enable_read,
+	.write = interrupt_enable_write,
+};
+
+static int setup_debugfs(struct rmi_function_container *fc)
+{
+	struct f01_data *data = fc->data;
+
+	if (!fc->debugfs_root)
+		return -ENODEV;
+
+	data->debugfs_interrupt_enable = debugfs_create_file("interrupt_enable",
+		RMI_RW_ATTR, fc->debugfs_root, fc, &interrupt_enable_fops);
+	if (!data->debugfs_interrupt_enable)
+		dev_warn(&fc->dev,
+			 "Failed to create debugfs interrupt_enable.\n");
+
+	return 0;
+}
+
+static void teardown_debugfs(struct f01_data *f01)
+{
+	if (f01->debugfs_interrupt_enable)
+		debugfs_remove(f01->debugfs_interrupt_enable);
+}
+#endif
 
 
 static ssize_t rmi_fn_01_productinfo_show(struct device *dev,
@@ -126,10 +339,6 @@ static ssize_t rmi_fn_01_reportrate_store(struct device *dev,
 static ssize_t rmi_fn_01_interrupt_enable_show(struct device *dev,
 					 struct device_attribute *attr,
 					 char *buf);
-
-static ssize_t rmi_fn_01_interrupt_enable_store(struct device *dev,
-					  struct device_attribute *attr,
-					  const char *buf, size_t count);
 
 static ssize_t rmi_fn_01_doze_interval_show(struct device *dev,
 					 struct device_attribute *attr,
@@ -202,15 +411,11 @@ static ssize_t rmi_fn_01_statuscode_show(struct device *dev,
 static int rmi_f01_alloc_memory(struct rmi_function_container *fc,
 					int num_of_irq_regs);
 
-static void rmi_f01_free_memory(struct rmi_function_container *fc);
-
 static int rmi_f01_initialize(struct rmi_function_container *fc);
 
 static int rmi_f01_create_sysfs(struct rmi_function_container *fc);
 
 static int rmi_f01_config(struct rmi_function_container *fc);
-
-static int rmi_f01_reset(struct rmi_function_container *fc);
 
 
 static struct device_attribute fn_01_attrs[] = {
@@ -232,18 +437,18 @@ static struct device_attribute fn_01_attrs[] = {
 	       rmi_fn_01_chargerinput_show, rmi_fn_01_chargerinput_store),
 	__ATTR(reportrate, RMI_RW_ATTR,
 	       rmi_fn_01_reportrate_show, rmi_fn_01_reportrate_store),
-	__ATTR(interrupt_enable, RMI_RW_ATTR,
-	       rmi_fn_01_interrupt_enable_show,
-		rmi_fn_01_interrupt_enable_store),
+	/* We don't want arbitrary callers changing the interrupt enable mask,
+	 * so it's read only.
+	 */
+	__ATTR(interrupt_enable, RMI_RO_ATTR,
+	       rmi_fn_01_interrupt_enable_show, rmi_store_error),
 	__ATTR(doze_interval, RMI_RW_ATTR,
-	       rmi_fn_01_doze_interval_show,
-		rmi_fn_01_doze_interval_store),
+	       rmi_fn_01_doze_interval_show, rmi_fn_01_doze_interval_store),
 	__ATTR(wakeup_threshold, RMI_RW_ATTR,
 	       rmi_fn_01_wakeup_threshold_show,
 		rmi_fn_01_wakeup_threshold_store),
 	__ATTR(doze_holdoff, RMI_RW_ATTR,
-	       rmi_fn_01_doze_holdoff_show,
-		rmi_fn_01_doze_holdoff_store),
+	       rmi_fn_01_doze_holdoff_show, rmi_fn_01_doze_holdoff_store),
 
 	/* We make report rate RO, since the driver uses that to look for
 	 * resets.  We don't want someone faking us out by changing that
@@ -266,18 +471,18 @@ static struct device_attribute fn_01_attrs[] = {
 };
 
 /* Utility routine to set the value of a bit field in a register. */
-int rmi_set_bit_field(struct rmi_device *rmi_dev,
-		      unsigned short address,
-		      unsigned char field_mask,
-		      unsigned char bits)
+int rmi_mask_and_set(struct rmi_device *rmi_dev,
+		      u16 address,
+		      u8 mask,
+		      u8 set)
 {
-	unsigned char reg_contents;
+	u8 reg_contents;
 	int retval;
 
 	retval = rmi_read(rmi_dev, address, &reg_contents);
-	if (retval)
+	if (retval < 0)
 		return retval;
-	reg_contents = (reg_contents & ~field_mask) | bits;
+	reg_contents = (reg_contents & ~mask) | set;
 	retval = rmi_write(rmi_dev, address, reg_contents);
 	if (retval == 1)
 		return 0;
@@ -363,8 +568,8 @@ static ssize_t rmi_fn_01_reset_store(struct device *dev,
 		retval = rmi_write_block(fc->rmi_dev, fc->fd.command_base_addr,
 				&commands.reg, sizeof(commands.reg));
 		if (retval < 0) {
-			dev_err(dev, "%s: failed to issue reset command, "
-				"error = %d.", __func__, retval);
+			dev_err(dev, "Failed to issue reset command, code = %d.",
+						retval);
 			return retval;
 		}
 	}
@@ -387,8 +592,7 @@ static ssize_t rmi_fn_01_sleepmode_show(struct device *dev,
 
 static ssize_t rmi_fn_01_sleepmode_store(struct device *dev,
 					 struct device_attribute *attr,
-					 const char *buf,
-					 size_t count)
+					 const char *buf, size_t count)
 {
 	struct f01_data *data = NULL;
 	unsigned long new_value;
@@ -416,8 +620,7 @@ static ssize_t rmi_fn_01_sleepmode_store(struct device *dev,
 }
 
 static ssize_t rmi_fn_01_nosleep_show(struct device *dev,
-				      struct device_attribute *attr,
-				      char *buf)
+				      struct device_attribute *attr, char *buf)
 {
 	struct f01_data *data = NULL;
 	struct rmi_function_container *fc = to_rmi_function_container(dev);
@@ -430,8 +633,7 @@ static ssize_t rmi_fn_01_nosleep_show(struct device *dev,
 
 static ssize_t rmi_fn_01_nosleep_store(struct device *dev,
 				       struct device_attribute *attr,
-				       const char *buf,
-				       size_t count)
+				       const char *buf, size_t count)
 {
 	struct f01_data *data = NULL;
 	unsigned long new_value;
@@ -458,8 +660,7 @@ static ssize_t rmi_fn_01_nosleep_store(struct device *dev,
 }
 
 static ssize_t rmi_fn_01_chargerinput_show(struct device *dev,
-				      struct device_attribute *attr,
-				      char *buf)
+				      struct device_attribute *attr, char *buf)
 {
 	struct f01_data *data = NULL;
 	struct rmi_function_container *fc = to_rmi_function_container(dev);
@@ -472,8 +673,7 @@ static ssize_t rmi_fn_01_chargerinput_show(struct device *dev,
 
 static ssize_t rmi_fn_01_chargerinput_store(struct device *dev,
 				       struct device_attribute *attr,
-				       const char *buf,
-				       size_t count)
+				       const char *buf, size_t count)
 {
 	struct f01_data *data = NULL;
 	unsigned long new_value;
@@ -500,8 +700,7 @@ static ssize_t rmi_fn_01_chargerinput_store(struct device *dev,
 }
 
 static ssize_t rmi_fn_01_reportrate_show(struct device *dev,
-				      struct device_attribute *attr,
-				      char *buf)
+				      struct device_attribute *attr, char *buf)
 {
 	struct f01_data *data = NULL;
 	struct rmi_function_container *fc = to_rmi_function_container(dev);
@@ -514,8 +713,7 @@ static ssize_t rmi_fn_01_reportrate_show(struct device *dev,
 
 static ssize_t rmi_fn_01_reportrate_store(struct device *dev,
 				       struct device_attribute *attr,
-				       const char *buf,
-				       size_t count)
+				       const char *buf, size_t count)
 {
 	struct f01_data *data = NULL;
 	unsigned long new_value;
@@ -542,8 +740,7 @@ static ssize_t rmi_fn_01_reportrate_store(struct device *dev,
 }
 
 static ssize_t rmi_fn_01_interrupt_enable_show(struct device *dev,
-					 struct device_attribute *attr,
-					 char *buf)
+				struct device_attribute *attr, char *buf)
 {
 	struct rmi_function_container *fc;
 	struct f01_data *data;
@@ -575,8 +772,8 @@ static ssize_t rmi_fn_01_interrupt_enable_show(struct device *dev,
 			current_buf += len;
 			total_len += len;
 		} else {
-			dev_err(dev, "%s: Failed to build interrupt_enable"
-				" buffer, code = %d.\n", __func__, len);
+			dev_err(dev, "Failed to build interrupt_enable buffer, code = %d.\n",
+						len);
 			return snprintf(buf, PAGE_SIZE, "unknown\n");
 		}
 	}
@@ -590,74 +787,8 @@ static ssize_t rmi_fn_01_interrupt_enable_show(struct device *dev,
 
 }
 
-static ssize_t rmi_fn_01_interrupt_enable_store(struct device *dev,
-					  struct device_attribute *attr,
-					  const char *buf, size_t count)
-{
-	struct rmi_function_container *fc;
-	struct f01_data *data;
-	int i;
-	int irq_count = 0;
-	int retval = count;
-	int irq_reg = 0;
-
-	fc = to_rmi_function_container(dev);
-	data = fc->data;
-	for (i = 0; i < data->irq_count && *buf != 0;
-	     i++, buf += 2) {
-		int irq_shift;
-		int interrupt_enable;
-		int result;
-
-		irq_reg = i / 8;
-		irq_shift = i % 8;
-
-		/* get next interrupt mapping value and store and bump up to
-		 * point to next item in buf */
-		result = sscanf(buf, "%u", &interrupt_enable);
-		if ((result != 1) ||
-			(interrupt_enable != 0 && interrupt_enable != 1)) {
-			dev_err(dev,
-				"%s: Error - interrupt enable[%d]"
-				" is not a valid value 0x%x.\n",
-				__func__, i, interrupt_enable);
-			return -EINVAL;
-		}
-		if (interrupt_enable == 0) {
-			data->device_control.interrupt_enable[irq_reg] &=
-				(1 << irq_shift) ^ 0xFF;
-		} else
-			data->device_control.interrupt_enable[irq_reg] |=
-				(1 << irq_shift);
-		irq_count++;
-	}
-
-	/* Make sure the irq count matches */
-	if (irq_count != data->irq_count) {
-		dev_err(dev,
-			"%s: Error - interrupt enable count of %d"
-			" doesn't match device count of %d.\n",
-			 __func__, irq_count, data->irq_count);
-		return -EINVAL;
-	}
-
-	/* write back to the control register */
-	retval = rmi_write_block(fc->rmi_dev, data->interrupt_enable_addr,
-			data->device_control.interrupt_enable,
-			sizeof(u8)*(data->num_of_irq_regs));
-	if (retval < 0) {
-		dev_err(dev, "%s : Could not write interrupt_enable_store"
-			" to 0x%x\n", __func__, data->interrupt_enable_addr);
-		return retval;
-	}
-
-	return count;
-
-}
-
 static ssize_t rmi_fn_01_doze_interval_show(struct device *dev,
-					 struct device_attribute *attr,
-					 char *buf)
+				struct device_attribute *attr, char *buf)
 {
 	struct f01_data *data = NULL;
 	struct rmi_function_container *fc = to_rmi_function_container(dev);
@@ -794,8 +925,7 @@ static ssize_t rmi_fn_01_doze_holdoff_store(struct device *dev,
 }
 
 static ssize_t rmi_fn_01_configured_show(struct device *dev,
-				      struct device_attribute *attr,
-				      char *buf)
+				      struct device_attribute *attr, char *buf)
 {
 	struct f01_data *data = NULL;
 	struct rmi_function_container *fc = to_rmi_function_container(dev);
@@ -807,8 +937,7 @@ static ssize_t rmi_fn_01_configured_show(struct device *dev,
 }
 
 static ssize_t rmi_fn_01_unconfigured_show(struct device *dev,
-				      struct device_attribute *attr,
-				      char *buf)
+				      struct device_attribute *attr, char *buf)
 {
 	struct f01_data *data = NULL;
 	struct rmi_function_container *fc = to_rmi_function_container(dev);
@@ -820,8 +949,7 @@ static ssize_t rmi_fn_01_unconfigured_show(struct device *dev,
 }
 
 static ssize_t rmi_fn_01_flashprog_show(struct device *dev,
-				      struct device_attribute *attr,
-				      char *buf)
+				      struct device_attribute *attr, char *buf)
 {
 	struct f01_data *data = NULL;
 	struct rmi_function_container *fc = to_rmi_function_container(dev);
@@ -833,8 +961,7 @@ static ssize_t rmi_fn_01_flashprog_show(struct device *dev,
 }
 
 static ssize_t rmi_fn_01_statuscode_show(struct device *dev,
-				      struct device_attribute *attr,
-				      char *buf)
+				      struct device_attribute *attr, char *buf)
 {
 	struct f01_data *data = NULL;
 	struct rmi_function_container *fc = to_rmi_function_container(dev);
@@ -845,31 +972,25 @@ static ssize_t rmi_fn_01_statuscode_show(struct device *dev,
 			data->device_status.status_code);
 }
 
-/* why is this not done in init? */
-int rmi_driver_f01_init(struct rmi_device *rmi_dev)
+static int f01_device_init(struct rmi_function_container *fc)
 {
-	struct rmi_driver_data *driver_data = rmi_get_driverdata(rmi_dev);
-	struct rmi_function_container *fc = driver_data->f01_container;
+	struct rmi_driver_data *driver_data =
+			dev_get_drvdata(&fc->rmi_dev->dev);
 	int error;
 
 	error = rmi_f01_alloc_memory(fc, driver_data->num_of_irq_regs);
 	if (error < 0)
-		goto error_exit;
+		return error;
 
 	error = rmi_f01_initialize(fc);
 	if (error < 0)
-		goto error_exit;
+		return error;
 
 	error = rmi_f01_create_sysfs(fc);
 	if (error < 0)
-		goto error_exit;
+		return error;
 
 	return 0;
-
- error_exit:
-	rmi_f01_free_memory(fc);
-
-	return error;
 }
 
 static int rmi_f01_alloc_memory(struct rmi_function_container *fc,
@@ -877,29 +998,22 @@ static int rmi_f01_alloc_memory(struct rmi_function_container *fc,
 {
 	struct f01_data *f01;
 
-	f01 = kzalloc(sizeof(struct f01_data), GFP_KERNEL);
+	f01 = devm_kzalloc(&fc->dev, sizeof(struct f01_data), GFP_KERNEL);
 	if (!f01) {
 		dev_err(&fc->dev, "Failed to allocate fn_01_data.\n");
 		return -ENOMEM;
 	}
 
-	f01->device_control.interrupt_enable =
-		kzalloc(sizeof(u8)*(num_of_irq_regs), GFP_KERNEL);
+	f01->device_control.interrupt_enable = devm_kzalloc(&fc->dev,
+			sizeof(u8)*(num_of_irq_regs),
+			GFP_KERNEL);
 	if (!f01->device_control.interrupt_enable) {
-		kfree(f01);
+		dev_err(&fc->dev, "Failed to allocate interrupt enable.\n");
 		return -ENOMEM;
 	}
 	fc->data = f01;
 
 	return 0;
-}
-
-static void rmi_f01_free_memory(struct rmi_function_container *fc)
-{
-	struct f01_data *f01 = fc->data;
-	kfree(f01->device_control.interrupt_enable);
-	kfree(fc->data);
-	fc->data = NULL;
 }
 
 static int rmi_f01_initialize(struct rmi_function_container *fc)
@@ -908,7 +1022,7 @@ static int rmi_f01_initialize(struct rmi_function_container *fc)
 	int retval;
 	u16 ctrl_base_addr;
 	struct rmi_device *rmi_dev = fc->rmi_dev;
-	struct rmi_driver_data *driver_data = rmi_get_driverdata(rmi_dev);
+	struct rmi_driver_data *driver_data = dev_get_drvdata(&rmi_dev->dev);
 	struct f01_data *data = fc->data;
 	struct rmi_device_platform_data *pdata = to_rmi_platform_data(rmi_dev);
 
@@ -942,9 +1056,6 @@ static int rmi_f01_initialize(struct rmi_function_container *fc)
 		data->device_control.ctrl0.sleep_mode = RMI_SLEEP_MODE_NORMAL;
 	}
 
-	/* We may want to suspend but maintain capability for sensor to wake */
-	data->allow_sensor_to_wake = pdata->power_management.allow_sensor_to_wake;
-
 	data->device_control.ctrl0.configured = 1;
 	retval = rmi_write_block(rmi_dev, fc->fd.control_base_addr,
 			data->device_control.ctrl0.regs,
@@ -959,30 +1070,13 @@ static int rmi_f01_initialize(struct rmi_function_container *fc)
 	ctrl_base_addr += sizeof(union f01_device_control_0);
 
 	data->interrupt_enable_addr = ctrl_base_addr;
-#if 1
-	/* HACK(CMM) Only enable F01 and F11 interrupts
-	   We get alot of interrupts from the firmware section (x34)
-	   that may cause failures during probe.  Until Synaptics fixes
-	   this in the driver we mask it here.
-	*/
-	data->device_control.interrupt_enable[0] = 0x6;
-	retval = rmi_write_block(rmi_dev, ctrl_base_addr,
-	                         data->device_control.interrupt_enable,
-	                         sizeof(u8) *(driver_data->num_of_irq_regs));
-	if (retval < 0) {
-		dev_err(&fc->dev, "Failed to write F01 control interrupt enable register.\n");
-		goto error_exit;
-	}
-	/* End hack */
-#endif
 	retval = rmi_read_block(rmi_dev, ctrl_base_addr,
 			data->device_control.interrupt_enable,
-			sizeof(u8) *(driver_data->num_of_irq_regs));
+			sizeof(u8)*(driver_data->num_of_irq_regs));
 	if (retval < 0) {
 		dev_err(&fc->dev, "Failed to read F01 control interrupt enable register.\n");
 		goto error_exit;
 	}
-	dev_err(&fc->dev, "%s Interrupts enabled: 0x%02x\n", __func__, data->device_control.interrupt_enable[0]);
 	ctrl_base_addr += driver_data->num_of_irq_regs;
 
 	/* dummy read in order to clear irqs */
@@ -991,19 +1085,6 @@ static int rmi_f01_initialize(struct rmi_function_container *fc)
 		dev_err(&fc->dev, "Failed to read Interrupt Status.\n");
 		return retval;
 	}
-	dev_err(&fc->dev, "Interrupt status before: 0x%02x\n", temp);
-
-	/* dummy read in order to clear irqs */
-	retval = rmi_read(rmi_dev, fc->fd.data_base_addr + 1, &temp);
-	if (retval < 0) {
-		dev_err(&fc->dev, "Failed to read Interrupt Status.\n");
-		return retval;
-	}
-	dev_err(&fc->dev, "Interrupt status after: 0x%02x\n", temp);
-
-	/* HACK(CMM) Enable interrupts */
-	enable_irq(gpio_to_irq(32));
-	/* /HACK */
 
 	retval = rmi_read_block(rmi_dev, fc->fd.query_base_addr,
 				data->basic_queries.regs,
@@ -1081,16 +1162,14 @@ static int rmi_f01_initialize(struct rmi_function_container *fc)
 			retval = rmi_write(rmi_dev, data->doze_holdoff_addr,
 					data->device_control.doze_holdoff);
 			if (retval < 0) {
-				dev_err(&fc->dev, "Failed to configure F01 "
-					"doze holdoff register.\n");
+				dev_err(&fc->dev, "Failed to configure F01 doze holdoff register.\n");
 				goto error_exit;
 			}
 		} else {
 			retval = rmi_read(rmi_dev, data->doze_holdoff_addr,
 					&data->device_control.doze_holdoff);
 			if (retval < 0) {
-				dev_err(&fc->dev, "Failed to read F01 doze"
-					" holdoff register.\n");
+				dev_err(&fc->dev, "Failed to read F01 doze holdoff register.\n");
 				goto error_exit;
 			}
 		}
@@ -1104,11 +1183,17 @@ static int rmi_f01_initialize(struct rmi_function_container *fc)
 	}
 
 	if (data->device_status.unconfigured) {
-		dev_err(&fc->dev,
-			"Device reset during configuration process, status: "
-			"%#02x!\n", data->device_status.status_code);
+		dev_err(&fc->dev, "Device reset during configuration process, status: %#02x!\n",
+				data->device_status.status_code);
 		retval = -EINVAL;
 		goto error_exit;
+	}
+
+	if (IS_ENABLED(CONFIG_RMI4_DEBUG)) {
+		retval = setup_debugfs(fc);
+		if (retval < 0)
+			dev_warn(&fc->dev, "Failed to setup debugfs. Code: %d.\n",
+				retval);
 	}
 
 	return retval;
@@ -1213,24 +1298,13 @@ static int rmi_f01_config(struct rmi_function_container *fc)
 	return 0;
 }
 
-static int rmi_f01_reset(struct rmi_function_container *fc)
-{
-	/*do nothing here */
-	return 0;
-}
-
-
 #ifdef CONFIG_PM
 static int rmi_f01_suspend(struct rmi_function_container *fc)
 {
 	struct rmi_device *rmi_dev = fc->rmi_dev;
-	struct rmi_driver_data *driver_data = rmi_get_driverdata(rmi_dev);
+	struct rmi_driver_data *driver_data = dev_get_drvdata(&rmi_dev->dev);
 	struct f01_data *data = driver_data->f01_container->data;
 	int retval = 0;
-
-	if (data->allow_sensor_to_wake) {
-		return 0;
-	}
 
 	if (data->suspended)
 		return 0;
@@ -1259,13 +1333,9 @@ static int rmi_f01_suspend(struct rmi_function_container *fc)
 static int rmi_f01_resume(struct rmi_function_container *fc)
 {
 	struct rmi_device *rmi_dev = fc->rmi_dev;
-	struct rmi_driver_data *driver_data = rmi_get_driverdata(rmi_dev);
+	struct rmi_driver_data *driver_data = dev_get_drvdata(&rmi_dev->dev);
 	struct f01_data *data = driver_data->f01_container->data;
 	int retval = 0;
-
-	if (data->allow_sensor_to_wake) {
-		return 0;
-	}
 
 	if (!data->suspended)
 		return 0;
@@ -1290,21 +1360,19 @@ static int rmi_f01_resume(struct rmi_function_container *fc)
 }
 #endif /* CONFIG_PM */
 
-static int rmi_f01_init(struct rmi_function_container *fc)
-{
-	return 0;
-}
-
-static void rmi_f01_remove(struct rmi_function_container *fc)
+static int f01_remove_device(struct device *dev)
 {
 	int attr_count;
+	struct rmi_function_container *fc = to_rmi_function_container(dev);
+
+	if (IS_ENABLED(CONFIG_RMI4_DEBUG))
+		teardown_debugfs(fc->data);
 
 	for (attr_count = 0; attr_count < ARRAY_SIZE(fn_01_attrs);
 			attr_count++) {
 		sysfs_remove_file(&fc->dev.kobj, &fn_01_attrs[attr_count].attr);
 	}
-
-	rmi_f01_free_memory(fc);
+	return 0;
 }
 
 static int rmi_f01_attention(struct rmi_function_container *fc, u8 *irq_bits)
@@ -1329,16 +1397,22 @@ static int rmi_f01_attention(struct rmi_function_container *fc, u8 *irq_bits)
 	return 0;
 }
 
+static int f01_probe(struct device *dev);
+
 static struct rmi_function_handler function_handler = {
+	.driver = {
+		.owner = THIS_MODULE,
+		.name = "rmi_f01",
+		.bus = &rmi_bus_type,
+		.probe = f01_probe,
+		.remove = f01_remove_device,
+	},
 	.func = 0x01,
-	.init = rmi_f01_init,
 	.config = rmi_f01_config,
-	.reset = rmi_f01_reset,
 	.attention = rmi_f01_attention,
 
 #ifdef	CONFIG_PM
-#if defined(CONFIG_HAS_EARLYSUSPEND) && \
-			!defined(CONFIG_RMI4_SPECIAL_EARLYSUSPEND)
+#if defined(CONFIG_HAS_EARLYSUSPEND)
 	.early_suspend = rmi_f01_suspend,
 	.late_resume = rmi_f01_resume,
 #else
@@ -1346,14 +1420,32 @@ static struct rmi_function_handler function_handler = {
 	.resume = rmi_f01_resume,
 #endif  /* defined(CONFIG_HAS_EARLYSUSPEND) && !def... */
 #endif  /* CONFIG_PM */
-	.remove = rmi_f01_remove,
 };
+
+static __devinit int f01_probe(struct device *dev)
+{
+	struct rmi_function_container *fc;
+
+	if (dev->type != &rmi_function_type) {
+		dev_dbg(dev, "Not a function device.\n");
+		return 1;
+	}
+	fc = to_rmi_function_container(dev);
+	if (fc->fd.function_number != function_handler.func) {
+		dev_dbg(dev, "Device is F%02X, not F%02X.\n",
+			fc->fd.function_number, function_handler.func);
+		return 1;
+	}
+
+	dev_dbg(dev, "Yay! It is F01!\n");
+	return f01_device_init(fc);
+}
 
 static int __init rmi_f01_module_init(void)
 {
 	int error;
 
-	error = rmi_register_function_driver(&function_handler);
+	error = driver_register(&function_handler.driver);
 	if (error < 0) {
 		pr_err("%s: register failed!\n", __func__);
 		return error;
@@ -1364,7 +1456,7 @@ static int __init rmi_f01_module_init(void)
 
 static void __exit rmi_f01_module_exit(void)
 {
-	rmi_unregister_function_driver(&function_handler);
+	driver_unregister(&function_handler.driver);
 }
 
 module_init(rmi_f01_module_init);

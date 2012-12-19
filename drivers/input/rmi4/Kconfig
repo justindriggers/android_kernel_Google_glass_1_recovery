@@ -24,22 +24,6 @@ config RMI4_DEBUG
 
 	  If unsure, say N.
 
-config RMI4_SPECIAL_EARLYSUSPEND
-	bool "Synaptics RMI4 special early suspend"
-	depends on RMI4_BUS && HAS_EARLYSUSPEND
-	help
-	  Say Y here to enable special suspend handling in the RMI4 driver.
-
-	  This feature causes the RMI4 sensors to be placed in full suspend
-	  state during the early suspend process.  The standard early suspend
-	  and late resume handlers will be replaced by the suspend and resume
-	  handling routines.  The result will be a small savings in power
-	  consumption, at the expense of decreased UI responsiveness at late
-	  resume.  Enable this feature only if you have extremely limited
-	  power resources in your system.
-
-	  If unsure, say N.
-
 config RMI4_FWLIB
 	bool "RMI4 Firmware Update"
 	depends on RMI4_BUS
@@ -50,7 +34,6 @@ config RMI4_FWLIB
 	  initialization process, and apply the updates if appropriate.
 
 	  This feature is not available as a loadable module.
-
 
 config RMI4_I2C
 	bool "RMI4 I2C Support"
@@ -146,17 +129,6 @@ config RMI4_F11_PEN
 	  If your system is not recognizing pen touches and you know your
 	  sensor supports pen input, you probably want to turn this feature
 	  off.
-
-config RMI4_F11_TYPEB
-	bool "RMI4 F11 Type B Support"
-	depends on RMI4_F11
-	help
-	  Say Y here to add support for Type B multi-touch.
-
-	  If this feature is enabled, the driver will support type B multi-
-	  touch input.
-
-	  See Documentation/input/multi-touch-protocol for details.
 
 config RMI4_VIRTUAL_BUTTON
 	tristate "RMI4 Vitual Button"

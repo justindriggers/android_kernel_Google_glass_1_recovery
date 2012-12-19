@@ -15,6 +15,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
+
 #include <linux/kernel.h>
 #include <linux/mutex.h>
 #include <linux/rmi.h>
@@ -31,13 +32,13 @@
 
 /* data specific to fn $34 that needs to be kept around */
 struct rmi_fn_34_data {
-	unsigned char status;
-	unsigned char cmd;
-	unsigned short bootloaderid;
-	unsigned short blocksize;
-	unsigned short imageblockcount;
-	unsigned short configblockcount;
-	unsigned short blocknum;
+	u8 status;
+	u8 cmd;
+	u16 bootloaderid;
+	u16 blocksize;
+	u16 imageblockcount;
+	u16 configblockcount;
+	u16 blocknum;
 	bool inflashprogmode;
 	struct mutex attn_mutex;
 };
@@ -101,8 +102,6 @@ static ssize_t rmi_fn_34_rescanPDT_store(struct device *dev,
 
 static int rmi_f34_alloc_memory(struct rmi_function_container *fc);
 
-static void rmi_f34_free_memory(struct rmi_function_container *fc);
-
 static int rmi_f34_initialize(struct rmi_function_container *fc);
 
 static int rmi_f34_config(struct rmi_function_container *fc);
@@ -145,7 +144,7 @@ struct bin_attribute dev_attr_data = {
 };
 
 
-static int rmi_f34_init(struct rmi_function_container *fc)
+static int f34_device_init(struct rmi_function_container *fc)
 {
 	int retval;
 
@@ -154,29 +153,24 @@ static int rmi_f34_init(struct rmi_function_container *fc)
 	/* init instance data, fill in values and create any sysfs files */
 	retval = rmi_f34_alloc_memory(fc);
 	if (retval < 0)
-		goto exit_free_data;
+		return retval;
 
 	retval = rmi_f34_initialize(fc);
 	if (retval < 0)
-		goto exit_free_data;
+		return retval;
 
 	retval = rmi_f34_create_sysfs(fc);
 	if (retval < 0)
-		goto exit_free_data;
+		return retval;
 
 	return 0;
-
-exit_free_data:
-	rmi_f34_free_memory(fc);
-
-	return retval;
 }
 
 static int rmi_f34_alloc_memory(struct rmi_function_container *fc)
 {
 	struct rmi_fn_34_data *f34;
 
-	f34 = kzalloc(sizeof(struct rmi_fn_34_data), GFP_KERNEL);
+	f34 = devm_kzalloc(&fc->dev, sizeof(struct rmi_fn_34_data), GFP_KERNEL);
 	if (!f34) {
 		dev_err(&fc->dev, "Failed to allocate rmi_fn_34_data.\n");
 		return -ENOMEM;
@@ -184,12 +178,6 @@ static int rmi_f34_alloc_memory(struct rmi_function_container *fc)
 	fc->data = f34;
 
 	return 0;
-}
-
-static void rmi_f34_free_memory(struct rmi_function_container *fc)
-{
-	kfree(fc->data);
-	fc->data = NULL;
 }
 
 static int rmi_f34_initialize(struct rmi_function_container *fc)
@@ -200,7 +188,7 @@ static int rmi_f34_initialize(struct rmi_function_container *fc)
 	struct rmi_fn_34_data *f34 = fc->data;
 	u16 query_base_addr;
 	u16 control_base_addr;
-	unsigned char buf[2];
+	u8 buf[2];
 
 	pdata = to_rmi_platform_data(rmi_dev);
 	dev_dbg(&fc->dev, "Initializing F34 values for %s.\n",
@@ -221,41 +209,39 @@ static int rmi_f34_initialize(struct rmi_function_container *fc)
 		return retval;
 	}
 
-	batohs(&f34->bootloaderid, buf);
+	f34->bootloaderid = batohs(buf);
 
 	retval = rmi_read_block(fc->rmi_dev, query_base_addr + BLK_SZ_OFF, buf,
 			ARRAY_SIZE(buf));
 
 	if (retval < 0) {
-		dev_err(&fc->dev, "Could not read block size from 0x%04x, "
-			"error=%d.\n", query_base_addr + BLK_SZ_OFF, retval);
+		dev_err(&fc->dev, "Could not read block size from 0x%04x, error=%d.\n",
+			query_base_addr + BLK_SZ_OFF, retval);
 		return retval;
 	}
-	batohs(&f34->blocksize, buf);
+	f34->blocksize = batohs(buf);
 
 	/* Get firmware image block count and store it in the instance data */
 	retval = rmi_read_block(fc->rmi_dev, query_base_addr + IMG_BLK_CNT_OFF,
 			buf, ARRAY_SIZE(buf));
 
 	if (retval < 0) {
-		dev_err(&fc->dev, "Couldn't read image block count from 0x%x, "
-			"error=%d.\n", query_base_addr + IMG_BLK_CNT_OFF,
-			retval);
+		dev_err(&fc->dev, "Couldn't read image block count from 0x%x, error=%d.\n",
+			query_base_addr + IMG_BLK_CNT_OFF, retval);
 		return retval;
 	}
-	batohs(&f34->imageblockcount, buf);
+	f34->imageblockcount = batohs(buf);
 
 	/* Get config block count and store it in the instance data */
 	retval = rmi_read_block(fc->rmi_dev, query_base_addr + 7, buf,
 			ARRAY_SIZE(buf));
 
 	if (retval < 0) {
-		dev_err(&fc->dev, "Couldn't read config block count from 0x%x, "
-			"error=%d.\n", query_base_addr + CFG_BLK_CNT_OFF,
-			retval);
+		dev_err(&fc->dev, "Couldn't read config block count from 0x%x, error=%d.\n",
+			query_base_addr + CFG_BLK_CNT_OFF, retval);
 		return retval;
 	}
-	batohs(&f34->configblockcount, buf);
+	f34->configblockcount = batohs(buf);
 
 	return 0;
 }
@@ -274,8 +260,8 @@ static int rmi_f34_create_sysfs(struct rmi_function_container *fc)
 	rc = sysfs_create_bin_file(&fc->dev.kobj,
 				&dev_attr_data);
 	if (rc < 0) {
-		dev_err(&fc->dev, "Failed to create sysfs file for F34 data "
-		     "(error = %d).\n", rc);
+		dev_err(&fc->dev, "Failed to create sysfs file for F34 data, error=%d.\n",
+			rc);
 		return -ENODEV;
 	}
 
@@ -317,18 +303,17 @@ static int rmi_f34_reset(struct rmi_function_container *fc)
 	return 0;
 }
 
-static void rmi_f34_remove(struct rmi_function_container *fc)
+static int f34_remove_device(struct device *dev)
 {
 	int attr_count;
+	struct rmi_function_container *fc = to_rmi_function_container(dev);
 
-	sysfs_remove_bin_file(&fc->dev.kobj,
-						  &dev_attr_data);
+	sysfs_remove_bin_file(&fc->dev.kobj, &dev_attr_data);
 
 	for (attr_count = 0; attr_count < ARRAY_SIZE(attrs); attr_count++)
-		sysfs_remove_file(&fc->dev.kobj,
-				  &attrs[attr_count].attr);
+		sysfs_remove_file(&fc->dev.kobj, &attrs[attr_count].attr);
 
-	rmi_f34_free_memory(fc);
+	return 0;
 }
 
 static int f34_read_status(struct rmi_function_container *fc)
@@ -380,13 +365,20 @@ int rmi_f34_attention(struct rmi_function_container *fc, u8 *irq_bits)
 	return retval;
 }
 
+static int f34_probe(struct device *dev);
+
 static struct rmi_function_handler function_handler = {
+	.driver = {
+		.owner = THIS_MODULE,
+		.name = "rmi_f34",
+		.bus = &rmi_bus_type,
+		.probe = f34_probe,
+		.remove = f34_remove_device,
+	},
 	.func = 0x34,
-	.init = rmi_f34_init,
 	.config = rmi_f34_config,
 	.reset = rmi_f34_reset,
 	.attention = rmi_f34_attention,
-	.remove = rmi_f34_remove
 };
 
 static ssize_t rmi_fn_34_bootloaderid_show(struct device *dev,
@@ -409,7 +401,7 @@ static ssize_t rmi_fn_34_bootloaderid_store(struct device *dev,
 {
 	int error;
 	unsigned long val;
-	unsigned char data[2];
+	u8 data[2];
 	struct rmi_function_container *fc;
 	struct rmi_fn_34_data *instance_data;
 	u16 data_base_addr;
@@ -427,7 +419,7 @@ static ssize_t rmi_fn_34_bootloaderid_store(struct device *dev,
 
 	/* Write the Bootloader ID key data back to the first two Block
 	 * Data registers (F34_Flash_Data2.0 and F34_Flash_Data2.1). */
-	hstoba(data, (unsigned short)val);
+	hstoba(data, (u16)val);
 	data_base_addr = fc->fd.data_base_addr;
 
 	error = rmi_write_block(fc->rmi_dev,
@@ -559,9 +551,7 @@ static ssize_t rmi_fn_34_cmd_store(struct device *dev,
 	/* make sure we are in Flash Prog mode for all cmds except the
 	 * Enable Flash Programming cmd - otherwise we are in error */
 	if ((val != F34_ENABLE_FLASH_PROG) && !instance_data->inflashprogmode) {
-		dev_err(dev, "%s: CANNOT SEND CMD %d TO SENSOR - "
-			"NOT IN FLASH PROG MODE\n"
-			, __func__, data_base_addr);
+		dev_err(dev, "Cannot send command to sensor - not in flash programming mode.\n");
 		return -EINVAL;
 	}
 
@@ -589,8 +579,8 @@ static ssize_t rmi_fn_34_cmd_store(struct device *dev,
 				BLK_NUM_OFF, instance_data->cmd);
 
 		if (error < 0) {
-			dev_err(dev, "%s: Could not write command 0x%02x "
-				"to 0x%04x\n", __func__, instance_data->cmd,
+			dev_err(dev, "Could not write command %#04x to %#06x\n",
+				instance_data->cmd,
 				data_base_addr + instance_data->blocksize +
 				BLK_NUM_OFF);
 			return error;
@@ -603,8 +593,7 @@ static ssize_t rmi_fn_34_cmd_store(struct device *dev,
 		instance_data->status = F34_STATUS_IN_PROGRESS;
 		break;
 	default:
-		dev_dbg(dev, "%s: RMI4 function $34 - "
-				"unknown command 0x%02lx.\n", __func__, val);
+		dev_dbg(dev, "RMI4 F34 - unknown command 0x%02lx.\n", val);
 		count = -EINVAL;
 		break;
 	}
@@ -632,7 +621,7 @@ static ssize_t rmi_fn_34_blocknum_store(struct device *dev,
 {
 	int error;
 	unsigned long val;
-	unsigned char data[2];
+	u8 data[2];
 	struct rmi_function_container *fc;
 	struct rmi_fn_34_data *instance_data;
 	u16 data_base_addr;
@@ -651,14 +640,14 @@ static ssize_t rmi_fn_34_blocknum_store(struct device *dev,
 
 	/* Write the Block Number data back to the first two Block
 	 * Data registers (F34_Flash_Data_0 and F34_Flash_Data_1). */
-	hstoba(data, (unsigned short)val);
+	hstoba(data, (u16)val);
 
 	error = rmi_write_block(fc->rmi_dev, data_base_addr,
 				data, ARRAY_SIZE(data));
 
 	if (error < 0) {
-		dev_err(dev, "%s : Could not write block number %u to 0x%x\n",
-		       __func__, instance_data->blocknum, data_base_addr);
+		dev_err(dev, "Could not write block number %u to %#06x.\n",
+		       instance_data->blocknum, data_base_addr);
 		return error;
 	}
 
@@ -691,13 +680,12 @@ static ssize_t rmi_fn_34_rescanPDT_store(struct device *dev,
 	fc = to_rmi_function_container(dev);
 	instance_data = fc->data;
 	rmi_dev = fc->rmi_dev;
-	driver_data = rmi_get_driverdata(rmi_dev);
+	driver_data = dev_get_drvdata(&rmi_dev->dev);
 
 	/* Make sure we are only in Flash Programming mode  - DON'T
 	 * ALLOW THIS IN UI MODE. */
 	if (instance_data->cmd != F34_ENABLE_FLASH_PROG) {
-		dev_err(dev, "%s: NOT IN FLASH PROG MODE - CAN'T RESCAN PDT.\n"
-				, __func__);
+		dev_err(dev, "Not in flash programming mode, cannot rescan PDT.");
 		return -EINVAL;
 	}
 
@@ -721,9 +709,8 @@ static ssize_t rmi_fn_34_rescanPDT_store(struct device *dev,
 			retval = rmi_read_block(rmi_dev, i, (u8 *)&pdt_entry,
 					       sizeof(pdt_entry));
 			if (retval != sizeof(pdt_entry)) {
-				dev_err(dev, "%s: err frm rmi_read_block pdt "
-					"entry data from PDT, "
-					"error = %d.", __func__, retval);
+				dev_err(dev, "Failed to read PDT entry at %#06x, error = %d.",
+						retval, i);
 				return retval;
 			}
 
@@ -791,9 +778,7 @@ static ssize_t rmi_fn_34_rescanPDT_store(struct device *dev,
 		}
 
 		if (!fn01found || !fn34found) {
-			dev_err(dev, "%s: failed to find fn$01 or fn$34 trying "
-				"to do rescan PDT.\n"
-				, __func__);
+			dev_err(dev, "F01 or F34 not found in PDT rescan.\n");
 			return -EINVAL;
 		}
 	}
@@ -820,10 +805,8 @@ static ssize_t rmi_fn_34_data_read(struct file *data_file,
 	data_base_addr = fc->fd.data_base_addr;
 
 	if (count != instance_data->blocksize) {
-		dev_err(dev,
-			"%s : Incorrect F34 block size %d. "
-			"Expected size %d.\n",
-			__func__, count, instance_data->blocksize);
+		dev_err(dev, "Incorrect F34 block size %d. Expected size %d.\n",
+				count, instance_data->blocksize);
 		return -EINVAL;
 	}
 
@@ -831,11 +814,11 @@ static ssize_t rmi_fn_34_data_read(struct file *data_file,
 	 * at reading from the sysfs file.  When we return the count (or
 	 * error if we fail) the app will resume. */
 	error = rmi_read_block(fc->rmi_dev, data_base_addr + BLK_NUM_OFF,
-			(unsigned char *)buf, count);
+			(u8 *)buf, count);
 
 	if (error < 0) {
-		dev_err(dev, "%s : Could not read data from 0x%04x\n",
-		       __func__, data_base_addr + BLK_NUM_OFF);
+		dev_err(dev, "Could not read data from %#06x\n",
+				data_base_addr + BLK_NUM_OFF);
 		return error;
 	}
 
@@ -865,10 +848,8 @@ static ssize_t rmi_fn_34_data_write(struct file *data_file,
 	 * count (or error if we fail) the app will resume. */
 
 	if (count != instance_data->blocksize) {
-		dev_err(dev,
-			"%s : Incorrect F34 block size %d. "
-			"Expected size %d.\n",
-			__func__, count, instance_data->blocksize);
+		dev_err(dev, "Incorrect F34 block size %d. Expected size %d.\n",
+			count, instance_data->blocksize);
 		return -EINVAL;
 	}
 
@@ -876,13 +857,11 @@ static ssize_t rmi_fn_34_data_write(struct file *data_file,
 	if (count) {
 		error = rmi_write_block(fc->rmi_dev,
 				data_base_addr + BLK_NUM_OFF,
-				(unsigned char *)buf,
-				count);
+				(u8 *)buf, count);
 
 		if (error < 0) {
-			dev_err(dev, "%s : Could not write block data "
-				"to 0x%x\n", __func__,
-				data_base_addr + BLK_NUM_OFF);
+			dev_err(dev, "%s : Could not write block data to 0x%x\n",
+				__func__, data_base_addr + BLK_NUM_OFF);
 			return error;
 		}
 	}
@@ -890,11 +869,29 @@ static ssize_t rmi_fn_34_data_write(struct file *data_file,
 	return count;
 }
 
+static __devinit int f34_probe(struct device *dev)
+{
+	struct rmi_function_container *fc;
+
+	if (dev->type != &rmi_function_type) {
+		dev_dbg(dev, "Not a function device.\n");
+		return 1;
+	}
+	fc = to_rmi_function_container(dev);
+	if (fc->fd.function_number != function_handler.func) {
+		dev_dbg(dev, "Device is F%02X, not F%02X.\n",
+			fc->fd.function_number, function_handler.func);
+		return 1;
+	}
+
+	return f34_device_init(fc);
+}
+
 static int __init rmi_f34_module_init(void)
 {
 	int error;
 
-	error = rmi_register_function_driver(&function_handler);
+	error = driver_register(&function_handler.driver);
 	if (error < 0) {
 		pr_err("%s : register failed !\n", __func__);
 		return error;
@@ -905,7 +902,7 @@ static int __init rmi_f34_module_init(void)
 
 static void rmi_f34_module_exit(void)
 {
-	rmi_unregister_function_driver(&function_handler);
+	driver_unregister(&function_handler.driver);
 }
 
 module_init(rmi_f34_module_init);

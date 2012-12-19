@@ -54,7 +54,7 @@ union f34_query_regs {
 	struct {
 		u8 regs[7];
 		u16 address;
-	};
+	} __attribute__((__packed__));
 };
 
 union f34_control_status {
@@ -66,7 +66,7 @@ union f34_control_status {
 	struct {
 		u8 regs[1];
 		u16 address;
-	};
+	} __attribute__((__packed__));
 };
 
 #define IS_IDLE(ctl_ptr) ((!ctl_ptr->status) && (!ctl_ptr->command))

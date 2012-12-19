@@ -37,9 +37,9 @@
 
 union f19_0d_query {
 	struct {
-		u8 configurable:1;
-		u8 has_sensitivity_adjust:1;
-		u8 has_hysteresis_threshold:1;
+		bool configurable:1;
+		bool has_sensitivity_adjust:1;
+		bool has_hysteresis_threshold:1;
 		u8 reserved_1:5;
 
 		u8 button_count:5;
@@ -64,7 +64,7 @@ union f19_0d_control_0 {
 /* rewrite control regs */
 struct f19_0d_control_1n {
 	u8 int_enabled_button;
-};
+} __attribute__((__packed__));
 
 struct f19_0d_control_1 {
 	struct f19_0d_control_1n *regs;
@@ -74,7 +74,7 @@ struct f19_0d_control_1 {
 
 struct f19_0d_control_2n {
 	u8 single_button;
-};
+} __attribute__((__packed__));
 
 struct f19_0d_control_2 {
 	struct f19_0d_control_2n *regs;
@@ -84,7 +84,7 @@ struct f19_0d_control_2 {
 
 struct f19_0d_control_3n {
 	u8 sensor_map_button:7;
-};
+} __attribute__((__packed__));
 
 struct f19_0d_control_3 {
 	struct f19_0d_control_3n *regs;
@@ -94,7 +94,7 @@ struct f19_0d_control_3 {
 
 struct f19_0d_control_4n {
 	u8 sensitivity_button:7;
-};
+} __attribute__((__packed__));
 
 struct f19_0d_control_4 {
 	struct f19_0d_control_4n *regs;
@@ -137,10 +137,10 @@ struct f19_data {
 	struct f19_0d_control control;
 	union f19_0d_query query;
 	u8 button_rezero;
-	unsigned char button_count;
-	unsigned char button_bitmask_size;
-	unsigned char *button_data_buffer;
-	unsigned short *button_map;
+	u8 button_count;
+	u8 button_bitmask_size;
+	u8 *button_data_buffer;
+	u16 *button_map;
 	char input_name[MAX_LEN];
 	char input_phys[MAX_LEN];
 	struct input_dev *input;
@@ -296,7 +296,7 @@ int rmi_f19_read_control_parameters(struct rmi_device *rmi_dev,
 	}
 	return 0;
 }
-static int rmi_f19_init(struct rmi_function_container *fc)
+static int f19_device_init(struct rmi_function_container *fc)
 {
 	int rc = rmi_f19_alloc_memory(fc);
 	if (rc < 0)
@@ -329,7 +329,7 @@ static int rmi_f19_alloc_memory(struct rmi_function_container *fc)
 	u16 ctrl_base_addr;
 
 	/* allow memory for fn19 data */
-	f19 = kzalloc(sizeof(struct f19_data), GFP_KERNEL);
+	f19 = devm_kzalloc(&fc->dev, sizeof(struct f19_data), GFP_KERNEL);
 	if (!f19) {
 		dev_err(&fc->dev, "Failed to allocate function data.\n");
 		return -ENOMEM;
@@ -344,16 +344,16 @@ static int rmi_f19_alloc_memory(struct rmi_function_container *fc)
 	}
 	f19->query.address = fc->fd.query_base_addr;
 
-	f19->button_bitmask_size = sizeof(u8)*(f19->query.button_count + 7) / 8;
-	f19->button_data_buffer = kcalloc(f19->button_bitmask_size,
-		    sizeof(unsigned char), GFP_KERNEL);
+	f19->button_bitmask_size = sizeof(u8)*(f19->query.button_count + 7)/8;
+	f19->button_data_buffer = devm_kzalloc(&fc->dev,
+				f19->button_bitmask_size, GFP_KERNEL);
 	if (!f19->button_data_buffer) {
 		dev_err(&fc->dev, "Failed to allocate button data buffer.\n");
 		return -ENOMEM;
 	}
 
-	f19->button_map = kcalloc(f19->query.button_count,
-				sizeof(unsigned short), GFP_KERNEL);
+	f19->button_map = devm_kzalloc(&fc->dev, f19->query.button_count,
+				GFP_KERNEL);
 	if (!f19->button_map) {
 		dev_err(&fc->dev, "Failed to allocate button map.\n");
 		return -ENOMEM;
@@ -362,8 +362,8 @@ static int rmi_f19_alloc_memory(struct rmi_function_container *fc)
 	/* allocate memory for control reg */
 	/* reg 0 */
 	ctrl_base_addr = fc->fd.control_base_addr;
-	f19->control.reg_0 =
-			kzalloc(sizeof(f19->control.reg_0->regs), GFP_KERNEL);
+	f19->control.reg_0 = devm_kzalloc(&fc->dev,
+				sizeof(f19->control.reg_0->regs), GFP_KERNEL);
 	if (!f19->control.reg_0) {
 		dev_err(&fc->dev, "Failed to allocate reg_0 control registers.");
 		return -ENOMEM;
@@ -372,14 +372,14 @@ static int rmi_f19_alloc_memory(struct rmi_function_container *fc)
 	ctrl_base_addr += sizeof(f19->control.reg_0->regs);
 
 	/* reg 1 */
-	f19->control.reg_1 =
-			kzalloc(sizeof(struct f19_0d_control_1), GFP_KERNEL);
+	f19->control.reg_1 = devm_kzalloc(&fc->dev,
+				sizeof(struct f19_0d_control_1), GFP_KERNEL);
 	if (!f19->control.reg_1) {
 		dev_err(&fc->dev, "Failed to allocate reg_1 control registers.");
 		return -ENOMEM;
 	}
-	f19->control.reg_1->regs =
-			kzalloc(f19->button_bitmask_size, GFP_KERNEL);
+	f19->control.reg_1->regs = devm_kzalloc(&fc->dev,
+					f19->button_bitmask_size, GFP_KERNEL);
 	if (!f19->control.reg_1->regs) {
 		dev_err(&fc->dev, "Failed to allocate reg_1->regs control registers.");
 		return -ENOMEM;
@@ -389,14 +389,14 @@ static int rmi_f19_alloc_memory(struct rmi_function_container *fc)
 	ctrl_base_addr += f19->button_bitmask_size;
 
 	/* reg 2 */
-	f19->control.reg_2 =
-			kzalloc(sizeof(struct f19_0d_control_2), GFP_KERNEL);
+	f19->control.reg_2 = devm_kzalloc(&fc->dev,
+			sizeof(struct f19_0d_control_2), GFP_KERNEL);
 	if (!f19->control.reg_2) {
 		dev_err(&fc->dev, "Failed to allocate reg_2 control registers.");
 		return -ENOMEM;
 	}
-	f19->control.reg_2->regs =
-			kzalloc(f19->button_bitmask_size, GFP_KERNEL);
+	f19->control.reg_2->regs = devm_kzalloc(&fc->dev,
+					f19->button_bitmask_size, GFP_KERNEL);
 	if (!f19->control.reg_2->regs) {
 		dev_err(&fc->dev, "Failed to allocate reg_2->regs control registers.");
 		return -ENOMEM;
@@ -406,14 +406,14 @@ static int rmi_f19_alloc_memory(struct rmi_function_container *fc)
 	ctrl_base_addr += f19->button_bitmask_size;
 
 	/* reg 3 */
-	f19->control.reg_3 =
-			kzalloc(sizeof(struct f19_0d_control_3), GFP_KERNEL);
+	f19->control.reg_3 = devm_kzalloc(&fc->dev,
+			sizeof(struct f19_0d_control_3), GFP_KERNEL);
 	if (!f19->control.reg_3) {
 		dev_err(&fc->dev, "Failed to allocate reg_3 control registers.");
 		return -ENOMEM;
 	}
-	f19->control.reg_3->regs =
-			kzalloc(f19->query.button_count, GFP_KERNEL);
+	f19->control.reg_3->regs = devm_kzalloc(&fc->dev,
+				f19->query.button_count, GFP_KERNEL);
 	if (!f19->control.reg_3->regs) {
 		dev_err(&fc->dev, "Failed to allocate reg_3->regs control registers.");
 		return -ENOMEM;
@@ -423,14 +423,14 @@ static int rmi_f19_alloc_memory(struct rmi_function_container *fc)
 	ctrl_base_addr += f19->query.button_count;
 
 	/* reg 4 */
-	f19->control.reg_4 =
-			kzalloc(sizeof(struct f19_0d_control_4), GFP_KERNEL);
+	f19->control.reg_4 = devm_kzalloc(&fc->dev,
+				sizeof(struct f19_0d_control_4), GFP_KERNEL);
 	if (!f19->control.reg_4) {
 		dev_err(&fc->dev, "Failed to allocate reg_3 control registers.");
 		return -ENOMEM;
 	}
-	f19->control.reg_4->regs =
-			kzalloc(f19->query.button_count, GFP_KERNEL);
+	f19->control.reg_4->regs = devm_kzalloc(&fc->dev,
+				f19->query.button_count, GFP_KERNEL);
 	if (!f19->control.reg_4->regs) {
 		dev_err(&fc->dev, "Failed to allocate reg_3->regs control registers.");
 		return -ENOMEM;
@@ -441,8 +441,8 @@ static int rmi_f19_alloc_memory(struct rmi_function_container *fc)
 
 	/* reg 5 */
 	if (f19->query.has_sensitivity_adjust) {
-		f19->control.reg_5 =
-			kzalloc(sizeof(f19->control.reg_5->regs), GFP_KERNEL);
+		f19->control.reg_5 = devm_kzalloc(&fc->dev,
+			sizeof(f19->control.reg_5->regs), GFP_KERNEL);
 		if (!f19->control.reg_5) {
 			dev_err(&fc->dev, "Failed to allocate reg_5 control registers.");
 			return -ENOMEM;
@@ -453,7 +453,8 @@ static int rmi_f19_alloc_memory(struct rmi_function_container *fc)
 	/* reg 6 */
 	if (f19->query.has_hysteresis_threshold) {
 		f19->control.reg_6 =
-			kzalloc(sizeof(f19->control.reg_6->regs), GFP_KERNEL);
+			devm_kzalloc(&fc->dev,
+				sizeof(f19->control.reg_6->regs), GFP_KERNEL);
 		if (!f19->control.reg_6) {
 			dev_err(&fc->dev, "Failed to allocate reg_6 control registers.");
 			return -ENOMEM;
@@ -485,21 +486,6 @@ static void rmi_f19_free_memory(struct rmi_function_container *fc)
 	else
 		sysfs_remove_file(&fc->dev.kobj, &sensor_map_ro_attr.attr);
 
-	if (f19) {
-		kfree(f19->button_data_buffer);
-		kfree(f19->button_map);
-		kfree(f19->control.reg_0);
-		kfree(f19->control.reg_1);
-		kfree(f19->control.reg_1->regs);
-		kfree(f19->control.reg_2);
-		kfree(f19->control.reg_2->regs);
-		kfree(f19->control.reg_3);
-		kfree(f19->control.reg_3->regs);
-		kfree(f19->control.reg_5);
-		kfree(f19->control.reg_6);
-		kfree(f19);
-		fc->data = NULL;
-	}
 }
 
 static int rmi_f19_initialize(struct rmi_function_container *fc)
@@ -735,12 +721,17 @@ static int rmi_f19_reset(struct rmi_function_container *fc)
 }
 
 
-static void rmi_f19_remove(struct rmi_function_container *fc)
+static int f19_remove_device(struct device *dev)
 {
-	struct f19_data *f19 = fc->data;
+	struct f19_data *f19;
+	struct rmi_function_container *fc = to_rmi_function_container(dev);
+
+	f19 = fc->data;
 
 	input_unregister_device(f19->input);
 	rmi_f19_free_memory(fc);
+
+	return 0;
 }
 
 static int rmi_f19_attention(struct rmi_function_container *fc, u8 *irq_bits)
@@ -782,20 +773,45 @@ static int rmi_f19_attention(struct rmi_function_container *fc, u8 *irq_bits)
 	return 0;
 }
 
+static int f19_probe(struct device *dev);
+
 static struct rmi_function_handler function_handler = {
+	.driver = {
+		.owner = THIS_MODULE,
+		.name = "rmi_f19",
+		.bus = &rmi_bus_type,
+		.probe = f19_probe,
+		.remove = f19_remove_device,
+	},
 	.func = 0x19,
-	.init = rmi_f19_init,
 	.config = rmi_f19_config,
 	.reset = rmi_f19_reset,
 	.attention = rmi_f19_attention,
-	.remove = rmi_f19_remove
 };
+
+static __devinit int f19_probe(struct device *dev)
+{
+	struct rmi_function_container *fc;
+
+	if (dev->type != &rmi_function_type) {
+		dev_dbg(dev, "Not a function device.\n");
+		return 1;
+	}
+	fc = to_rmi_function_container(dev);
+	if (fc->fd.function_number != function_handler.func) {
+		dev_dbg(dev, "Device is F%02X, not F%02X.\n",
+			fc->fd.function_number, function_handler.func);
+		return 1;
+	}
+
+	return f19_device_init(fc);
+}
 
 static int __init rmi_f19_module_init(void)
 {
 	int error;
 
-	error = rmi_register_function_driver(&function_handler);
+	error = driver_register(&function_handler.driver);
 	if (error < 0) {
 		pr_err("%s: register failed!\n", __func__);
 		return error;
@@ -806,7 +822,7 @@ static int __init rmi_f19_module_init(void)
 
 static void rmi_f19_module_exit(void)
 {
-	rmi_unregister_function_driver(&function_handler);
+	driver_unregister(&function_handler.driver);
 }
 
 /* sysfs functions */

@@ -16,18 +16,18 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
-#include <linux/kernel.h>
-#include <linux/module.h>
-#include <linux/spi/spi.h>
-#include <linux/delay.h>
-#include <linux/slab.h>
-#include <linux/completion.h>
-#include <linux/sched.h>
-#include <linux/gpio.h>
-#include <linux/rmi.h>
 
-#define COMMS_DEBUG 0
-#define FF_DEBUG 0
+#include <linux/kernel.h>
+#include <linux/completion.h>
+#include <linux/delay.h>
+#include <linux/gpio.h>
+#include <linux/kconfig.h>
+#include <linux/module.h>
+#include <linux/rmi.h>
+#include <linux/sched.h>
+#include <linux/slab.h>
+#include <linux/spi/spi.h>
+#include "rmi_driver.h"
 
 #define RMI_PROTOCOL_VERSION_ADDRESS	0xa0fd
 #define SPI_V2_UNIFIED_READ		0xc0
@@ -55,8 +55,6 @@ struct rmi_spi_data {
 	int (*set_page) (struct rmi_phys_device *phys, u8 page);
 	bool split_read_pending;
 	int enabled;
-	int irq;
-	int irq_flags;
 	struct rmi_phys_device *phys;
 	struct completion irq_comp;
 
@@ -65,39 +63,204 @@ struct rmi_spi_data {
 	struct work_struct poll_work;
 	int poll_interval;
 
+	bool comms_debug;
+	bool ff_debug;
+#ifdef	CONFIG_RMI4_DEBUG
+	struct dentry *debugfs_comms;
+	struct dentry *debugfs_ff;
+#endif
 };
+
+#ifdef CONFIG_RMI4_DEBUG
+
+#include <linux/debugfs.h>
+#include <linux/uaccess.h>
+
+static int setup_debugfs(struct rmi_device *rmi_dev, struct rmi_spi_data *data);
+static void teardown_debugfs(struct rmi_spi_data *data);
+
+struct i2c_debugfs_data {
+	bool done;
+	struct rmi_spi_data *spi_data;
+};
+
+static int debug_open(struct inode *inodep, struct file *filp)
+{
+	struct i2c_debugfs_data *data;
+
+	data = kzalloc(sizeof(struct i2c_debugfs_data), GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+
+	data->spi_data = inodep->i_private;
+	filp->private_data = data;
+	return 0;
+}
+
+static int debug_release(struct inode *inodep, struct file *filp)
+{
+	kfree(filp->private_data);
+	return 0;
+}
+
+static ssize_t comms_debug_read(struct file *filp, char __user *buffer,
+		size_t size, loff_t *offset) {
+	int retval;
+	char local_buf[size];
+	struct i2c_debugfs_data *dfs = filp->private_data;
+	struct rmi_spi_data *data = dfs->spi_data;
+
+	if (dfs->done)
+		return 0;
+
+	dfs->done = 1;
+
+	retval = snprintf(local_buf, PAGE_SIZE, "%u\n", data->comms_debug);
+
+	if (retval <= 0 || copy_to_user(buffer, local_buf, retval))
+		return -EFAULT;
+
+	return retval;
+}
+
+static ssize_t comms_debug_write(struct file *filp, const char __user *buffer,
+			   size_t size, loff_t *offset) {
+	int retval;
+	char local_buf[size];
+	unsigned int new_value;
+	struct i2c_debugfs_data *dfs = filp->private_data;
+	struct rmi_spi_data *data = dfs->spi_data;
+
+	retval = copy_from_user(local_buf, buffer, size);
+	if (retval)
+		return -EFAULT;
+
+	retval = sscanf(local_buf, "%u", &new_value);
+	if (retval != 1 || new_value > 1)
+		return -EINVAL;
+
+	data->comms_debug = new_value;
+
+	return size;
+}
+
+static ssize_t ff_debug_read(struct file *filp, char __user *buffer,
+		size_t size, loff_t *offset) {
+	int retval;
+	char local_buf[size];
+	struct i2c_debugfs_data *dfs = filp->private_data;
+	struct rmi_spi_data *data = dfs->spi_data;
+
+	if (dfs->done)
+		return 0;
+
+	dfs->done = 1;
+
+	retval = snprintf(local_buf, PAGE_SIZE, "%u\n", data->ff_debug);
+
+	if (retval <= 0 || copy_to_user(buffer, local_buf, retval))
+		return -EFAULT;
+
+	return retval;
+}
+
+static ssize_t ff_debug_write(struct file *filp, const char __user *buffer,
+			   size_t size, loff_t *offset) {
+	int retval;
+	char local_buf[size];
+	unsigned int new_value;
+	struct i2c_debugfs_data *dfs = filp->private_data;
+	struct rmi_spi_data *data = dfs->spi_data;
+
+	retval = copy_from_user(local_buf, buffer, size);
+	if (retval)
+		return -EFAULT;
+
+	retval = sscanf(local_buf, "%u", &new_value);
+	if (retval != 1 || new_value > 1)
+		return -EINVAL;
+
+	data->ff_debug = new_value;
+
+	return size;
+}
+
+static const struct file_operations comms_debug_fops = {
+	.owner = THIS_MODULE,
+	.open = debug_open,
+	.release = debug_release,
+	.read = comms_debug_read,
+	.write = comms_debug_write,
+};
+
+static const struct file_operations ff_debug_fops = {
+	.owner = THIS_MODULE,
+	.open = debug_open,
+	.release = debug_release,
+	.read = ff_debug_read,
+	.write = ff_debug_write,
+};
+
+static int setup_debugfs(struct rmi_device *rmi_dev, struct rmi_spi_data *data)
+{
+	if (!rmi_dev->debugfs_root)
+		return -ENODEV;
+
+	data->debugfs_comms = debugfs_create_file("comms_debug", RMI_RW_ATTR,
+			rmi_dev->debugfs_root, data, &comms_debug_fops);
+	if (!data->debugfs_comms || IS_ERR(data->debugfs_comms)) {
+		dev_warn(&rmi_dev->dev, "Failed to create debugfs comms_debug.\n");
+		data->debugfs_comms = NULL;
+	}
+
+	data->debugfs_ff = debugfs_create_file("ff_debug", RMI_RW_ATTR,
+			rmi_dev->debugfs_root, data, &ff_debug_fops);
+	if (!data->debugfs_ff || IS_ERR(data->debugfs_ff)) {
+		dev_warn(&rmi_dev->dev, "Failed to create debugfs ff_debug.\n");
+		data->debugfs_ff = NULL;
+	}
+
+
+	return 0;
+}
+
+static void teardown_debugfs(struct rmi_spi_data *data)
+{
+	if (data->debugfs_comms)
+		debugfs_remove(data->debugfs_comms);
+	if (data->debugfs_ff)
+		debugfs_remove(data->debugfs_ff);
+}
+#endif
+
+#define COMMS_DEBUG(data) (IS_ENABLED(CONFIG_RMI4_DEBUG) && data->comms_debug)
+#define FF_DEBUG(data) (IS_ENABLED(CONFIG_RMI4_DEBUG) && data->ff_debug)
+#define IRQ_DEBUG(data) (IS_ENABLED(CONFIG_RMI4_DEBUG) && data->irq_debug)
+
 
 static irqreturn_t rmi_spi_hard_irq(int irq, void *p)
 {
 	struct rmi_phys_device *phys = p;
 	struct rmi_spi_data *data = phys->data;
+	struct rmi_device *rmi_dev = phys->rmi_dev;
 	struct rmi_device_platform_data *pdata = phys->dev->platform_data;
+	struct rmi_driver_data *rmi_data;
+
+	rmi_data = dev_get_drvdata(&rmi_dev->dev);
+
+	if (IRQ_DEBUG(rmi_data))
+		dev_dbg(phys->dev, "ATTN gpio, value: %d.\n",
+			gpio_get_value(pdata->attn_gpio));
 
 	if (data->split_read_pending &&
 		      gpio_get_value(pdata->attn_gpio) ==
 		      pdata->attn_polarity) {
-		phys->info.attn_count++;
+		atomic_inc(&data->attn_count);
 		complete(&data->irq_comp);
 		return IRQ_HANDLED;
 	}
 
 	return IRQ_WAKE_THREAD;
-}
-
-static irqreturn_t rmi_spi_irq_thread(int irq, void *p)
-{
-	struct rmi_phys_device *phys = p;
-	struct rmi_device *rmi_dev = phys->rmi_dev;
-	struct rmi_driver *driver = rmi_dev->driver;
-	struct rmi_device_platform_data *pdata = phys->dev->platform_data;
-
-	if (gpio_get_value(pdata->attn_gpio) == pdata->attn_polarity) {
-		phys->info.attn_count++;
-		if (driver && driver->irq_handler)
-			driver->irq_handler(rmi_dev, irq);
-	}
-
-	return IRQ_HANDLED;
 }
 
 static void spi_poll_work(struct work_struct *work)
@@ -131,7 +294,7 @@ static int rmi_spi_xfer(struct rmi_phys_device *phys,
 		    const u8 *txbuf, unsigned n_tx, u8 *rxbuf, unsigned n_rx)
 {
 	struct spi_device *client = to_spi_device(phys->dev);
-	struct rmi_spi_data *v2_data = phys->data;
+	struct rmi_spi_data *data = phys->data;
 	struct rmi_device_platform_data *pdata = phys->dev->platform_data;
 	int status;
 	struct spi_message message;
@@ -143,14 +306,8 @@ static int rmi_spi_xfer(struct rmi_phys_device *phys,
 	int block_delay = n_rx > 0 ? pdata->spi_data.block_delay_us : 0;
 	int byte_delay = n_rx > 1 ? pdata->spi_data.read_delay_us : 0;
 	int write_delay = n_tx > 1 ? pdata->spi_data.write_delay_us : 0;
-#if FF_DEBUG
-	bool bad_data = true;
-#endif
-#if COMMS_DEBUG || FF_DEBUG
-	int i;
-#endif
 
-	if (v2_data->split_read_pending) {
+	if (data->split_read_pending) {
 		block_delay =
 		    n_rx > 0 ? pdata->spi_data.split_read_block_delay_us : 0;
 		byte_delay =
@@ -230,14 +387,19 @@ static int rmi_spi_xfer(struct rmi_phys_device *phys,
 		}
 	}
 
-#if COMMS_DEBUG
-	if (n_tx) {
-		dev_dbg(&client->dev, "SPI sends %d bytes: ", n_tx);
-		for (i = 0; i < n_tx; i++)
-			pr_info("%02X ", txbuf[i]);
-		pr_info("\n");
+	if (COMMS_DEBUG(data) && n_tx) {
+		char debug_buf[n_tx*3 + 1];
+		int i;
+		int n = 0;
+		char *temp = debug_buf;
+
+		for (i = 0; i < n_tx; i++) {
+			n = sprintf(temp, " %02x", txbuf[i]);
+			temp += n;
+		}
+		dev_dbg(&client->dev, "sends %d bytes:%s\n",
+			n_tx, debug_buf);
 	}
-#endif
 
 	/* do the i/o */
 	if (pdata->spi_data.cs_assert) {
@@ -287,16 +449,23 @@ static int rmi_spi_xfer(struct rmi_phys_device *phys,
 		goto error_exit;
 	}
 
-#if COMMS_DEBUG
-	if (n_rx) {
-		dev_dbg(&client->dev, "SPI received %d bytes: ", n_rx);
-		for (i = 0; i < n_rx; i++)
-			pr_info("%02X ", rxbuf[i]);
-		pr_info("\n");
+	if (COMMS_DEBUG(data) && n_rx) {
+		char debug_buf[n_rx*3 + 1];
+		int i;
+		int n = 0;
+		char *temp = debug_buf;
+
+		for (i = 0; i < n_rx; i++) {
+			n = sprintf(temp, " %02x", rxbuf[i]);
+			temp += n;
+		}
+		dev_dbg(&client->dev, "received %d bytes:%s\n",
+			n_rx, debug_buf);
 	}
-#endif
-#if FF_DEBUG
-	if (n_rx) {
+
+	if (FF_DEBUG(data) && n_rx) {
+		bool bad_data = true;
+		int i;
 		for (i = 0; i < n_rx; i++) {
 			if (rxbuf[i] != 0xFF) {
 				bad_data = false;
@@ -309,7 +478,6 @@ static int rmi_spi_xfer(struct rmi_phys_device *phys,
 				phys->info.rx_errs, phys->info.rx_count);
 		}
 	}
-#endif
 
 error_exit:
 	kfree(xfers);
@@ -348,18 +516,12 @@ exit:
 	return error;
 }
 
-static int rmi_spi_v2_write(struct rmi_phys_device *phys, u16 addr, u8 data)
-{
-	int error = rmi_spi_v2_write_block(phys, addr, &data, 1);
-
-	return (error == 1) ? 0 : error;
-}
 
 static int rmi_spi_v1_write_block(struct rmi_phys_device *phys, u16 addr,
 				  u8 *buf, int len)
 {
 	struct rmi_spi_data *data = phys->data;
-	unsigned char txbuf[len + 2];
+	u8 txbuf[len + 2];
 	int error;
 
 	txbuf[0] = (addr >> 8) & ~RMI_V1_READ_FLAG;
@@ -384,12 +546,6 @@ exit:
 	return error;
 }
 
-static int rmi_spi_v1_write(struct rmi_phys_device *phys, u16 addr, u8 data)
-{
-	int error = rmi_spi_v1_write_block(phys, addr, &data, 1);
-
-	return (error == 1) ? 0 : error;
-}
 
 static int rmi_spi_v2_split_read_block(struct rmi_phys_device *phys, u16 addr,
 				       u8 *buf, int len)
@@ -474,12 +630,6 @@ exit:
 	return error;
 }
 
-static int rmi_spi_v2_read(struct rmi_phys_device *phys, u16 addr, u8 *buf)
-{
-	int error = rmi_spi_v2_read_block(phys, addr, buf, 1);
-
-	return (error == 1) ? 0 : error;
-}
 
 static int rmi_spi_v1_read_block(struct rmi_phys_device *phys, u16 addr,
 				 u8 *buf, int len)
@@ -507,13 +657,6 @@ static int rmi_spi_v1_read_block(struct rmi_phys_device *phys, u16 addr,
 exit:
 	mutex_unlock(&data->page_mutex);
 	return error;
-}
-
-static int rmi_spi_v1_read(struct rmi_phys_device *phys, u16 addr, u8 *buf)
-{
-	int error = rmi_spi_v1_read_block(phys, addr, buf, 1);
-
-	return (error == 1) ? 0 : error;
 }
 
 #define RMI_SPI_PAGE_SELECT_WRITE_LENGTH 1
@@ -557,52 +700,35 @@ static int rmi_spi_v2_set_page(struct rmi_phys_device *phys, u8 page)
 	return RMI_SPI_PAGE_SELECT_WRITE_LENGTH;
 }
 
-
-static int acquire_attn_irq(struct rmi_spi_data *data)
-{
-	int retval;
-	struct rmi_phys_device *rmi_phys = data->phys;
-
-	retval = request_threaded_irq(data->irq, rmi_spi_hard_irq,
-				rmi_spi_irq_thread, data->irq_flags,
-				dev_name(rmi_phys->dev), rmi_phys);
-	if (retval < 0) {
-		dev_err(&(rmi_phys->rmi_dev->dev), "request_threaded_irq "
-			"failed, code: %d.\n", retval);
-	}
-	return retval;
-}
-
 static int setup_attn(struct rmi_spi_data *data)
 {
 	int retval;
 	struct rmi_phys_device *rmi_phys = data->phys;
 	struct rmi_device_platform_data *pdata = rmi_phys->dev->platform_data;
 
-	retval = acquire_attn_irq(data);
-	if (retval < 0)
-		return retval;
+	if (IS_ENABLED(CONFIG_RMI4_DEBUG))
+		retval = setup_debugfs(rmi_phys->rmi_dev, data);
 
-#if defined(CONFIG_RMI4_DEV)
-	retval = gpio_export(pdata->attn_gpio, false);
-	if (retval) {
-		dev_warn(&(rmi_phys->rmi_dev->dev),
-			 "WARNING: Failed to export ATTN gpio!\n");
-		retval = 0;
-	} else {
-		retval = gpio_export_link(&(rmi_phys->rmi_dev->dev), "attn",
-					pdata->attn_gpio);
+	if (IS_ENABLED(CONFIG_RMI4_DEV)) {
+		retval = gpio_export(pdata->attn_gpio, false);
 		if (retval) {
-			dev_warn(&(rmi_phys->rmi_dev->dev), "WARNING: "
-				"Failed to symlink ATTN gpio!\n");
+			dev_warn(&(rmi_phys->rmi_dev->dev),
+				"WARNING: Failed to export ATTN gpio!\n");
 			retval = 0;
 		} else {
-			dev_info(&(rmi_phys->rmi_dev->dev),
-				"%s: Exported GPIO %d.", __func__,
-				pdata->attn_gpio);
+			retval = gpio_export_link(&(rmi_phys->rmi_dev->dev),
+						  "attn", pdata->attn_gpio);
+			if (retval) {
+				dev_warn(&(rmi_phys->rmi_dev->dev),
+					 "WARNING: Failed to symlink ATTN gpio!\n");
+				retval = 0;
+			} else {
+				dev_info(&(rmi_phys->rmi_dev->dev),
+					"%s: Exported GPIO %d.", __func__,
+					pdata->attn_gpio);
+			}
 		}
 	}
-#endif /* CONFIG_RMI4_DEV */
 
 	return retval;
 }
@@ -615,46 +741,6 @@ static int setup_polling(struct rmi_spi_data *data)
 	hrtimer_start(&data->poll_timer, ktime_set(1, 0), HRTIMER_MODE_REL);
 
 	return 0;
-}
-
-static int enable_device(struct rmi_phys_device *phys)
-{
-	int retval = 0;
-
-	struct rmi_spi_data *data = phys->data;
-
-	if (data->enabled) {
-		dev_dbg(phys->dev, "Physical device already enabled.\n");
-		return 0;
-	}
-
-	retval = acquire_attn_irq(data);
-	if (retval)
-		goto error_exit;
-
-	data->enabled = true;
-	dev_dbg(phys->dev, "Physical device enabled.\n");
-	return 0;
-
-error_exit:
-	dev_err(phys->dev, "Failed to enable physical device. Code=%d.\n",
-		retval);
-	return retval;
-}
-
-static void disable_device(struct rmi_phys_device *phys)
-{
-	struct rmi_spi_data *data = phys->data;
-
-	if (!data->enabled) {
-		dev_warn(phys->dev, "Physical device already disabled.\n");
-		return;
-	}
-	disable_irq(data->irq);
-	free_irq(data->irq, data->phys);
-
-	dev_dbg(phys->dev, "Physical device disabled.\n");
-	data->enabled = false;
 }
 
 #define DUMMY_READ_SLEEP_US 10
@@ -747,27 +833,14 @@ static int __devinit rmi_spi_probe(struct spi_device *spi)
 		goto err_phys;
 	}
 	data->enabled = true;	/* We plan to come up enabled. */
-	data->irq = gpio_to_irq(pdata->attn_gpio);
-	if (pdata->level_triggered) {
-		data->irq_flags = IRQF_ONESHOT |
-			((pdata->attn_polarity == RMI_ATTN_ACTIVE_HIGH) ?
-			IRQF_TRIGGER_HIGH : IRQF_TRIGGER_LOW);
-	} else {
-		data->irq_flags =
-			(pdata->attn_polarity == RMI_ATTN_ACTIVE_HIGH) ?
-			IRQF_TRIGGER_RISING : IRQF_TRIGGER_FALLING;
-	}
 	data->phys = rmi_phys;
 
 	rmi_phys->data = data;
 	rmi_phys->dev = &spi->dev;
 
-	rmi_phys->write = rmi_spi_v1_write;
 	rmi_phys->write_block = rmi_spi_v1_write_block;
-	rmi_phys->read = rmi_spi_v1_read;
 	rmi_phys->read_block = rmi_spi_v1_read_block;
-	rmi_phys->enable_device = enable_device;
-	rmi_phys->disable_device = disable_device;
+	rmi_phys->hard_irq = rmi_spi_hard_irq;
 	data->set_page = rmi_spi_v1_set_page;
 
 	rmi_phys->info.proto = spi_v1_proto_name;
@@ -806,9 +879,7 @@ static int __devinit rmi_spi_probe(struct spi_device *spi)
 
 	if (buf[0] == 1) {
 		/* SPIv2 */
-		rmi_phys->write		= rmi_spi_v2_write;
 		rmi_phys->write_block	= rmi_spi_v2_write_block;
-		rmi_phys->read		= rmi_spi_v2_read;
 		data->set_page		= rmi_spi_v2_set_page;
 
 		rmi_phys->info.proto = spi_v2_proto_name;
@@ -817,9 +888,7 @@ static int __devinit rmi_spi_probe(struct spi_device *spi)
 			init_completion(&data->irq_comp);
 			rmi_phys->read_block = rmi_spi_v2_split_read_block;
 		} else {
-			dev_warn(&spi->dev, "WARNING: SPI V2 detected, but no "
-				"attention GPIO was specified. This is unlikely"
-				" to work well.\n");
+			dev_warn(&spi->dev, "WARNING: SPI V2 detected, but no attention GPIO was specified. This is unlikely to work well.\n");
 			rmi_phys->read_block = rmi_spi_v2_read_block;
 		}
 	} else if (buf[0] != 0) {
@@ -852,7 +921,6 @@ err_unregister:
 err_gpio:
 	if (pdata->gpio_config)
 		pdata->gpio_config(pdata->gpio_data, false);
-err_data:
 	kfree(data);
 err_phys:
 	kfree(rmi_phys);
@@ -864,19 +932,22 @@ static int __devexit rmi_spi_remove(struct spi_device *spi)
 	struct rmi_phys_device *phys = dev_get_drvdata(&spi->dev);
 	struct rmi_device_platform_data *pd = spi->dev.platform_data;
 
-	disable_device(phys);
+	if (IS_ENABLED(CONFIG_RMI4_DEBUG))
+		teardown_debugfs(phys->data);
+
+	/* Can I remove this disable_device */
+	/* disable_device(phys); */
 	rmi_unregister_phys_device(phys);
 	kfree(phys->data);
 	kfree(phys);
 
 	if (pd->gpio_config)
-		pd->gpio_config(pdata->gpio_data, false);
+		pd->gpio_config(pd->gpio_data, false);
 
 	return 0;
 }
 
 static const struct spi_device_id rmi_id[] = {
-	{ "rmi", 0 },
 	{ "rmi_spi", 0 },
 	{ }
 };

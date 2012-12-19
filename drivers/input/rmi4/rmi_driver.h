@@ -19,7 +19,7 @@
 #ifndef _RMI_DRIVER_H
 #define _RMI_DRIVER_H
 
-#define RMI_DRIVER_VERSION "1.4"
+#define RMI_DRIVER_VERSION "1.5"
 
 #define RMI_PRODUCT_ID_LENGTH    10
 #define RMI_PRODUCT_INFO_LENGTH   2
@@ -29,8 +29,6 @@
 /* Sysfs related macros */
 
 /* You must define FUNCTION_DATA and FNUM to use these functions. */
-#define RMI4_SYSFS_DEBUG (defined(CONFIG_RMI4_DEBUG) || defined(CONFIG_ANDROID))
-
 #if defined(FNUM) && defined(FUNCTION_DATA)
 
 #define tricat(x, y, z) tricat_(x, y, z)
@@ -349,7 +347,7 @@ union pdt_properties {
 		u8 reserved_1:6;
 		u8 has_bsr:1;
 		u8 reserved_2:1;
-	};
+	} __attribute__((__packed__));
 	u8 regs[1];
 };
 
@@ -359,6 +357,10 @@ struct rmi_driver_data {
 	struct rmi_function_container *f01_container;
 	bool f01_bootloader_mode;
 
+	atomic_t attn_count;
+	bool irq_debug;
+	int irq;
+	int irq_flags;
 	int num_of_irq_regs;
 	int irq_count;
 	u8 *current_irq_mask;
@@ -368,13 +370,12 @@ struct rmi_driver_data {
 	struct mutex pdt_mutex;
 
 	union pdt_properties pdt_props;
-	unsigned char bsr;
+	u8 bsr;
 	bool enabled;
 
 #ifdef CONFIG_PM
 	bool suspended;
-#if defined(CONFIG_HAS_EARLYSUSPEND) && \
-			!defined(CONFIG_RMI4_SPECIAL_EARLYSUSPEND)
+#if defined(CONFIG_HAS_EARLYSUSPEND)
 	bool early_suspended;
 #endif
 	struct mutex suspend_mutex;
@@ -387,20 +388,18 @@ struct rmi_driver_data {
 #endif
 
 #ifdef CONFIG_RMI4_DEBUG
-#ifdef CONFIG_RMI4_SPI
 	struct dentry *debugfs_delay;
-#endif
 	struct dentry *debugfs_phys;
 	struct dentry *debugfs_reg_ctl;
 	struct dentry *debugfs_reg;
+	struct dentry *debugfs_irq;
+	struct dentry *debugfs_attn_count;
 	u16 reg_debug_addr;
 	u8 reg_debug_size;
 #endif
 
 	void *data;
 };
-
-int rmi_driver_f01_init(struct rmi_device *rmi_dev);
 
 
 #define PDT_START_SCAN_LOCATION 0x00e9
@@ -417,7 +416,7 @@ struct pdt_entry {
 	u8 function_version:2;
 	u8 bit7:1;
 	u8 function_number:8;
-};
+} __attribute__((__packed__));
 
 static inline void copy_pdt_entry_to_fd(struct pdt_entry *pdt,
 				 struct rmi_function_descriptor *fd,
@@ -435,6 +434,8 @@ static inline void copy_pdt_entry_to_fd(struct pdt_entry *pdt,
 #ifdef	CONFIG_RMI4_FWLIB
 extern void rmi4_fw_update(struct rmi_device *rmi_dev,
 		struct pdt_entry *f01_pdt, struct pdt_entry *f34_pdt);
+#else
+#define rmi4_fw_update(rmi_dev, f01_pdt, f34_pdt)
 #endif
 
 #endif

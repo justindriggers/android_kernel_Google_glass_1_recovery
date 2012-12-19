@@ -23,11 +23,7 @@ obj-$(CONFIG_INPUT_TABLET)	+= tablet/
 obj-$(CONFIG_INPUT_TOUCHSCREEN)	+= touchscreen/
 obj-$(CONFIG_INPUT_MISC)	+= misc/
 
+obj-$(CONFIG_RMI4_BUS)          += rmi4/
+
 obj-$(CONFIG_INPUT_APMPOWER)	+= apm-power.o
 obj-$(CONFIG_INPUT_KEYRESET)	+= keyreset.o
-
-# This configuration variable is used inside the Synaptics
-# rmi4 code.
-obj-$(CONFIG_RMI4_BUS) += rmi4/
-
-obj-$(CONFIG_INPUT_TOUCHPAD) += touchpad/

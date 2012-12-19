@@ -16,6 +16,8 @@ obj-$(CONFIG_RMI4_F41) += rmi_f41.o
 obj-$(CONFIG_RMI4_F54) += rmi_f54.o
 obj-$(CONFIG_RMI4_DEV) += rmi_dev.o
 
+ccflags-$(CONFIG_RMI4_DEBUG) += -DDEBUG
+
 ifeq ($(KERNELRELEASE),)
 
 # KERNELDIR ?= /home/<AndroidKernelDirectory>
@@ -30,7 +32,7 @@ clean:
 	rm -rf *.o *~ core .depend .*.cmd *.ko *.mod.c
 else
 
-# $(info Building with KERNELRELEASE = ${KERNELRELEASE})
+$(info Building with KERNELRELEASE = ${KERNELRELEASE})
 obj-m +=    rmi_dev.o
 
 endif

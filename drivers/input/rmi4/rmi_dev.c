@@ -16,15 +16,16 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#include <linux/fs.h>
 #include <linux/delay.h>
-#include <linux/uaccess.h>
-#include <linux/slab.h>
+#include <linux/fs.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
-#include <linux/syscalls.h>
-
+#include <linux/notifier.h>
 #include <linux/rmi.h>
+#include <linux/slab.h>
+#include <linux/syscalls.h>
+#include <linux/uaccess.h>
+
 #include "rmi_driver.h"
 
 #define CHAR_DEVICE_NAME "rmi"
@@ -49,11 +50,12 @@ struct rmidev_data {
 	struct class *device_class;
 };
 
+
 /*store dynamically allocated major number of char device*/
 static int rmidev_major_num;
 
 
-static struct class *rmidev_device_class;
+static struct class *rmidev_class;
 
 
 /* file operations for RMI char device */
@@ -64,8 +66,7 @@ static struct class *rmidev_device_class;
  * @filp: file structure for seek
  * @off: offset
  *       if whence == SEEK_SET,
- *       high 16 bits: page address
- *       low 16 bits: register address
+ *       register address
  *
  *       if whence == SEEK_CUR,
  *       offset from current position
@@ -136,7 +137,7 @@ static ssize_t rmidev_read(struct file *filp, char __user *buf,
 {
 	struct rmidev_data *data = filp->private_data;
 	ssize_t retval  = 0;
-	unsigned char tmpbuf[count+1];
+	u8 tmpbuf[count+1];
 
 	/* limit offset to REG_ADDR_LIMIT-1 */
 	if (count > (REG_ADDR_LIMIT - *f_pos))
@@ -185,7 +186,7 @@ static ssize_t rmidev_write(struct file *filp, const char __user *buf,
 {
 	struct rmidev_data *data = filp->private_data;
 	ssize_t retval  = 0;
-	unsigned char tmpbuf[count+1];
+	u8 tmpbuf[count+1];
 
 	/* limit offset to REG_ADDR_LIMIT-1 */
 	if (count > (REG_ADDR_LIMIT - *f_pos))
@@ -232,12 +233,13 @@ static int rmidev_open(struct inode *inp, struct file *filp)
 	if (!data->rmi_dev)
 		return -EACCES;
 
+	dev_dbg(&data->rmi_dev->dev, "%s.", __func__);
+
 	mutex_lock(&(data->file_mutex));
 	if (data->ref_count < 1)
 		data->ref_count++;
 	else
 		retval = -EACCES;
-
 	mutex_unlock(&(data->file_mutex));
 
 	return retval;
@@ -258,12 +260,12 @@ static int rmidev_release(struct inode *inp, struct file *filp)
 	if (!data->rmi_dev)
 		return -EACCES;
 
-	mutex_lock(&(data->file_mutex));
+	dev_dbg(&data->rmi_dev->dev, "%s.", __func__);
 
+	mutex_lock(&(data->file_mutex));
 	data->ref_count--;
 	if (data->ref_count < 0)
 		data->ref_count = 0;
-
 	mutex_unlock(&(data->file_mutex));
 
 	return 0;
@@ -320,95 +322,91 @@ static char *rmi_char_devnode(struct device *dev, mode_t *mode)
 	return kasprintf(GFP_KERNEL, "rmi/%s", dev_name(dev));
 }
 
-static int rmidev_init_device(struct rmi_char_device *cd)
+static int rmidev_attach(struct device *dev, void *data)
 {
-	struct rmi_device *rmi_dev = cd->rmi_dev;
-	struct rmidev_data *data;
+	int retval = 0;
+	struct rmi_device *rmi_dev;
+	struct rmidev_data *char_dev;
 	dev_t dev_no;
-	int retval;
 	struct device *device_ptr;
 
+	if (dev->type != &rmi_sensor_type)
+		return 0;
+	dev_dbg(dev, "%s is interested.\n", __func__);
+	rmi_dev = to_rmi_device(dev);
+
 	if (rmidev_major_num) {
-		dev_no = MKDEV(rmidev_major_num, cd->rmi_dev->number);
+		dev_no = MKDEV(rmidev_major_num, rmi_dev->number);
 		retval = register_chrdev_region(dev_no, 1, CHAR_DEVICE_NAME);
 	} else {
 		retval = alloc_chrdev_region(&dev_no, 0, 1, CHAR_DEVICE_NAME);
 		/* let kernel allocate a major for us */
 		rmidev_major_num = MAJOR(dev_no);
-		dev_info(&rmi_dev->dev, "Major number of rmidev: %d\n",
+		dev_dbg(dev, "Major number of rmidev: %d\n",
 				 rmidev_major_num);
 	}
 	if (retval < 0) {
-		dev_err(&rmi_dev->dev,
-			"Failed to get minor dev number %d, code %d.\n",
-			cd->rmi_dev->number, retval);
+		dev_err(dev, "Failed to get minor dev number %d, code %d.\n",
+			rmi_dev->number, retval);
 		return retval;
 	} else
-		dev_info(&rmi_dev->dev, "Allocated rmidev %d %d.\n",
+		dev_dbg(dev, "Allocated rmidev %d %d.\n",
 			 MAJOR(dev_no), MINOR(dev_no));
 
-	data = kzalloc(sizeof(struct rmidev_data), GFP_KERNEL);
-	if (!data) {
-		dev_err(&rmi_dev->dev, "Failed to allocate rmidev_data.\n");
-		/* unregister the char device region */
-		__unregister_chrdev(rmidev_major_num, MINOR(dev_no), 1,
-				CHAR_DEVICE_NAME);
+	char_dev = devm_kzalloc(dev, sizeof(struct rmidev_data), GFP_KERNEL);
+	if (!char_dev)
 		return -ENOMEM;
-	}
+	char_dev->rmi_dev = rmi_dev;
+	mutex_init(&char_dev->file_mutex);
 
-	mutex_init(&data->file_mutex);
+	cdev_init(&char_dev->main_dev, &rmidev_fops);
 
-	data->rmi_dev = cd->rmi_dev;
-	cd->data = data;
-
-	cdev_init(&data->main_dev, &rmidev_fops);
-
-	retval = cdev_add(&data->main_dev, dev_no, 1);
+	retval = cdev_add(&char_dev->main_dev, dev_no, 1);
 	if (retval) {
-		dev_err(&cd->rmi_dev->dev, "Error %d adding rmi_char_dev.\n",
-			retval);
-		rmidev_device_cleanup(data);
-		return retval;
+		dev_err(dev, "Error %d adding rmi_char_dev.\n", retval);
+		rmidev_device_cleanup(char_dev);
+		goto error_exit;
 	}
 
-	dev_set_name(&cd->dev, "rmidev%d", MINOR(dev_no));
-	data->device_class = rmidev_device_class;
-	device_ptr = device_create(
-			data->device_class,
-			NULL, dev_no, NULL,
-			CHAR_DEVICE_NAME"%d",
-			MINOR(dev_no));
+	char_dev->device_class = rmidev_class;
+	device_ptr = device_create(char_dev->device_class, NULL, dev_no, NULL,
+			CHAR_DEVICE_NAME"%d", MINOR(dev_no));
 
 	if (IS_ERR(device_ptr)) {
-		dev_err(&cd->rmi_dev->dev, "Failed to create rmi device.\n");
-		rmidev_device_cleanup(data);
-		return -ENODEV;
+		dev_err(dev, "Failed to create rmi device.\n");
+		rmidev_device_cleanup(char_dev);
+		retval = -ENODEV;
+		goto error_exit;
 	}
 
 	return 0;
+
+error_exit:
+	devm_kfree(dev, char_dev);
+	return retval;
 }
 
-static void rmidev_remove_device(struct rmi_char_device *cd)
+static int rmidev_notifier_call(struct notifier_block *nb,
+				unsigned long action, void *data)
 {
-	struct rmidev_data *data;
+	struct device *dev = data;
 
-	dev_dbg(&cd->dev, "%s: removing an rmidev device.\n", __func__);
-	if (!cd)
-		return;
-
-	data = cd->data;
-	if (data)
-		rmidev_device_cleanup(data);
+	switch (action) {
+	case BUS_NOTIFY_ADD_DEVICE:
+		dev_dbg(dev, "%s: added device.\n", __func__);
+		break;
+	case BUS_NOTIFY_DEL_DEVICE:
+		dev_dbg(dev, "%s: removed device.\n", __func__);
+		break;
+	default:
+		dev_dbg(dev, "%s: unknown action %lu.\n", __func__, action);
+		break;
+	}
+	return 0;
 }
 
-static struct rmi_char_driver rmidev_driver = {
-	.driver = {
-		.name = "rmidev",
-		.owner = THIS_MODULE,
-	},
-
-	.init = rmidev_init_device,
-	.remove = rmidev_remove_device,
+static struct notifier_block rmi_bus_notifier = {
+	.notifier_call = rmidev_notifier_call,
 };
 
 static int __init rmidev_init(void)
@@ -417,27 +415,35 @@ static int __init rmidev_init(void)
 	pr_debug("%s: rmi_dev initialization.\n", __func__);
 
 	/* create device node */
-	rmidev_device_class = class_create(THIS_MODULE, DEVICE_CLASS_NAME);
+	rmidev_class = class_create(THIS_MODULE, DEVICE_CLASS_NAME);
 
-	if (IS_ERR(rmidev_device_class)) {
+	if (IS_ERR(rmidev_class)) {
 		pr_err("%s: ERROR - Failed to create /dev/%s.\n", __func__,
 			CHAR_DEVICE_NAME);
 		return -ENODEV;
 	}
 	/* setup permission */
-	rmidev_device_class->devnode = rmi_char_devnode;
+	rmidev_class->devnode = rmi_char_devnode;
 
-	error = rmi_register_character_driver(&rmidev_driver);
-	if (error)
-		class_destroy(rmidev_device_class);
+	/* Ask the bus to let us know when new devices appear. */
+	error = bus_register_notifier(&rmi_bus_type, &rmi_bus_notifier);
+	if (error) {
+		pr_err("%s: failed to register bus notifier, code=%d.\n",
+		       __func__, error);
+		return error;
+	}
+
+	/* Bind to any previously existing sensors. */
+	rmi_for_each_dev(NULL, rmidev_attach);
+
 	return error;
 }
 
 static void __exit rmidev_exit(void)
 {
 	pr_debug("%s: exiting.\n", __func__);
-	rmi_unregister_character_driver(&rmidev_driver);
-	class_destroy(rmidev_device_class);
+	bus_unregister_notifier(&rmi_bus_type, &rmi_bus_notifier);
+	class_destroy(rmidev_class);
 }
 
 module_init(rmidev_init);

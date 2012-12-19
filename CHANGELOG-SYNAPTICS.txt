@@ -1,0 +1,24 @@
+Updates for driver version 1.5 (final as of 2012-10-05)
+-------------------------------------------------------
+
+* F11 platform data has been updated to a per-sensor basis (remember that a
+single F11 module might have more than one 2D sensor attached to it).
+
+* F11 virtual button maps have been switch to a per-sensor basis.
+
+* F11 Type B support is always on, and removed from Kconfig.  Per-sensor
+platformdata is provided if you need to force Multifinger Type A input.
+
+* IMPORTANT: the RMI4 driver has been converted over to the Linux kernel bus
+and driver model.  This means that the sysfs file structure has changed.  Some
+files have moved to debugfs, and for remaining files, the sysfs tree structure
+has changed.  Refer to Documentation/ABI/testing/debugfs-rmi4 and sysfs-rmi4
+for full details.
+
+* ALSO IMPORTANT: The Kconfig options have been simplified.  Several have been
+eliminated, and others have been consolidated.  Please consult Kconfig and make
+any necessary related changes to your kernel configuration.
+
+* ATTN interrupts are not enabled until the F01 function driver is bound to
+the sensor.  This should eliminate spurious interrupts that were seen during
+the system bootup process.

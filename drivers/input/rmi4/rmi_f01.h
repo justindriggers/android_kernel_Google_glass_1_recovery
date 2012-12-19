@@ -22,35 +22,68 @@
 
 #define RMI_PRODUCT_ID_LENGTH    10
 
+/**
+ * @manufacturer_id - reports the identity of the manufacturer of the RMI
+ * device. Synaptics RMI devices report a Manufacturer ID of $01.
+ * @custom_map - at least one custom, non
+ * RMI-compatible register exists in the register address map for this device.
+ * @non-compliant - the device implements a register map that is not compliant
+ * with the RMI specification.
+ * @has_lts - the device uses Synaptics' LTS hardware architecture.
+ * @has_sensor_id - the SensorID query register (F01_RMI_Query22) exists.
+ * @has_charger_input - the ChargerConnected bit (F01_RMI_Ctrl0, bit 5) is
+ * meaningful.
+ * @has_adjustable_doze - the doze (power management) control registers exist.
+ * @has_adjustable_doze_holdoff - the doze holdoff register exists.
+ * @has_product_properties - indicates the presence of F01_RMI_Query42,
+ * ProductProperties2.
+ * @productinfo_1 - meaning varies from product to product, consult your
+ * product spec sheet.
+ * @productinfo_2 - meaning varies from product to product, consult your
+ * product spec sheet.
+ * @year - year of manufacture MOD 2000.
+ * @month - month of manufacture
+ * @day - day of manufacture
+ * @wafer_id1_lsb - The wafer-lot ID registers record the lot number of the
+ * wafer from which the module’s touch controller was produced.
+ * @wafer_id1_msb - The wafer-lot ID registers record the lot number of the
+ * wafer from which the module’s touch controller was produced.
+ * @wafer_id2_lsb - The wafer-lot ID registers record the lot number of the
+ * wafer from which the module’s touch controller was produced.
+ * @wafer_id2_msb - The wafer-lot ID registers record the lot number of the
+ * wafer from which the module’s touch controller was produced.
+ * @wafer_id3_lsb - The wafer-lot ID registers record the lot number of the
+ * wafer from which the module’s touch controller was produced.
+ */
 union f01_basic_queries {
 	struct {
 		u8 manufacturer_id:8;
 
-		u8 custom_map:1;
-		u8 non_compliant:1;
-		u8 has_lts:1;
-		u8 has_sensor_id:1;
-		u8 has_charger_input:1;
-		u8 has_adjustable_doze:1;
-		u8 has_adjustable_doze_holdoff:1;
-		u8 has_product_properties_2:1;
+		bool custom_map:1;
+		bool non_compliant:1;
+		bool has_lts:1;
+		bool has_sensor_id:1;
+		bool has_charger_input:1;
+		bool has_adjustable_doze:1;
+		bool has_adjustable_doze_holdoff:1;
+		bool has_product_properties_2:1;
 
 		u8 productinfo_1:7;
-		u8 q2_bit_7:1;
+		bool q2_bit_7:1;
 		u8 productinfo_2:7;
-		u8 q3_bit_7:1;
+		bool q3_bit_7:1;
 
 		u8 year:5;
 		u8 month:4;
 		u8 day:5;
-		u8 cp1:1;
-		u8 cp2:1;
+		bool cp1:1;
+		bool cp2:1;
 		u8 wafer_id1_lsb:8;
 		u8 wafer_id1_msb:8;
 		u8 wafer_id2_lsb:8;
 		u8 wafer_id2_msb:8;
 		u8 wafer_id3_lsb:8;
-	};
+	} __attribute__((__packed__));
 	u8 regs[11];
 };
 
@@ -58,9 +91,9 @@ union f01_device_status {
 	struct {
 		u8 status_code:4;
 		u8 reserved:2;
-		u8 flash_prog:1;
-		u8 unconfigured:1;
-	};
+		bool flash_prog:1;
+		bool unconfigured:1;
+	} __attribute__((__packed__));
 	u8 regs[1];
 };
 
@@ -73,15 +106,30 @@ union f01_device_status {
 #define RMI_IS_VALID_SLEEPMODE(mode) \
 	(mode >= RMI_SLEEP_MODE_NORMAL && mode <= RMI_SLEEP_MODE_RESERVED1)
 
+/**
+ * @sleep_mode - This field controls power management on the device. This
+ * field affects all functions of the device together.
+ * @nosleep - When set to ‘1’, this bit disables whatever sleep mode may be
+ * selected by the sleep_mode field,and forces the device to run at full power
+ * without sleeping.
+ * @charger_input - When this bit is set to ‘1’, the touch controller employs
+ * a noise-filtering algorithm designed for use with a connected battery
+ * charger.
+ * @report_rate - sets the report rate for the device.  The effect of this
+ * setting is highly product dependent.  Check the spec sheet for your
+ * particular touch sensor.
+ * @configured - written by the host as an indicator that the device has been
+ * successfuly configured.
+ */
 union f01_device_control_0 {
 	struct {
 		u8 sleep_mode:2;
-		u8 nosleep:1;
+		bool nosleep:1;
 		u8 reserved:2;
-		u8 charger_input:1;
-		u8 report_rate:1;
-		u8 configured:1;
-	};
+		bool charger_input:1;
+		bool report_rate:1;
+		bool configured:1;
+	} __attribute__((__packed__));
 	u8 regs[1];
 };
 

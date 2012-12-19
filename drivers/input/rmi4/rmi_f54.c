@@ -15,12 +15,13 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
-#include <linux/hrtimer.h>
+
 #include <linux/kernel.h>
+#include <linux/delay.h>
+#include <linux/hrtimer.h>
 #include <linux/rmi.h>
 #include <linux/slab.h>
 #include <linux/version.h>
-#include <linux/delay.h>
 
 #define FUNCTION_DATA rmi_fn_54_data
 #define FNUM 54
@@ -66,11 +67,11 @@ union f54_ad_query {
 
 		/* query2 */
 		u8 f54_ad_query2_b0__1:2;
-		u8 has_baseline:1;
-		u8 has_image8:1;
+		bool has_baseline:1;
+		bool has_image8:1;
 		u8 f54_ad_query2_b4__5:2;
-		u8 has_image16:1;
-		u8 f54_ad_query2_b7:1;
+		bool has_image16:1;
+		bool f54_ad_query2_b7:1;
 
 		/* query 3.0 and 3.1 */
 		u16 clock_rate;
@@ -79,39 +80,39 @@ union f54_ad_query {
 		u8 touch_controller_family;
 
 		/* query 5 */
-		u8 has_pixel_touch_threshold_adjustment:1;
+		bool has_pixel_touch_threshold_adjustment:1;
 		u8 f54_ad_query5_b1__7:7;
 
 		/* query 6 */
-		u8 has_sensor_assignment:1;
-		u8 has_interference_metric:1;
-		u8 has_sense_frequency_control:1;
-		u8 has_firmware_noise_mitigation:1;
-		u8 f54_ad_query6_b4:1;
-		u8 has_two_byte_report_rate:1;
-		u8 has_one_byte_report_rate:1;
-		u8 has_relaxation_control:1;
+		bool has_sensor_assignment:1;
+		bool has_interference_metric:1;
+		bool has_sense_frequency_control:1;
+		bool has_firmware_noise_mitigation:1;
+		bool f54_ad_query6_b4:1;
+		bool has_two_byte_report_rate:1;
+		bool has_one_byte_report_rate:1;
+		bool has_relaxation_control:1;
 
 		/* query 7 */
 		u8 curve_compensation_mode:2;
 		u8 f54_ad_query7_b2__7:6;
 
 		/* query 8 */
-		u8 f54_ad_query2_b0:1;
-		u8 has_iir_filter:1;
-		u8 has_cmn_removal:1;
-		u8 has_cmn_maximum:1;
-		u8 has_touch_hysteresis:1;
-		u8 has_edge_compensation:1;
-		u8 has_per_frequency_noise_control:1;
-		u8 f54_ad_query8_b7:1;
+		bool f54_ad_query2_b0:1;
+		bool has_iir_filter:1;
+		bool has_cmn_removal:1;
+		bool has_cmn_maximum:1;
+		bool has_touch_hysteresis:1;
+		bool has_edge_compensation:1;
+		bool has_per_frequency_noise_control:1;
+		bool f54_ad_query8_b7:1;
 
 		u8 f54_ad_query9;
 		u8 f54_ad_query10;
 
 		/* query 11 */
 		u8 f54_ad_query11_b0__6:7;
-		u8 has_query_15:1;
+		bool has_query_15:1;
 
 		/* query 12 */
 		u8 number_of_sensing_frequencies:4;
@@ -130,8 +131,8 @@ union f54_ad_query {
 union f54_ad_control_0 {
 	/* control 0 */
 	struct {
-		u8 no_relax:1;
-		u8 no_scan:1;
+		bool no_relax:1;
+		bool no_scan:1;
 		u8 f54_ad_ctrl0_b2__7:6;
 	} __attribute__((__packed__));
 	struct {
@@ -184,13 +185,13 @@ union f54_ad_control_4__6 {
 		/* control 5 */
 		u8 low_ref_cap:2;
 		u8 low_ref_feedback_cap:2;
-		u8 low_ref_polarity:1;
+		bool low_ref_polarity:1;
 		u8 f54_ad_ctrl5_b5__7:3;
 
 		/* control 6 */
 		u8 high_ref_cap:2;
 		u8 high_ref_feedback_cap:2;
-		u8 high_ref_polarity:1;
+		bool high_ref_polarity:1;
 		u8 f54_ad_ctrl6_b5__7:3;
 	} __attribute__((__packed__));
 	struct {
@@ -204,7 +205,7 @@ union f54_ad_control_7 {
 		/* control 7 */
 		u8 cbc_cap:2;
 		u8 cbc_polarity:2;
-		u8 cbc_tx_carrier_selection:1;
+		bool cbc_tx_carrier_selection:1;
 		u8 f54_ad_ctrl6_b5__7:3;
 	} __attribute__((__packed__));
 	struct {
@@ -267,8 +268,8 @@ union f54_ad_control_12__13 {
 union f54_ad_control_14 {
 	struct {
 		/* control 14 */
-			u8 rxs_on_xaxis:1;
-			u8 curve_comp_on_txs:1;
+			bool rxs_on_xaxis:1;
+			bool curve_comp_on_txs:1;
 			u8 f54_ad_ctrl14b2__7:6;
 	} __attribute__((__packed__));
 	struct {
@@ -303,10 +304,10 @@ struct f54_ad_control_16 {
 /* control 17 */
 struct f54_ad_control_17n {
 	u8 burst_countb10__8:3;
-	u8 disable:1;
-	u8 f54_ad_ctrlb4:1;
+	bool disable:1;
+	bool f54_ad_ctrlb4:1;
 	u8 filter_bandwidth:3;
-};
+} __attribute__((__packed__));
 
 struct f54_ad_control_17 {
 		struct f54_ad_control_17n *regs;
@@ -317,7 +318,7 @@ struct f54_ad_control_17 {
 struct f54_ad_control_18n {
 	/*Control 18.* */
 	u8 burst_countb7__0n;
-};
+} __attribute__((__packed__));
 
 struct f54_ad_control_18 {
 		struct f54_ad_control_18n *regs;
@@ -328,7 +329,7 @@ struct f54_ad_control_18 {
 struct f54_ad_control_19n {
 	/*Control 19.* */
 	u8 stretch_duration;
-};
+} __attribute__((__packed__));
 
 struct f54_ad_control_19 {
 		struct f54_ad_control_19n *regs;
@@ -339,7 +340,7 @@ struct f54_ad_control_19 {
 union f54_ad_control_20 {
 	struct {
 		/* control 20 */
-		u8 disable_noise_mitigation:1;
+		bool disable_noise_mitigation:1;
 		u8 f54_ad_ctrl20b2__7:7;
 	} __attribute__((__packed__));
 	struct {
@@ -410,7 +411,7 @@ union f54_ad_control_29 {
 	struct {
 		/* control 29 */
 		u8 f54_ad_ctrl20b0__6:7;
-		u8 cmn_filter_disable:1;
+		bool cmn_filter_disable:1;
 	} __attribute__((__packed__));
 	struct {
 		u8 regs[1];
@@ -463,7 +464,7 @@ union f54_ad_control_32__35 {
 struct f54_ad_control_36n {
 	/*Control 36.* */
 	u8 axis1_comp;
-};
+} __attribute__((__packed__));
 
 struct f54_ad_control_36 {
 		struct f54_ad_control_36n *regs;
@@ -474,7 +475,7 @@ struct f54_ad_control_36 {
 struct f54_ad_control_37n {
 	/*Control 37.* */
 	u8 axis2_comp;
-};
+} __attribute__((__packed__));
 
 struct f54_ad_control_37 {
 		struct f54_ad_control_37n *regs;
@@ -485,7 +486,7 @@ struct f54_ad_control_37 {
 struct f54_ad_control_38n {
 	/*Control 38.* */
 	u8 noise_control_1;
-};
+} __attribute__((__packed__));
 
 struct f54_ad_control_38 {
 		struct f54_ad_control_38n *regs;
@@ -496,7 +497,7 @@ struct f54_ad_control_38 {
 struct f54_ad_control_39n {
 	/*Control 39.* */
 	u8 noise_control_2;
-};
+} __attribute__((__packed__));
 
 struct f54_ad_control_39 {
 		struct f54_ad_control_39n *regs;
@@ -507,7 +508,7 @@ struct f54_ad_control_39 {
 struct f54_ad_control_40n {
 	/*Control 40.* */
 	u8 noise_control_3;
-};
+} __attribute__((__packed__));
 
 struct f54_ad_control_40 {
 		struct f54_ad_control_40n *regs;
@@ -901,7 +902,7 @@ struct rmi_fn_54_data {
 	signed char status;
 	bool no_auto_cal;
 	unsigned int report_size;
-	unsigned char *report_data;
+	u8 *report_data;
 	unsigned int bufsize;
 	struct mutex data_mutex;
 	struct mutex status_mutex;
@@ -930,7 +931,7 @@ static int rmi_f54_reset(struct rmi_function_container *fc);
 
 static int rmi_f54_create_sysfs(struct rmi_function_container *fc);
 
-static int rmi_f54_init(struct rmi_function_container *fc)
+static int f54_device_init(struct rmi_function_container *fc)
 {
 	int retval = 0;
 	struct rmi_fn_54_data *f54;
@@ -960,7 +961,7 @@ static int rmi_f54_alloc_memory(struct rmi_function_container *fc)
 {
 	struct rmi_fn_54_data *f54;
 
-	f54 = kzalloc(sizeof(struct rmi_fn_54_data), GFP_KERNEL);
+	f54 = devm_kzalloc(&fc->dev, sizeof(struct rmi_fn_54_data), GFP_KERNEL);
 	if (!f54) {
 		dev_err(&fc->dev, "Failed to allocate rmi_fn_54_data.\n");
 		return -ENOMEM;
@@ -980,11 +981,8 @@ static void rmi_f54_free_memory(struct rmi_function_container *fc)
 	for (reg_num = 0; reg_num < ARRAY_SIZE(attrs_ctrl_regs); reg_num++)
 		sysfs_remove_group(&fc->dev.kobj, &attrs_ctrl_regs[reg_num]);
 	sysfs_remove_bin_file(&fc->dev.kobj, &dev_rep_data);
-	if (f54) {
+	if (f54)
 		kfree(f54->report_data);
-		kfree(f54);
-		fc->data = NULL;
-	}
 }
 
 static int rmi_f54_reset(struct rmi_function_container *fc)
@@ -1009,18 +1007,23 @@ static int rmi_f54_reset(struct rmi_function_container *fc)
 	return 0;
 }
 
-static void rmi_f54_remove(struct rmi_function_container *fc)
+static int f54_remove_device(struct device *dev)
 {
-	struct rmi_fn_54_data *data = fc->data;
+	struct rmi_fn_54_data *data;
+	struct rmi_function_container *fc = to_rmi_function_container(dev);
 
-	dev_info(&fc->dev, "Removing F54.");
+	dev_dbg(&fc->dev, "Removing F54.");
 
-	#if F54_WATCHDOG
+	data = fc->data;
+
+#if F54_WATCHDOG
 	/* Stop timer */
 	hrtimer_cancel(&data->watchdog);
-	#endif
+#endif
 
 	rmi_f54_free_memory(fc);
+
+	return 0;
 }
 
 static int rmi_f54_create_sysfs(struct rmi_function_container *fc)
@@ -1093,7 +1096,8 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 
 	f54->attrs_ctrl_regs_exist[reg_num] = true;
 	reg_num++;
-	control->reg_0 = kzalloc(sizeof(union f54_ad_control_0), GFP_KERNEL);
+	control->reg_0 = devm_kzalloc(&fc->dev,
+				sizeof(union f54_ad_control_0), GFP_KERNEL);
 	if (!control->reg_0) {
 		dev_err(&fc->dev, "Failed to allocate control registers.");
 		return -ENOMEM;
@@ -1104,8 +1108,9 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 	if (f54->query.touch_controller_family == 0
 			|| f54->query.touch_controller_family == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_1 = kzalloc(sizeof(union f54_ad_control_1),
-								GFP_KERNEL);
+		control->reg_1 = devm_kzalloc(&fc->dev,
+						sizeof(union f54_ad_control_1),
+						GFP_KERNEL);
 		if (!control->reg_1) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
@@ -1117,7 +1122,8 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 
 	f54->attrs_ctrl_regs_exist[reg_num] = true;
 	reg_num++;
-	control->reg_2 = kzalloc(sizeof(union f54_ad_control_2), GFP_KERNEL);
+	control->reg_2 = devm_kzalloc(&fc->dev,
+				sizeof(union f54_ad_control_2), GFP_KERNEL);
 	if (!control->reg_2) {
 		dev_err(&fc->dev, "Failed to allocate control registers.");
 		return -ENOMEM;
@@ -1128,8 +1134,9 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 	if (f54->query.has_pixel_touch_threshold_adjustment == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
 
-		control->reg_3 = kzalloc(sizeof(union f54_ad_control_3),
-								GFP_KERNEL);
+		control->reg_3 = devm_kzalloc(&fc->dev,
+					sizeof(union f54_ad_control_3),
+					GFP_KERNEL);
 		if (!control->reg_3) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
@@ -1142,8 +1149,9 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 	if (f54->query.touch_controller_family == 0
 		|| f54->query.touch_controller_family == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_4__6 = kzalloc(sizeof(union f54_ad_control_4__6),
-								GFP_KERNEL);
+		control->reg_4__6 = devm_kzalloc(&fc->dev,
+					sizeof(union f54_ad_control_4__6),
+					GFP_KERNEL);
 		if (!control->reg_4__6) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
@@ -1155,8 +1163,9 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 
 	if (f54->query.touch_controller_family == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_7 = kzalloc(sizeof(union f54_ad_control_7),
-								GFP_KERNEL);
+		control->reg_7 = devm_kzalloc(&fc->dev,
+					sizeof(union f54_ad_control_7),
+					GFP_KERNEL);
 		if (!control->reg_7) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
@@ -1169,8 +1178,9 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 	if (f54->query.touch_controller_family == 0
 		|| f54->query.touch_controller_family == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_8__9 = kzalloc(sizeof(union f54_ad_control_8__9),
-								GFP_KERNEL);
+		control->reg_8__9 = devm_kzalloc(&fc->dev,
+				sizeof(union f54_ad_control_8__9),
+				GFP_KERNEL);
 		if (!control->reg_8__9) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
@@ -1182,8 +1192,9 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 
 	if (f54->query.has_interference_metric == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_10 = kzalloc(sizeof(union f54_ad_control_10),
-								GFP_KERNEL);
+		control->reg_10 = devm_kzalloc(&fc->dev,
+					sizeof(union f54_ad_control_10),
+					GFP_KERNEL);
 		if (!control->reg_10) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
@@ -1198,7 +1209,7 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 
 	if (f54->query.has_relaxation_control == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_12__13 = kzalloc(
+		control->reg_12__13 = devm_kzalloc(&fc->dev,
 			sizeof(union f54_ad_control_12__13), GFP_KERNEL);
 		if (!control->reg_12__13) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
@@ -1211,22 +1222,24 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 
 	if (f54->query.has_sensor_assignment == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_14 = kzalloc(sizeof(union f54_ad_control_14),
-								GFP_KERNEL);
+		control->reg_14 = devm_kzalloc(&fc->dev,
+					sizeof(union f54_ad_control_14),
+					GFP_KERNEL);
 		if (!control->reg_14) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 
-		control->reg_15 =
-			kzalloc(sizeof(struct f54_ad_control_15), GFP_KERNEL);
+		control->reg_15 = devm_kzalloc(&fc->dev,
+					sizeof(struct f54_ad_control_15),
+					GFP_KERNEL);
 		if (!control->reg_15) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 		control->reg_15->length = f54->query.num_of_rx_electrodes;
-		control->reg_15->regs =
-				kzalloc(control->reg_15->length *
+		control->reg_15->regs = devm_kzalloc(&fc->dev,
+					control->reg_15->length *
 					sizeof(struct f54_ad_control_15n),
 					GFP_KERNEL);
 		if (!control->reg_15->regs) {
@@ -1234,15 +1247,16 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 			return -ENOMEM;
 		}
 
-		control->reg_16 =
-			kzalloc(sizeof(struct f54_ad_control_16), GFP_KERNEL);
+		control->reg_16 = devm_kzalloc(&fc->dev,
+					sizeof(struct f54_ad_control_16),
+					GFP_KERNEL);
 		if (!control->reg_16) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 		control->reg_16->length = f54->query.num_of_tx_electrodes;
-		control->reg_16->regs =
-				kzalloc(control->reg_16->length *
+		control->reg_16->regs = devm_kzalloc(&fc->dev,
+					control->reg_16->length *
 					sizeof(struct f54_ad_control_16n),
 					GFP_KERNEL);
 		if (!control->reg_16->regs) {
@@ -1263,43 +1277,49 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
 		size = f54->query.number_of_sensing_frequencies;
 
-		control->reg_17 =
-			kzalloc(sizeof(struct f54_ad_control_17), GFP_KERNEL);
+		control->reg_17 = devm_kzalloc(&fc->dev,
+					sizeof(struct f54_ad_control_17),
+					GFP_KERNEL);
 		if (!control->reg_17) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 		control->reg_17->length = size;
-		control->reg_17->regs = kzalloc(size *
-				sizeof(struct f54_ad_control_17n), GFP_KERNEL);
+		control->reg_17->regs = devm_kzalloc(&fc->dev,
+				size * sizeof(struct f54_ad_control_17n),
+				GFP_KERNEL);
 		if (!control->reg_17->regs) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 
-		control->reg_18 =
-			kzalloc(sizeof(struct f54_ad_control_18), GFP_KERNEL);
+		control->reg_18 = devm_kzalloc(&fc->dev,
+				sizeof(struct f54_ad_control_18),
+				GFP_KERNEL);
 		if (!control->reg_18) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 		control->reg_18->length = size;
-		control->reg_18->regs = kzalloc(size *
-				sizeof(struct f54_ad_control_18n), GFP_KERNEL);
+		control->reg_18->regs = devm_kzalloc(&fc->dev,
+				size * sizeof(struct f54_ad_control_18n),
+				GFP_KERNEL);
 		if (!control->reg_18->regs) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 
-		control->reg_19 =
-			kzalloc(sizeof(struct f54_ad_control_19), GFP_KERNEL);
+		control->reg_19 = devm_kzalloc(&fc->dev,
+					sizeof(struct f54_ad_control_19),
+					GFP_KERNEL);
 		if (!control->reg_19) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 		control->reg_19->length = size;
-		control->reg_19->regs = kzalloc(size *
-				sizeof(struct f54_ad_control_19n), GFP_KERNEL);
+		control->reg_19->regs = devm_kzalloc(&fc->dev,
+				size * sizeof(struct f54_ad_control_19n),
+				GFP_KERNEL);
 		if (!control->reg_19->regs) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
@@ -1315,15 +1335,17 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 	reg_num++;
 
 	f54->attrs_ctrl_regs_exist[reg_num] = true;
-	control->reg_20 = kzalloc(sizeof(union f54_ad_control_20), GFP_KERNEL);
+	control->reg_20 = devm_kzalloc(&fc->dev,
+				sizeof(union f54_ad_control_20), GFP_KERNEL);
 	control->reg_20->address = next_loc;
 	next_loc += sizeof(control->reg_20->regs);
 	reg_num++;
 
 	if (f54->query.has_sense_frequency_control == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_21 = kzalloc(sizeof(union f54_ad_control_21),
-								GFP_KERNEL);
+		control->reg_21 = devm_kzalloc(&fc->dev,
+					sizeof(union f54_ad_control_21),
+					GFP_KERNEL);
 		control->reg_21->address = next_loc;
 		next_loc += sizeof(control->reg_21->regs);
 	}
@@ -1331,8 +1353,9 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 
 	if (f54->query.has_sense_frequency_control == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_22__26 = kzalloc(
-			sizeof(union f54_ad_control_22__26), GFP_KERNEL);
+		control->reg_22__26 = devm_kzalloc(&fc->dev,
+				sizeof(union f54_ad_control_22__26),
+				GFP_KERNEL);
 		control->reg_22__26->address = next_loc;
 		next_loc += sizeof(control->reg_22__26->regs);
 	}
@@ -1340,8 +1363,9 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 
 	if (f54->query.has_iir_filter == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_27 = kzalloc(sizeof(union f54_ad_control_27),
-								GFP_KERNEL);
+		control->reg_27 = devm_kzalloc(&fc->dev,
+					sizeof(union f54_ad_control_27),
+					GFP_KERNEL);
 		control->reg_27->address = next_loc;
 		next_loc += sizeof(control->reg_27->regs);
 	}
@@ -1349,8 +1373,9 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 
 	if (f54->query.has_firmware_noise_mitigation == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_28 = kzalloc(sizeof(union f54_ad_control_28),
-								GFP_KERNEL);
+		control->reg_28 = devm_kzalloc(&fc->dev,
+					sizeof(union f54_ad_control_28),
+					GFP_KERNEL);
 		control->reg_28->address = next_loc;
 		next_loc += sizeof(control->reg_28->regs);
 	}
@@ -1358,8 +1383,9 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 
 	if (f54->query.has_cmn_removal == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_29 = kzalloc(sizeof(union f54_ad_control_29),
-								GFP_KERNEL);
+		control->reg_29 = devm_kzalloc(&fc->dev,
+					sizeof(union f54_ad_control_29),
+					GFP_KERNEL);
 		control->reg_29->address = next_loc;
 		next_loc += sizeof(control->reg_29->regs);
 	}
@@ -1367,8 +1393,9 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 
 	if (f54->query.has_cmn_maximum == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_30 = kzalloc(sizeof(union f54_ad_control_30),
-								GFP_KERNEL);
+		control->reg_30 = devm_kzalloc(&fc->dev,
+				sizeof(union f54_ad_control_30),
+				GFP_KERNEL);
 		control->reg_30->address = next_loc;
 		next_loc += sizeof(control->reg_30->regs);
 	}
@@ -1376,8 +1403,9 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 
 	if (f54->query.has_touch_hysteresis == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_31 = kzalloc(sizeof(union f54_ad_control_31),
-								GFP_KERNEL);
+		control->reg_31 = devm_kzalloc(&fc->dev,
+				sizeof(union f54_ad_control_31),
+				GFP_KERNEL);
 		control->reg_31->address = next_loc;
 		next_loc += sizeof(control->reg_31->regs);
 	}
@@ -1385,7 +1413,7 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 
 	if (f54->query.has_interference_metric == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
-		control->reg_32__35 = kzalloc(
+		control->reg_32__35 = devm_kzalloc(&fc->dev,
 			sizeof(union f54_ad_control_32__35), GFP_KERNEL);
 		control->reg_32__35->address = next_loc;
 		next_loc += sizeof(control->reg_32__35->regs);
@@ -1402,15 +1430,15 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 			|| f54->query.curve_compensation_mode == 2) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
 
-		control->reg_36 =
-			kzalloc(sizeof(struct f54_ad_control_36), GFP_KERNEL);
+		control->reg_36 = devm_kzalloc(&fc->dev,
+				sizeof(struct f54_ad_control_36), GFP_KERNEL);
 		if (!control->reg_36) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 		control->reg_36->length = size;
-		control->reg_36->regs =
-			kzalloc(size * sizeof(struct f54_ad_control_36n),
+		control->reg_36->regs = devm_kzalloc(&fc->dev,
+				size * sizeof(struct f54_ad_control_36n),
 				GFP_KERNEL);
 		if (!control->reg_36->regs) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
@@ -1425,14 +1453,15 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 	if (f54->query.curve_compensation_mode == 2) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
 
-		control->reg_37 =
-			kzalloc(sizeof(struct f54_ad_control_37), GFP_KERNEL);
+		control->reg_37 = devm_kzalloc(&fc->dev,
+				sizeof(struct f54_ad_control_37), GFP_KERNEL);
 		if (!control->reg_37) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 		control->reg_37->length = f54->query.num_of_tx_electrodes;
-		control->reg_37->regs = kzalloc(control->reg_37->length *
+		control->reg_37->regs = devm_kzalloc(&fc->dev,
+				control->reg_37->length*
 				sizeof(struct f54_ad_control_37n),
 				GFP_KERNEL);
 		if (!control->reg_37->regs) {
@@ -1448,48 +1477,52 @@ static int rmi_f54_initialize(struct rmi_function_container *fc)
 	if (f54->query.has_per_frequency_noise_control == 1) {
 		f54->attrs_ctrl_regs_exist[reg_num] = true;
 
-		control->reg_38 =
-			kzalloc(sizeof(struct f54_ad_control_38), GFP_KERNEL);
+		control->reg_38 = devm_kzalloc(&fc->dev,
+				sizeof(struct f54_ad_control_38), GFP_KERNEL);
 		if (!control->reg_38) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 		control->reg_38->length =
 				f54->query.number_of_sensing_frequencies;
-		control->reg_38->regs = kzalloc(control->reg_38->length *
-					sizeof(struct f54_ad_control_38n),
-					GFP_KERNEL);
+		control->reg_38->regs = devm_kzalloc(&fc->dev,
+			control->reg_38->length*
+			sizeof(struct f54_ad_control_38n),
+			GFP_KERNEL);
 		if (!control->reg_38->regs) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 
-		control->reg_39 =
-			kzalloc(sizeof(struct f54_ad_control_39), GFP_KERNEL);
+		control->reg_39 = devm_kzalloc(&fc->dev,
+				sizeof(struct f54_ad_control_39), GFP_KERNEL);
 		if (!control->reg_39) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 		control->reg_39->length =
 				f54->query.number_of_sensing_frequencies;
-		control->reg_39->regs = kzalloc(control->reg_39->length *
-					sizeof(struct f54_ad_control_39n),
-					GFP_KERNEL);
+		control->reg_39->regs = devm_kzalloc(&fc->dev,
+				control->reg_39->length*
+				sizeof(struct f54_ad_control_39n),
+				GFP_KERNEL);
 		if (!control->reg_39->regs) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 
-		control->reg_40 =
-			kzalloc(sizeof(struct f54_ad_control_40), GFP_KERNEL);
+		control->reg_40 = devm_kzalloc(&fc->dev,
+				sizeof(struct f54_ad_control_40), GFP_KERNEL);
 		if (!control->reg_40) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
 		}
 		control->reg_40->length =
 				f54->query.number_of_sensing_frequencies;
-		control->reg_40->regs = kzalloc(control->reg_40->length *
-				sizeof(struct f54_ad_control_40n), GFP_KERNEL);
+		control->reg_40->regs = devm_kzalloc(&fc->dev,
+			control->reg_40->length*
+			sizeof(struct f54_ad_control_40n),
+			GFP_KERNEL);
 		if (!control->reg_40->regs) {
 			dev_err(&fc->dev, "Failed to allocate control registers.");
 			return -ENOMEM;
@@ -1561,14 +1594,14 @@ static void set_report_size(struct rmi_fn_54_data *data)
 int rmi_f54_attention(struct rmi_function_container *fc, u8 *irq_bits)
 {
 	struct rmi_driver *driver = fc->rmi_dev->driver;
-	char fifo[2];
+	u8 fifo[2];
 	struct rmi_fn_54_data *data = fc->data;
 	int error = 0;
 
 	set_report_size(data);
 	if (data->report_size == 0) {
-		dev_err(&fc->dev, "Invalid report type set in %s. "
-				"This should never happen.\n", __func__);
+		dev_err(&fc->dev, "Invalid report type set in %s. This should never happen.\n",
+			__func__);
 		error = -EINVAL;
 		goto error_exit;
 	}
@@ -1629,16 +1662,10 @@ int rmi_f54_attention(struct rmi_function_container *fc, u8 *irq_bits)
 	case F54_FULL_RAW_CAP_RX_COUPLING_COMP:
 		pr_info("Report data (Image):\n");
 		int i, j, k;
-		char c[2];
-		short s;
 		k = 0;
-		for (i = 0; i < data->query.num_of_tx_electrodes;
-									i++) {
-			for (j = 0; j <
-			     data->query.num_of_rx_electrodes; j++) {
-				c[0] = data->report_data[k];
-				c[1] = data->report_data[k+1];
-				memcpy(&s, &c, 2);
+		for (i = 0; i < data->query.num_of_tx_electrodes; i++) {
+			for (j = 0; j < data->query.num_of_rx_electrodes; j++) {
+				s16 s = (s16) batohs(data->report_data+k);
 				if (s < -64)
 					printk(".");
 				else if (s < 0)
@@ -1684,7 +1711,7 @@ static void clear_status_worker(struct work_struct *work)
 					struct rmi_fn_54_data, work);
 	struct rmi_function_container *fc = data->fc;
 	struct rmi_driver *driver = fc->rmi_dev->driver;
-	char command;
+	u8 command;
 	int result;
 
 	mutex_lock(&data->status_mutex);
@@ -1770,7 +1797,7 @@ static ssize_t rmi_fn_54_report_type_store(struct device *dev,
 				const char *buf, size_t count) {
 	int result;
 	unsigned long val;
-	unsigned char data;
+	u8 data;
 	struct rmi_function_container *fc;
 	struct rmi_fn_54_data *instance_data;
 	fc = to_rmi_function_container(dev);
@@ -1788,22 +1815,21 @@ static ssize_t rmi_fn_54_report_type_store(struct device *dev,
 	mutex_lock(&instance_data->status_mutex);
 	if (instance_data->status != BUSY) {
 		instance_data->report_type = (enum f54_report_types)val;
-		data = (char)val;
+		data = (u8)val;
 		/* Write the Report Type back to the first Block
 		 * Data registers (F54_AD_Data0). */
-		result =
-		    rmi_write_block(fc->rmi_dev, fc->fd.data_base_addr,
-								&data, 1);
+		result = rmi_write_block(fc->rmi_dev,
+				fc->fd.data_base_addr, &data, 1);
 		mutex_unlock(&instance_data->status_mutex);
 		if (result < 0) {
-			dev_err(dev, "%s : Could not write report type to"
-				" 0x%x\n", __func__, fc->fd.data_base_addr);
+			dev_err(dev, "%s : Could not write report type to 0x%x\n",
+				__func__, fc->fd.data_base_addr);
 			return result;
 		}
 		return count;
 	} else {
-		dev_err(dev, "%s : Report type cannot be changed in the middle"
-				" of command.\n", __func__);
+		dev_err(dev, "%s : Report type cannot be changed in the middle of command.\n",
+			__func__);
 		mutex_unlock(&instance_data->status_mutex);
 		return -EINVAL;
 	}
@@ -1829,7 +1855,7 @@ static ssize_t rmi_fn_54_get_report_store(struct device *dev,
 	/* Do nothing if not set to 1. This prevents accidental commands. */
 	if (val != 1)
 		return count;
-	command = (unsigned char)GET_REPORT;
+	command = GET_REPORT;
 	/* Basic checks on report_type to ensure we write a valid type
 	 * to the sensor.
 	 * TODO: Check Query3 to see if some specific reports are
@@ -1907,7 +1933,7 @@ static ssize_t rmi_fn_54_force_cal_store(struct device *dev,
 	if (val != 1)
 		return count;
 
-	command = (unsigned char)FORCE_CAL;
+	command = FORCE_CAL;
 
 	if (instance_data->status == BUSY)
 		return -EBUSY;
@@ -1974,7 +2000,7 @@ static ssize_t rmi_fn_54_no_auto_cal_store(struct device *dev,
 				const char *buf, size_t count) {
 	int result;
 	unsigned long val;
-	unsigned char data;
+	u8 data;
 	struct rmi_function_container *fc;
 	struct rmi_fn_54_data *instance_data;
 
@@ -1993,6 +2019,11 @@ static ssize_t rmi_fn_54_no_auto_cal_store(struct device *dev,
 	/* Read current control values */
 	result =
 	    rmi_read_block(fc->rmi_dev, fc->fd.control_base_addr, &data, 1);
+	if (result < 0) {
+		dev_err(dev, "%s : Could not read control base address to 0x%x\n",
+		       __func__, fc->fd.control_base_addr);
+		return result;
+	}
 
 	/* if the current control registers are already set as we want them, do
 	 * nothing to them */
@@ -2018,7 +2049,7 @@ static ssize_t rmi_fn_54_fifoindex_show(struct device *dev,
 	struct rmi_function_container *fc;
 	struct rmi_fn_54_data *instance_data;
 	struct rmi_driver *driver;
-	unsigned char temp_buf[2];
+	u8 temp_buf[2];
 	int retval;
 
 	fc = to_rmi_function_container(dev);
@@ -2035,7 +2066,7 @@ static ssize_t rmi_fn_54_fifoindex_show(struct device *dev,
 		       fc->fd.data_base_addr + RMI_F54_FIFO_OFFSET);
 		return retval;
 	}
-	batohs(&instance_data->fifoindex, temp_buf);
+	instance_data->fifoindex = batohs(temp_buf);
 	return snprintf(buf, PAGE_SIZE, "%u\n", instance_data->fifoindex);
 }
 static ssize_t rmi_fn_54_fifoindex_store(struct device *dev,
@@ -2045,7 +2076,7 @@ static ssize_t rmi_fn_54_fifoindex_store(struct device *dev,
 {
 	int error;
 	unsigned long val;
-	unsigned char data[2];
+	u8 data[2];
 	struct rmi_function_container *fc;
 	struct rmi_fn_54_data *instance_data;
 
@@ -2061,12 +2092,11 @@ static ssize_t rmi_fn_54_fifoindex_store(struct device *dev,
 	instance_data->fifoindex = val;
 
 	/* Write the FifoIndex back to the first data registers. */
-	hstoba(data, (unsigned short)val);
+	hstoba(data, (u16)val);
 
 	error = rmi_write_block(fc->rmi_dev,
 				fc->fd.data_base_addr + RMI_F54_FIFO_OFFSET,
-				data,
-				ARRAY_SIZE(data));
+				data, ARRAY_SIZE(data));
 
 	if (error < 0) {
 		dev_err(dev, "%s : Could not write fifoindex to 0x%x\n",
@@ -2090,10 +2120,8 @@ static ssize_t rmi_fn_54_data_read(struct file *data_file, struct kobject *kobj,
 	instance_data = fc->data;
 	mutex_lock(&instance_data->data_mutex);
 	if (count < instance_data->report_size) {
-		dev_err(dev,
-			"%s: F54 report size too large for buffer: %d."
-				" Need at least: %d for Report type: %d.\n",
-			__func__, count, instance_data->report_size,
+		dev_err(dev,  "F54 report size too large for buffer: %d. Need at least: %d for Report type: %d.\n",
+				count, instance_data->report_size,
 			instance_data->report_type);
 		mutex_unlock(&instance_data->data_mutex);
 		return -EINVAL;
@@ -2137,8 +2165,7 @@ static ssize_t rmi_fn_54_burst_count_show(struct device *dev,
 			(u8 *) data->control.reg_17->regs,
 			data->control.reg_17->length * sizeof(u8));
 	if (result < 0) {
-		dev_err(dev, "%s : Could not read control at 0x%x\n"
-					"Data may be outdated.", __func__,
+		dev_err(dev, "Could not read control at %#06x Data may be outdated.",
 					data->control.reg_17->address);
 	}
 
@@ -2146,8 +2173,7 @@ static ssize_t rmi_fn_54_burst_count_show(struct device *dev,
 			(u8 *)data->control.reg_18->regs,
 			data->control.reg_18->length * sizeof(u8));
 	if (result < 0) {
-		dev_err(dev, "%s : Could not read control at 0x%x\n"
-					"Data may be outdated.", __func__,
+		dev_err(dev, "Could not read control at %#06x. Data may be outdated.",
 					data->control.reg_18->address);
 	}
 	mutex_unlock(&data->control_mutex);
@@ -2212,20 +2238,46 @@ show_store_union_struct_unsigned(control, reg_32__35, tx_low_edge_comp)
 show_store_union_struct_unsigned(control, reg_32__35, tx_high_edge_comp)
 
 /* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
+
+static int f54_probe(struct device *dev);
+
 static struct rmi_function_handler function_handler = {
+	.driver = {
+		.owner = THIS_MODULE,
+		.name = "rmi_f54",
+		.bus = &rmi_bus_type,
+		.probe = f54_probe,
+		.remove = f54_remove_device,
+	},
 	.func = 0x54,
-	.init = rmi_f54_init,
 	.config = NULL,
 	.reset = rmi_f54_reset,
 	.attention = rmi_f54_attention,
-	.remove = rmi_f54_remove
 };
+
+static __devinit int f54_probe(struct device *dev)
+{
+	struct rmi_function_container *fc;
+
+	if (dev->type != &rmi_function_type) {
+		dev_dbg(dev, "Not a function device.\n");
+		return 1;
+	}
+	fc = to_rmi_function_container(dev);
+	if (fc->fd.function_number != function_handler.func) {
+		dev_dbg(dev, "Device is F%02X, not F%02X.\n",
+			fc->fd.function_number, function_handler.func);
+		return 1;
+	}
+
+	return f54_device_init(fc);
+}
 
 static int __init rmi_f54_module_init(void)
 {
 	int error;
 
-	error = rmi_register_function_driver(&function_handler);
+	error = driver_register(&function_handler.driver);
 	if (error < 0) {
 		pr_err("%s: register failed!\n", __func__);
 		return error;
@@ -2235,7 +2287,7 @@ static int __init rmi_f54_module_init(void)
 
 static void rmi_f54_module_exit(void)
 {
-	rmi_unregister_function_driver(&function_handler);
+	driver_unregister(&function_handler.driver);
 }
 
 module_init(rmi_f54_module_init);
