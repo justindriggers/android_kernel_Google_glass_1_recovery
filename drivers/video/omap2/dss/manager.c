@@ -1328,9 +1328,9 @@ static void configure_manager(enum omap_channel channel)
 		dispc_enable_cpr(channel, c->cpr_enable);
 		dispc_set_cpr_coef(channel, &c->cpr_coefs);
 	}
-	dispc_enable_gamma_table(c->gamma_enable);
 	if (c->gamma_table_dirty)
 		dispc_set_gamma_table(channel, c->gamma_table);
+	dispc_enable_gamma_table(c->gamma_enable);
 }
 
 /* configure_dispc() tries to write values from cache to shadow registers.

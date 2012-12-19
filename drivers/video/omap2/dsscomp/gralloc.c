@@ -254,7 +254,7 @@ static void dsscomp_gralloc_do_clone(struct work_struct *work)
 	dsscomp_gralloc_transfer_dmabuf(wk->dma_cfg);
 #ifdef CONFIG_DEBUG_FS
 	ms2 = ktime_to_ms(ktime_get());
-	dev_info(DEV(cdev), "DMA latency(msec) = %lld\n", ms2-ms1);
+	dev_info(DEV(cdev), "DMA latency(msec) = %lld\n", (long long int)(ms2-ms1));
 #endif
 
 	wk->comp->state = DSSCOMP_STATE_APPLYING;
@@ -263,7 +263,7 @@ static void dsscomp_gralloc_do_clone(struct work_struct *work)
 	kfree(wk);
 }
 
-static bool dsscomp_is_any_device_active()
+static bool dsscomp_is_any_device_active(void)
 {
 	struct omap_dss_device *dssdev;
 	u32 display_ix;
@@ -644,6 +644,7 @@ static void dsscomp_early_suspend_cb(void *data, int status)
 
 static void dsscomp_early_suspend(struct early_suspend *h)
 {
+	void dispc_enable_gamma_table(int);
 	struct dsscomp_setup_dispc_data d = {
 		.num_mgrs = 0,
 	};
@@ -662,6 +663,8 @@ static void dsscomp_early_suspend(struct early_suspend *h)
 		pr_warn("DSSCOMP: timeout blanking screen\n");
 	else
 		pr_info("DSSCOMP: blanked screen\n");
+	/* disable gamma so resume loads table before enable */
+	dispc_enable_gamma_table(0);
 }
 
 static void dsscomp_late_resume(struct early_suspend *h)
