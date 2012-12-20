@@ -37,7 +37,7 @@
 
 /* driver name/version */
 #define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.5"
+#define DRIVER_VERSION "0.6"
 
 /* minimum MCU firmware version required for this driver */
 #define MINIMUM_MCU_VERSION		12
@@ -571,6 +571,9 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 		dev_info(&glasshub->i2c_client->dev, "%s: wink signal received\n",
 				__FUNCTION__);
 		sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "wink");
+
+		/* optimization: force read of prox data when wink is received */
+		status |= IRQ_PASSTHRU;
 	}
 
 	/* process prox data */
@@ -580,6 +583,15 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 		/* read value */
 		rc = _i2c_read_reg(glasshub, REG16_PROX_DATA, &value);
 		if (rc) goto Error;
+
+		/* shouldn't happen, but 0xffff indicates we read past end of buffer */
+		if (value == 0xffff) {
+			dev_warn(&glasshub->i2c_client->dev,
+					"%s: read past end of buffer, status = 0x%02x\n",
+					__FUNCTION__,
+					status);
+			break;
+		}
 		++glasshub->sample_count;
 
 		/* Buffer up data (and drop data that exceeds our buffer
@@ -1597,7 +1609,7 @@ static struct attribute *bootmode_attrs[] = {
 	&dev_attr_update_fw_enable.attr,
 	&dev_attr_flash_status.attr,
 	&dev_attr_irq.attr,
-	&dev_attr_disable,
+	&dev_attr_disable.attr,
 	NULL
 };
 
