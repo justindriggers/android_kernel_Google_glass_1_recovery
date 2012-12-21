@@ -37,7 +37,7 @@
 
 /* driver name/version */
 #define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.6"
+#define DRIVER_VERSION "0.7"
 
 /* minimum MCU firmware version required for this driver */
 #define MINIMUM_MCU_VERSION		12
@@ -107,6 +107,7 @@
 #define FLAG_SYSFS_CREATED		3
 #define FLAG_PASSTHRU_STARTED		4
 #define FLAG_DEVICE_DISABLED		5
+#define FLAG_WINK_FLAG_ENABLE		6
 
 /* flags for device permissions */
 #define DEV_MODE_RO (S_IRUSR | S_IRGRP)
@@ -152,6 +153,12 @@
 /* interval for averaging sample rate, must be power-of-two */
 #define PROX_AVERAGING_INTERVAL		32
 #define PROX_AVERAGING_SHIFT		5
+
+/* flags and mask for prox meta data */
+#define PROX_DATA_MASK			0x7fff
+#define PROX_DATA_MASK_NO_WINK_FLAG	0x3fff
+#define PROX_DATA_END_OF_DATA_FLAG	0x8000
+#define PROX_DATA_WINK_DETECTED_FLAG	0x4000
 
 /* values for flash_status */
 #define FLASH_STATUS_OK			0
@@ -456,6 +463,8 @@ int boot_device_l(struct glasshub_data *glasshub)
 	temp = CMD_BOOT;
 	for (retry = 0; retry < 5; retry++) {
 		rc = _i2c_write_mult(glasshub, &temp, sizeof(temp));
+
+		/* takes some time for the app code to start up */
 		msleep(100);
 		if (rc == 0) break;
 	}
@@ -503,7 +512,9 @@ int reset_device_l(struct glasshub_data *glasshub, int force)
 				__FUNCTION__);
 		goto err_out;
 	}
-	msleep(30);
+
+	/* takes some time for the app code to shut down */
+	msleep(50);
 	clear_bit(FLAG_DEVICE_BOOTED, &glasshub->flags);
 
 err_out:
@@ -600,15 +611,21 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 		 * I2C bus transfer to check the status register.
 		 */
 		if (atomic_read(&glasshub_opened) && (prox_count < PROX_QUEUE_SZ)) {
-			data[prox_count++] = (uint16_t) value & 0x7fff;
+			data[prox_count++] = (uint16_t) value;
 		}
 
 		/* check for end of data */
-		if (value & 0x8000) break;
+		if (value & PROX_DATA_END_OF_DATA_FLAG) break;
 	}
 
 	/* pass prox data to misc device driver */
 	if (prox_count) {
+		uint16_t mask = PROX_DATA_MASK_NO_WINK_FLAG;
+
+		/* should we mask the wink flag bit? */
+		if (test_bit(FLAG_WINK_FLAG_ENABLE, &glasshub->flags)) {
+			mask = PROX_DATA_MASK;
+		}
 
 		/* if passthru enabled, backdate timestamps */
 		if (test_and_clear_bit(FLAG_PASSTHRU_STARTED, &glasshub->flags)) {
@@ -616,9 +633,10 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 			glasshub->start_timestamp = 0;
 		}
 
+		/* copy data to FIFO, filling in timestamps */
 		for (i = 0; i < prox_count; i++) {
 			struct glasshub_data_user rec;
-			rec.value = data[i];
+			rec.value = data[i] & mask;
 			glasshub->last_timestamp += glasshub->average_delta;
 			rec.timestamp = glasshub->last_timestamp;
 			kfifo_put(&prox_fifo, &rec);
@@ -713,6 +731,12 @@ static ssize_t bootloader_version_show(struct device *dev, struct device_attribu
 {
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 	return sprintf(buf, "%d\n", glasshub->bootloader_version);
+}
+
+/* show the driver version number */
+static ssize_t driver_version_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%s\n", DRIVER_VERSION);
 }
 
 /* show don/doff status */
@@ -987,6 +1011,36 @@ static ssize_t wink_enable_store(struct device *dev, struct device_attribute *at
 		const char *buf, size_t count)
 {
 	return store_reg(dev, buf, count, REG_ENABLE_WINK, 0, 1, NULL);
+}
+
+/* show wink_flag_enable value */
+static ssize_t wink_flag_enable_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	return sprintf(buf, "%d\n", test_bit(FLAG_WINK_FLAG_ENABLE, &glasshub->flags) ? 1 : 0);
+}
+
+/* write wink_flag_enable value */
+static ssize_t wink_flag_enable_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	unsigned long value = 0;
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+
+	/* parse value */
+	if (kstrtoul(buf, 10, &value)) {
+		goto err_out;
+	}
+
+	/* disable device */
+	if (value) {
+		set_bit(FLAG_WINK_FLAG_ENABLE, &glasshub->flags);
+	} else {
+		clear_bit(FLAG_WINK_FLAG_ENABLE, &glasshub->flags);
+	}
+
+err_out:
+	return count;
 }
 
 /* show wink inhibit period */
@@ -1549,6 +1603,7 @@ static ssize_t sample_count_show(struct device *dev, struct device_attribute *at
 static DEVICE_ATTR(update_fw_enable, DEV_MODE_RW, update_fw_enable_show, update_fw_enable_store);
 static DEVICE_ATTR(version, DEV_MODE_RO, version_show, NULL);
 static DEVICE_ATTR(bootloader_version, DEV_MODE_RO, bootloader_version_show, NULL);
+static DEVICE_ATTR(driver_version, DEV_MODE_RO, driver_version_show, NULL);
 static DEVICE_ATTR(passthru_enable, DEV_MODE_RW, passthru_enable_show, passthru_enable_store);
 static DEVICE_ATTR(proxraw, DEV_MODE_RO, proxraw_show, NULL);
 static DEVICE_ATTR(proxmin, DEV_MODE_RO, proxmin_show, NULL);
@@ -1565,6 +1620,7 @@ static DEVICE_ATTR(prox_version, DEV_MODE_RO, prox_version_show, NULL);
 static DEVICE_ATTR(wink, DEV_MODE_RO, wink_show, NULL);
 static DEVICE_ATTR(wink_enable, DEV_MODE_RW, wink_enable_show, wink_enable_store);
 static DEVICE_ATTR(wink_inhibit, DEV_MODE_RW, wink_inhibit_show, wink_inhibit_store);
+static DEVICE_ATTR(wink_flag_enable, DEV_MODE_RW, wink_flag_enable_show, wink_flag_enable_store);
 static DEVICE_ATTR(detector_gain, DEV_MODE_RW, detector_gain_show, detector_gain_store);
 static DEVICE_ATTR(detector_bias, DEV_MODE_RW, detector_bias_show, detector_bias_store);
 static DEVICE_ATTR(debug, DEV_MODE_RW, debug_show, debug_store);
@@ -1591,6 +1647,7 @@ static struct attribute *attrs[] = {
 	&dev_attr_wink.attr,
 	&dev_attr_wink_enable.attr,
 	&dev_attr_wink_inhibit.attr,
+	&dev_attr_wink_flag_enable.attr,
 	&dev_attr_detector_gain.attr,
 	&dev_attr_detector_bias.attr,
 	&dev_attr_debug.attr,
@@ -1606,6 +1663,7 @@ static struct attribute_group attr_group = {
 static struct attribute *bootmode_attrs[] = {
 	&dev_attr_bootloader_version.attr,
 	&dev_attr_version.attr,
+	&dev_attr_driver_version.attr,
 	&dev_attr_update_fw_enable.attr,
 	&dev_attr_flash_status.attr,
 	&dev_attr_irq.attr,
@@ -1854,6 +1912,7 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 	struct glasshub_data *glasshub = NULL;
 	int rc;
 
+	dev_info(&i2c_client->dev, "%s: Probing glasshub...\n", __FUNCTION__);
 	glasshub = kzalloc(sizeof(struct glasshub_data), GFP_KERNEL);
 	if (!glasshub)
 	{
@@ -1876,11 +1935,9 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 	}
 
 	/* setup the device */
-	dev_info(&i2c_client->dev, "%s: Probing glasshub...\n", __FUNCTION__);
 	if (glasshub_setup(glasshub)) {
 		goto err_out;
 	}
-	dev_info(&i2c_client->dev, "%s: Probe successful\n", __FUNCTION__);
 
 	/* store driver data into device private structure */
 	dev_set_drvdata(&i2c_client->dev, glasshub);
@@ -1906,9 +1963,11 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 			goto err_out;
 		}
 	}
+	dev_info(&i2c_client->dev, "%s: Probe successful\n", __FUNCTION__);
 	return 0;
 
 err_out:
+	dev_err(&i2c_client->dev, "%s: Probe failed\n", __FUNCTION__);
 	kfree(glasshub);
 	return -ENODEV;
 }
