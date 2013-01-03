@@ -37,7 +37,7 @@
 
 /* driver name/version */
 #define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.7"
+#define DRIVER_VERSION "0.8"
 
 /* minimum MCU firmware version required for this driver */
 #define MINIMUM_MCU_VERSION		12
@@ -71,6 +71,7 @@
 #define REG_WINK_INHIBIT		15
 #define REG_WINK_STATUS			16
 #define REG_DEBUG			17
+#define REG_AMBIENT_ENABLE		18
 
 /* 16-bit registers */
 #define REG16_DETECTOR_BIAS		0x80
@@ -79,6 +80,8 @@
 #define REG16_PROX_RAW			0x83
 #define REG16_PROX_DATA			0x84
 #define REG16_ADDRESS			0x85
+#define REG16_VIS_DATA			0x86
+#define REG16_IR_DATA			0x87
 
 #define CMD_APP_VERSION			0xF6
 #define CMD_BOOTLOADER_VERSION		0xF7
@@ -780,7 +783,7 @@ static ssize_t passthru_enable_store(struct device *dev, struct device_attribute
 }
 
 /* read prox value */
-static int read_prox_raw(struct glasshub_data *glasshub, uint16_t *pProxData)
+static int read_prox_raw_l(struct glasshub_data *glasshub, uint16_t *pProxData)
 {
 	int rc;
 	unsigned data;
@@ -808,17 +811,26 @@ static ssize_t proxraw_show(struct device *dev, struct device_attribute *attr, c
 /* show raw IR value */
 static ssize_t ir_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	/* TODO implement this!!! */
-	unsigned data = 0xffff;
-	return sprintf(buf, "%u\n", data);
+	return show_reg(dev, buf, REG16_IR_DATA);
 }
 
 /* show raw visible light value */
-static ssize_t vis_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t visible_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	/* TODO implement this!!! */
-	unsigned data = 0xffff;
-	return sprintf(buf, "%u\n", data);
+	return show_reg(dev, buf, REG16_VIS_DATA);
+}
+
+/* show ambient enable */
+static ssize_t ambient_enable_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show_reg(dev, buf, REG_AMBIENT_ENABLE);
+}
+
+/* set ambient enable */
+static ssize_t ambient_enable_store(struct device *dev, struct device_attribute *attr, const char *buf,
+		size_t count)
+{
+	return store_reg(dev, buf, count, REG_AMBIENT_ENABLE, 0, 1, NULL);
 }
 
 /* show don/doff threshold value */
@@ -901,7 +913,7 @@ static ssize_t calibrate_store(struct device *dev,
 				msleep(35);
 
 				/* read raw prox value */
-				rc = read_prox_raw(glasshub, &temp);
+				rc = read_prox_raw_l(glasshub, &temp);
 				if (rc) break;
 
 				/* read raw prox value and add to running sum */
@@ -1607,7 +1619,8 @@ static DEVICE_ATTR(driver_version, DEV_MODE_RO, driver_version_show, NULL);
 static DEVICE_ATTR(passthru_enable, DEV_MODE_RW, passthru_enable_show, passthru_enable_store);
 static DEVICE_ATTR(proxraw, DEV_MODE_RO, proxraw_show, NULL);
 static DEVICE_ATTR(proxmin, DEV_MODE_RO, proxmin_show, NULL);
-static DEVICE_ATTR(vis, DEV_MODE_RO, vis_show, NULL);
+static DEVICE_ATTR(ambient_enable, DEV_MODE_RW, ambient_enable_show, ambient_enable_store);
+static DEVICE_ATTR(visible, DEV_MODE_RO, visible_show, NULL);
 static DEVICE_ATTR(ir, DEV_MODE_RO, ir_show, NULL);
 static DEVICE_ATTR(don_doff_enable, DEV_MODE_RW, don_doff_enable_show, don_doff_enable_store);
 static DEVICE_ATTR(don_doff, DEV_MODE_RO, don_doff_show, NULL);
@@ -1635,7 +1648,8 @@ static struct attribute *attrs[] = {
 	&dev_attr_proxraw.attr,
 	&dev_attr_proxmin.attr,
 	&dev_attr_ir.attr,
-	&dev_attr_vis.attr,
+	&dev_attr_visible.attr,
+	&dev_attr_ambient_enable.attr,
 	&dev_attr_don_doff_enable.attr,
 	&dev_attr_don_doff.attr,
 	&dev_attr_don_doff_threshold.attr,
