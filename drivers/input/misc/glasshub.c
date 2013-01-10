@@ -37,7 +37,7 @@
 
 /* driver name/version */
 #define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.8"
+#define DRIVER_VERSION "0.9"
 
 /* minimum MCU firmware version required for this driver */
 #define MINIMUM_MCU_VERSION		12
@@ -89,10 +89,13 @@
 #define CMD_FLASH			0xF9
 #define CMD_BOOT			0xFA
 
-/* interrupt sources */
+/* interrupt sources in STATUS register */
 #define IRQ_PASSTHRU			0b00000001
 #define IRQ_WINK			0b00000010
 #define IRQ_DON_DOFF			0b00000100
+
+/* status flags in STATUS register */
+#define STATUS_OVERFLOW			0b10000000
 
 /* device ID */
 #define GLASSHUB_PART_ID		0xbb
@@ -149,13 +152,19 @@
 /* number of samples to take for calibration mean */
 #define NUM_CALIBRATION_SAMPLES		3
 
-/* number of samples in prox data buffer */
-#define PROX_QUEUE_SZ			64
+/* number of samples in prox data buffer, must be a power of 2 */
+#define PROX_QUEUE_SZ			128
+
+/* expected prox sample interval in nanoseconds */
 #define PROX_INTERVAL			(1000000000LL / 32)
 
-/* interval for averaging sample rate, must be power-of-two */
-#define PROX_AVERAGING_INTERVAL		32
+/* Interval for drift correction in sample frames. Uses shift
+ * operation to avoid divide, so the interval must be a power
+ * of 2. Thus, a value of 5 yields an interval of 32 frames or
+ * 1 second at 32 Hz.
+ */
 #define PROX_AVERAGING_SHIFT		5
+#define PROX_AVERAGING_INTERVAL		(1 << PROX_AVERAGING_SHIFT)
 
 /* flags and mask for prox meta data */
 #define PROX_DATA_MASK			0x7fff
@@ -571,27 +580,8 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 	rc = _i2c_read_reg8(glasshub, REG_STATUS, &status);
 	if (rc) goto Error;
 
-	/* process don/doff */
-	if (status & IRQ_DON_DOFF) {
-		rc = _i2c_read_reg8(glasshub, REG_DON_DOFF, &glasshub->don_doff_state);
-		if (rc) goto Error;
-		dev_info(&glasshub->i2c_client->dev, "%s: don/doff state = %u\n",
-				__FUNCTION__, glasshub->don_doff_state);
-		sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "don_doff");
-	}
-
-	/* process wink signal */
-	if (status & IRQ_WINK) {
-		dev_info(&glasshub->i2c_client->dev, "%s: wink signal received\n",
-				__FUNCTION__);
-		sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "wink");
-
-		/* optimization: force read of prox data when wink is received */
-		status |= IRQ_PASSTHRU;
-	}
-
 	/* process prox data */
-	while (status & IRQ_PASSTHRU) {
+	while (status & (IRQ_PASSTHRU | IRQ_WINK)) {
 		unsigned value = 0;
 
 		/* read value */
@@ -630,8 +620,8 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 			mask = PROX_DATA_MASK;
 		}
 
-		/* if passthru enabled, backdate timestamps */
-		if (test_and_clear_bit(FLAG_PASSTHRU_STARTED, &glasshub->flags)) {
+		/* if prox data is not contiguous, start from current timestamp */
+		if (status & STATUS_OVERFLOW || (glasshub->last_timestamp == 0)) {
 			glasshub->last_timestamp = timestamp - prox_count * glasshub->average_delta;
 			glasshub->start_timestamp = 0;
 		}
@@ -677,6 +667,22 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 
 		/* wake up user space */
 		wake_up_interruptible(&prox_read_wait);
+	}
+
+	/* process don/doff */
+	if (status & IRQ_DON_DOFF) {
+		rc = _i2c_read_reg8(glasshub, REG_DON_DOFF, &glasshub->don_doff_state);
+		if (rc) goto Error;
+		dev_info(&glasshub->i2c_client->dev, "%s: don/doff state = %u\n",
+				__FUNCTION__, glasshub->don_doff_state);
+		sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "don_doff");
+	}
+
+	/* process wink signal */
+	if (status & IRQ_WINK) {
+		dev_info(&glasshub->i2c_client->dev, "%s: wink signal received\n",
+				__FUNCTION__);
+		sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "wink");
 	}
 
 	mutex_unlock(&glasshub->device_lock);
