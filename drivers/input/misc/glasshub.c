@@ -72,6 +72,7 @@
 #define REG_WINK_STATUS			16
 #define REG_DEBUG			17
 #define REG_AMBIENT_ENABLE		18
+#define REG_FRAME_COUNT			19
 
 /* 16-bit registers */
 #define REG16_DETECTOR_BIAS		0x80
@@ -111,9 +112,8 @@
 #define FLAG_DEVICE_BOOTED		1
 #define FLAG_FLASH_MODE			2
 #define FLAG_SYSFS_CREATED		3
-#define FLAG_PASSTHRU_STARTED		4
-#define FLAG_DEVICE_DISABLED		5
-#define FLAG_WINK_FLAG_ENABLE		6
+#define FLAG_DEVICE_DISABLED		4
+#define FLAG_WINK_FLAG_ENABLE		5
 
 /* flags for device permissions */
 #define DEV_MODE_RO (S_IRUSR | S_IRGRP)
@@ -261,6 +261,7 @@ struct glasshub_data {
 	uint8_t bootloader_version;
 	uint8_t app_version_major;
 	uint8_t app_version_minor;
+	int debug;
 };
 
 struct glasshub_data *glasshub_private = NULL;
@@ -598,6 +599,15 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 		}
 		++glasshub->sample_count;
 
+		/* DEBUG: read frame counter */
+		if (glasshub->debug && (prox_count == 0))
+		{
+			unsigned frame_count;
+			rc = _i2c_read_reg(glasshub, REG_FRAME_COUNT, &frame_count);
+			if (rc) goto Error;
+			printk("%s: Frame counter = %u\n", __func__, frame_count);
+		}
+
 		/* Buffer up data (and drop data that exceeds our buffer
 		 * length). Note that when the high bit is set, there is
 		 * no more data. This mechanism saves us from doing another
@@ -615,6 +625,10 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 	if (prox_count) {
 		uint16_t mask = PROX_DATA_MASK_NO_WINK_FLAG;
 
+		if (glasshub->debug) {
+			printk("%s: Read %d packets\n", __func__, prox_count);
+		}
+
 		/* should we mask the wink flag bit? */
 		if (test_bit(FLAG_WINK_FLAG_ENABLE, &glasshub->flags)) {
 			mask = PROX_DATA_MASK;
@@ -624,6 +638,9 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 		if (status & STATUS_OVERFLOW || (glasshub->last_timestamp == 0)) {
 			glasshub->last_timestamp = timestamp - prox_count * glasshub->average_delta;
 			glasshub->start_timestamp = 0;
+			if (glasshub->debug) {
+				printk("%s: Resync @ %lld\n", __func__, glasshub->start_timestamp);
+			}
 		}
 
 		/* copy data to FIFO, filling in timestamps */
@@ -633,6 +650,9 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 			glasshub->last_timestamp += glasshub->average_delta;
 			rec.timestamp = glasshub->last_timestamp;
 			kfifo_put(&prox_fifo, &rec);
+			if (glasshub->debug && (i == 0)) {
+				printk("%s: First sample in packet @ %lld\n", __func__, glasshub->last_timestamp);
+			}
 		}
 
 		/* calculate average sample rate */
@@ -648,22 +668,12 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 					glasshub->start_timestamp = timestamp;
 					glasshub->count_for_average = 0;
 				}
-
-				/* check for drift */
-				drift = timestamp - glasshub->last_timestamp;
-				if ((drift < -PROX_INTERVAL) || (drift > PROX_INTERVAL)) {
-					dev_warn(&glasshub->i2c_client->dev,
-							"Proximity data drift exceeds one sample: %lld\n",
-							drift);
-					glasshub->last_timestamp = glasshub->last_timestamp + (drift >> 5);
-				}
 			}
 
 
 		} else {
 			glasshub->start_timestamp = 0;
 		}
-
 
 		/* wake up user space */
 		wake_up_interruptible(&prox_read_wait);
@@ -711,14 +721,13 @@ static ssize_t show_reg(struct device *dev, char *buf, uint8_t reg)
 
 /* common routine to set an I2C register from userspace */
 static ssize_t store_reg(struct device *dev, const char *buf, size_t count,
-		uint8_t reg, uint16_t min, uint16_t max, unsigned long *pValue)
+		uint8_t reg, uint16_t min, uint16_t max)
 {
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 	unsigned long value = 0;
 	if (!kstrtoul(buf, 10, &value)) {
 		value = (value < min) ? min : value;
 		value = (value > max) ? max : value;
-		if (pValue) *pValue = value;
 		mutex_lock(&glasshub->device_lock);
 		if (boot_device_l(glasshub) == 0) {
 			_i2c_write_reg(glasshub, reg, value);
@@ -764,7 +773,7 @@ static ssize_t don_doff_enable_show(struct device *dev, struct device_attribute 
 static ssize_t don_doff_enable_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_ENABLE_DON_DOFF, 0, 1, NULL);
+	return store_reg(dev, buf, count, REG_ENABLE_DON_DOFF, 0, 1);
 }
 
 /* show prox passthrough mode */
@@ -777,15 +786,7 @@ static ssize_t passthru_enable_show(struct device *dev, struct device_attribute 
 static ssize_t passthru_enable_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	ssize_t ret;
-	unsigned long value;
-	struct glasshub_data *glasshub = dev_get_drvdata(dev);
-
-	ret = store_reg(dev, buf, count, REG_ENABLE_PASSTHRU, 0, 1, &value);
-	if (value) {
-		set_bit(FLAG_PASSTHRU_STARTED, &glasshub->flags);
-	}
-	return ret;
+	return store_reg(dev, buf, count, REG_ENABLE_PASSTHRU, 0, 1);
 }
 
 /* read prox value */
@@ -836,7 +837,7 @@ static ssize_t ambient_enable_show(struct device *dev, struct device_attribute *
 static ssize_t ambient_enable_store(struct device *dev, struct device_attribute *attr, const char *buf,
 		size_t count)
 {
-	return store_reg(dev, buf, count, REG_AMBIENT_ENABLE, 0, 1, NULL);
+	return store_reg(dev, buf, count, REG_AMBIENT_ENABLE, 0, 1);
 }
 
 /* show don/doff threshold value */
@@ -850,7 +851,7 @@ static ssize_t don_doff_threshold_show(struct device *dev, struct device_attribu
 static ssize_t don_doff_threshold_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG16_DON_DOFF_THRESH, 1, 5000, NULL);
+	return store_reg(dev, buf, count, REG16_DON_DOFF_THRESH, 1, 5000);
 }
 
 /* show don/doff hysteresis value */
@@ -864,7 +865,7 @@ static ssize_t don_doff_hysteresis_show(struct device *dev, struct device_attrib
 static ssize_t don_doff_hysteresis_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_DON_DOFF_HYSTERESIS, 1, 255, NULL);
+	return store_reg(dev, buf, count, REG_DON_DOFF_HYSTERESIS, 1, 255);
 }
 
 /* show IR LED drive value */
@@ -877,7 +878,7 @@ static ssize_t led_drive_show(struct device *dev, struct device_attribute *attr,
 static ssize_t led_drive_store(struct device *dev, struct device_attribute *attr, const char *buf,
 		size_t count)
 {
-	return store_reg(dev, buf, count, REG_LED_DRIVE, 0, 7, NULL);
+	return store_reg(dev, buf, count, REG_LED_DRIVE, 0, 7);
 }
 
 /* calibrate IR LED drive levels */
@@ -1028,7 +1029,7 @@ static ssize_t wink_enable_show(struct device *dev, struct device_attribute *att
 static ssize_t wink_enable_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_ENABLE_WINK, 0, 1, NULL);
+	return store_reg(dev, buf, count, REG_ENABLE_WINK, 0, 1);
 }
 
 /* show wink_flag_enable value */
@@ -1071,7 +1072,7 @@ static ssize_t wink_inhibit_show(struct device *dev, struct device_attribute *at
 static ssize_t wink_inhibit_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_WINK_INHIBIT, 1, 255, NULL);
+	return store_reg(dev, buf, count, REG_WINK_INHIBIT, 1, 255);
 }
 
 /* show detector gain */
@@ -1084,7 +1085,7 @@ static ssize_t detector_gain_show(struct device *dev, struct device_attribute *a
 static ssize_t detector_gain_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_DETECTOR_GAIN, 0x01, 0x80, NULL);
+	return store_reg(dev, buf, count, REG_DETECTOR_GAIN, 0x01, 0x80);
 }
 
 /* show detector bias */
@@ -1097,7 +1098,7 @@ static ssize_t detector_bias_show(struct device *dev, struct device_attribute *a
 static ssize_t detector_bias_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG16_DETECTOR_BIAS, 1, 5000, NULL);
+	return store_reg(dev, buf, count, REG16_DETECTOR_BIAS, 1, 5000);
 }
 
 /* show last error code from device */
@@ -1107,16 +1108,16 @@ static ssize_t error_code_show(struct device *dev, struct device_attribute *attr
 }
 
 /* show debug value */
-static ssize_t debug_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t mcu_debug_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return show_reg(dev, buf, REG_DEBUG);
 }
 
 /* write debug value */
-static ssize_t debug_store(struct device *dev, struct device_attribute *attr,
+static ssize_t mcu_debug_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_DEBUG, 0, 255, NULL);
+	return store_reg(dev, buf, count, REG_DEBUG, 0, 255);
 }
 
 /* show disable value */
@@ -1618,6 +1619,25 @@ static ssize_t sample_count_show(struct device *dev, struct device_attribute *at
 	return sprintf(buf, "%lu\n", glasshub->sample_count);
 }
 
+/* show debug value */
+static ssize_t debug_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	return sprintf(buf, "%d\n", glasshub->debug);
+}
+
+/* write debug value */
+static ssize_t debug_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	unsigned long value = 0;
+	if (!kstrtoul(buf, 10, &value)) {
+		glasshub->debug = value ? 1 : 0;
+	}
+	return count;
+}
+
 static DEVICE_ATTR(update_fw_enable, DEV_MODE_RW, update_fw_enable_show, update_fw_enable_store);
 static DEVICE_ATTR(version, DEV_MODE_RO, version_show, NULL);
 static DEVICE_ATTR(bootloader_version, DEV_MODE_RO, bootloader_version_show, NULL);
@@ -1642,12 +1662,13 @@ static DEVICE_ATTR(wink_inhibit, DEV_MODE_RW, wink_inhibit_show, wink_inhibit_st
 static DEVICE_ATTR(wink_flag_enable, DEV_MODE_RW, wink_flag_enable_show, wink_flag_enable_store);
 static DEVICE_ATTR(detector_gain, DEV_MODE_RW, detector_gain_show, detector_gain_store);
 static DEVICE_ATTR(detector_bias, DEV_MODE_RW, detector_bias_show, detector_bias_store);
-static DEVICE_ATTR(debug, DEV_MODE_RW, debug_show, debug_store);
+static DEVICE_ATTR(mcu_debug, DEV_MODE_RW, mcu_debug_show, mcu_debug_store);
 static DEVICE_ATTR(error_code, DEV_MODE_RO, error_code_show, NULL);
 static DEVICE_ATTR(irq, DEV_MODE_RO, irq_show, NULL);
 static DEVICE_ATTR(flash_status, DEV_MODE_RO, flash_status_show, NULL);
 static DEVICE_ATTR(sample_count, DEV_MODE_RO, sample_count_show, NULL);
 static DEVICE_ATTR(disable, DEV_MODE_RW, disable_show, disable_store);
+static DEVICE_ATTR(debug, DEV_MODE_RW, debug_show, debug_store);
 
 static struct attribute *attrs[] = {
 	&dev_attr_passthru_enable.attr,
@@ -1670,7 +1691,7 @@ static struct attribute *attrs[] = {
 	&dev_attr_wink_flag_enable.attr,
 	&dev_attr_detector_gain.attr,
 	&dev_attr_detector_bias.attr,
-	&dev_attr_debug.attr,
+	&dev_attr_mcu_debug.attr,
 	&dev_attr_error_code.attr,
 	&dev_attr_sample_count.attr,
 	NULL
@@ -1688,6 +1709,7 @@ static struct attribute *bootmode_attrs[] = {
 	&dev_attr_flash_status.attr,
 	&dev_attr_irq.attr,
 	&dev_attr_disable.attr,
+	&dev_attr_debug.attr,
 	NULL
 };
 
