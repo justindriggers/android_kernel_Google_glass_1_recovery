@@ -1072,7 +1072,7 @@ static struct omap_uart_port_info omap_serial_port_info[] __initdata = {
                 .dma_rx_poll_rate = DEFAULT_RXDMA_POLLRATE,
                 .dma_rx_timeout = DEFAULT_RXDMA_TIMEOUT,
                 .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
-                .wer = 0,
+                .wer = (OMAP_UART_WER_TX | OMAP_UART_WER_RX | OMAP_UART_WER_CTS),
         },
 };
 
