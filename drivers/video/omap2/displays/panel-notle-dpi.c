@@ -77,6 +77,7 @@ typedef enum {
         V6_HOG      = 6,
         V1_EVT1     = 1,
         V1_EVT2     = 2,
+        V1_EVT3     = 3,
 } notle_version;
 
 enum {
@@ -335,7 +336,8 @@ static ssize_t dump_regs(struct notle_drv_data *notle_data,
         *buf = '\0';
         if (version == V6_HOG ||
             version == V1_EVT1 ||
-            version == V1_EVT2) {
+            version == V1_EVT2 ||
+            version == V1_EVT3) {
           for (i = 0; i < sizeof(ice40_regs); ++i) {
             val = ice40_read_register(ice40_regs[i]);
             if (val < 0) {
@@ -452,6 +454,7 @@ static ssize_t colormix_store(struct notle_drv_data *notle_data,
             case V6_HOG:
             case V1_EVT1:
             case V1_EVT2:
+            case V1_EVT3:
               led_config_to_linecuts(notle_data->dssdev, &led_config,
                                      &red, &green, &blue);
               if (ice40_set_backlight(1, red, green, blue)) {
@@ -503,6 +506,7 @@ static ssize_t testpattern_store(struct notle_drv_data *notle_data,
           case V6_HOG:
           case V1_EVT1:
           case V1_EVT2:
+          case V1_EVT3:
                 i = ice40_read_register(ICE40_PIPELINE);
                 if (i < 0) {
                         printk(KERN_ERR LOG_TAG "Failed to testpattern_store: "
@@ -556,6 +560,7 @@ static ssize_t testmono_store(struct notle_drv_data *notle_data,
           case V6_HOG:
           case V1_EVT1:
           case V1_EVT2:
+          case V1_EVT3:
                 value = ice40_read_register(ICE40_BACKLIGHT);
                 if (value < 0) {
                         printk(KERN_ERR LOG_TAG "Failed to testmono_store: "
@@ -592,7 +597,8 @@ static ssize_t forcer_show(struct notle_drv_data *notle_data, char *buf) {
 
         if (version != V6_HOG &&
             version != V1_EVT1 &&
-            version != V1_EVT2) {
+            version != V1_EVT2 &&
+            version != V1_EVT3) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -613,7 +619,8 @@ static ssize_t forcer_store(struct notle_drv_data *notle_data,
 
         if (version != V6_HOG &&
             version != V1_EVT1 &&
-            version != V1_EVT2) {
+            version != V1_EVT2 &&
+            version != V1_EVT3) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -650,7 +657,8 @@ static ssize_t forceg_show(struct notle_drv_data *notle_data, char *buf) {
 
         if (version != V6_HOG &&
             version != V1_EVT1 &&
-            version != V1_EVT2) {
+            version != V1_EVT2 &&
+            version != V1_EVT3) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -671,7 +679,8 @@ static ssize_t forceg_store(struct notle_drv_data *notle_data,
 
         if (version != V6_HOG &&
             version != V1_EVT1 &&
-            version != V1_EVT2) {
+            version != V1_EVT2 &&
+            version != V1_EVT3) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -708,7 +717,8 @@ static ssize_t forceb_show(struct notle_drv_data *notle_data, char *buf) {
 
         if (version != V6_HOG &&
             version != V1_EVT1 &&
-            version != V1_EVT2) {
+            version != V1_EVT2 &&
+            version != V1_EVT3) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -729,7 +739,8 @@ static ssize_t forceb_store(struct notle_drv_data *notle_data,
 
         if (version != V6_HOG &&
             version != V1_EVT1 &&
-            version != V1_EVT2) {
+            version != V1_EVT2 &&
+            version != V1_EVT3) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -766,7 +777,8 @@ static ssize_t cpsel_show(struct notle_drv_data *notle_data, char *buf) {
 
         if (version != V6_HOG &&
             version != V1_EVT1 &&
-            version != V1_EVT2) {
+            version != V1_EVT2 &&
+            version != V1_EVT3) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -787,7 +799,8 @@ static ssize_t cpsel_store(struct notle_drv_data *notle_data,
 
         if (version != V6_HOG &&
             version != V1_EVT1 &&
-            version != V1_EVT2) {
+            version != V1_EVT2 &&
+            version != V1_EVT3) {
                 printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
                        version);
                 return -EINVAL;
@@ -830,6 +843,7 @@ static ssize_t mono_show(struct notle_drv_data *notle_data, char *buf) {
             case V6_HOG:
             case V1_EVT1:
             case V1_EVT2:
+            case V1_EVT3:
               val = ice40_read_register(ICE40_BACKLIGHT);
               if (val < 0) {
                 printk(KERN_ERR LOG_TAG "Failed to read iCE40 register: "
@@ -868,6 +882,7 @@ static ssize_t mono_store(struct notle_drv_data *notle_data,
             case V6_HOG:
             case V1_EVT1:
             case V1_EVT2:
+            case V1_EVT3:
               r = ice40_read_register(ICE40_BACKLIGHT);
               if (r < 0) {
                 printk(KERN_ERR LOG_TAG "Failed to read iCE40 register: "
@@ -929,6 +944,7 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
             case V6_HOG:
             case V1_EVT1:
             case V1_EVT2:
+            case V1_EVT3:
               if (led_config.brightness) {
                 led_config_to_linecuts(notle_data->dssdev, &led_config,
                                        &r, &g, &b);
@@ -1366,6 +1382,7 @@ static int fpga_read_revision(void) {
         case V6_HOG:
         case V1_EVT1:
         case V1_EVT2:
+        case V1_EVT3:
                 if ((r = ice40_read_register(ICE40_REVISION)) < 0) {
                         printk(KERN_ERR LOG_TAG "Failed to read iCE40 FPGA config: %i\n", r);
                         break;
@@ -1479,7 +1496,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
 
         for (i = 0; i < ARRAY_SIZE(panel_init_regs); ++i) {
           if (panel_init_regs[i].reg == REG_DELAY) {
-            if (version == V1_EVT2) {
+            if (version == V1_EVT2 || version == V1_EVT3) {
               r = ice40_write_register(ICE40_LCOS, ICE40_LCOS_DISP_ENB);
               if (r) {
                 printk(KERN_ERR LOG_TAG "Failed to panel_enable\n");
@@ -1530,6 +1547,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
           case V6_HOG:
           case V1_EVT1:
           case V1_EVT2:
+          case V1_EVT3:
             ice40_write_register(ICE40_PIPELINE, ice40_defaults.pipeline);
             ice40_write_register(ICE40_BACKLIGHT, ice40_defaults.backlight);
             break;
@@ -1552,6 +1570,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
             case V6_HOG:
             case V1_EVT1:
             case V1_EVT2:
+            case V1_EVT3:
                   msleep(1);
                   led_config_to_linecuts(dssdev, &led_config, &r, &g, &b);
                   ice40_set_backlight(1, r, g, b);
@@ -1595,6 +1614,7 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
           case V6_HOG:
           case V1_EVT1:
           case V1_EVT2:
+          case V1_EVT3:
             /* Don't change the color mix, just disable the backlight. */
             if (ice40_set_backlight(0, -1, -1, -1)) {
               printk(KERN_ERR LOG_TAG "Failed to disable iCE40 FPGA LED_EN\n");
@@ -1621,7 +1641,7 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
         }
 
         /* Disable DISP_ENB */
-        if (version == V1_EVT2) {
+        if (version == V1_EVT2 || version == V1_EVT3) {
           ice40_write_register(ICE40_LCOS, 0x0);
         } else if (panel_data->panel_disable) {
           panel_data->panel_disable();

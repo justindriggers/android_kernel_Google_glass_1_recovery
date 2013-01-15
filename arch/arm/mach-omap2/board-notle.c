@@ -194,7 +194,6 @@ static void notle_version_init(void)
         gpio_free(GPIO_BOARD_ID0);
         gpio_free(GPIO_BOARD_ID1);
         gpio_free(GPIO_BOARD_ID2);
-
 }
 
 
@@ -208,6 +207,8 @@ static char * notle_version_str(notle_version board_ver)
                 return "V1 EVT1";
         case V1_EVT2:
                 return "V1 EVT2";
+        case V1_EVT3:
+                return "V1 EVT3";
         default:
                 return "UNVERSIONED";
         }
@@ -307,6 +308,10 @@ notle_get_gpio(int gpio_index)
         ret = notle_gpio_board_evt1[gpio_index];
         break;
     case V1_EVT2:
+        ret = notle_gpio_board_evt2[gpio_index];
+        break;
+    case V1_EVT3:
+        // Note(petermalkin): electically EVT3 is the same as EVT2
         ret = notle_gpio_board_evt2[gpio_index];
         break;
     default:
@@ -544,7 +549,7 @@ int __init notle_dpi_init(void)
                 return r;
         }
 
-        if (NOTLE_VERSION == V1_EVT2) {
+        if (NOTLE_VERSION == V1_EVT2 || NOTLE_VERSION == V1_EVT3) {
                 struct panel_notle_data *panel_data = &panel_notle;
 
                 panel_data->gpio_fpga_cdone = notle_get_gpio(GPIO_FPGA_CDONE_INDEX);
@@ -574,7 +579,7 @@ int __init notle_dpi_init(void)
         }
 
         if (NOTLE_VERSION == V1_HOG || NOTLE_VERSION == V1_EVT1 ||
-            NOTLE_VERSION == V1_EVT2) {
+            NOTLE_VERSION == V1_EVT2 || NOTLE_VERSION == V1_EVT3) {
           spi_register_board_info(ice40_spi_board_info,
                                   ARRAY_SIZE(ice40_spi_board_info));
         }
@@ -1735,7 +1740,7 @@ static void __init notle_i2c_irq_fixup(void)
 
     // XXX TODO(jscarr) REMOVE this when pre EVT2 units are destroyed
     // first batch of evt2 had prox_int on blink_int
-    if (NOTLE_VERSION == V1_EVT2) {
+    if (NOTLE_VERSION == V1_EVT2 || NOTLE_VERSION == V1_EVT3) {
         pr_err("Forcing prox_int to %d instead of %d\n", gpio_blink, gpio_prox); 
         gpio_prox = gpio_blink;
     }
@@ -1791,6 +1796,7 @@ static int __init notle_i2c_init(void)
 
 		/* setup the charger/battery platform data based on board revision */
 		switch (NOTLE_VERSION) {
+            case V1_EVT3:
 			case V1_EVT2:
 				notle_charger_data.supplied_to = notle_charger_supplicants_evt2;
 				notle_charger_data.num_supplicants =
@@ -1817,6 +1823,7 @@ static int __init notle_i2c_init(void)
           case V1_HOG:
           case V1_EVT1:
           case V1_EVT2:
+          case V1_EVT3:
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
             synaptics_f11_data.flip_X = false;
             synaptics_f11_data.flip_Y = true;
@@ -2037,7 +2044,7 @@ static int notle_gps_init(void) {
         }
 
         /* EVT2 added the GPS_AWAKE connection, was NC in EVT1 */
-        if (NOTLE_VERSION == V1_EVT2) {
+        if (NOTLE_VERSION == V1_EVT2 || NOTLE_VERSION == V1_EVT3) {
             r = gpio_request_one(GPIO_GPS_AWAKE_EVT2, GPIOF_IN, "gps_awake");
             if (r) {
                     pr_err("Failed to get gps_awake gpio\n");
@@ -2200,6 +2207,7 @@ static void __init notle_init(void)
                     OMAP4_CTRL_MODULE_PAD_WKUP_CONTROL_USIMIO);
             break;
 
+        case V1_EVT3:
         case V1_EVT2:
             omap_emif_setup_device_details(&emif_devices_evt2, &emif_devices_evt2);
             omap4_mux_init(evt2_board_mux, evt2_board_wkup_mux, package);

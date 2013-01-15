@@ -111,6 +111,7 @@ typedef enum {
         UNVERSIONED = 7,
         V1_EVT1     = 1,
         V1_EVT2     = 2,
+        V1_EVT3     = 3,
         V1_HOG      = 6,
 } notle_version;
 
