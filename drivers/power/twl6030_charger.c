@@ -49,6 +49,8 @@
 #define CHARGERUSB_CTRLLIMIT2             0x10
 #define ANTICOLLAPSE_CTRL1                0x11
 #define ANTICOLLAPSE_CTRL2                0x12
+#define LED_PWM_CTRL1                     0x14
+#define LED_PWM_CTRL2                     0x15
 
 #define FG_REG_00                         0x00
 #define FG_REG_01                         0x01
@@ -214,6 +216,12 @@
 #define STS_HW_CONDITIONS                 0x21
 #define STS_USB_ID                        (1 << 2)    /* Level status of USB ID */
 
+enum led_mode {
+	LED_PWM_AUTO = 0x0,
+	LED_PWM_ON = 0x1,
+	LED_PWM_OFF= 0x2,
+};
+
 /* To get VBUS input limit from twl6030_usb */
 #if CONFIG_TWL6030_USB
 extern unsigned int twl6030_get_usb_max_power(struct otg_transceiver *x);
@@ -247,9 +255,26 @@ static const char *twl6030_state[] = {
 #define is_powered(di) (di->state > STATE_FAULT)
 #define is_charging(di) (di->state > STATE_FULL)
 
-/* change the order, not the length to keep this a power of 2 */
-#define VOLTAGE_HISTORY_ORDER 3
-#define VOLTAGE_HISTORY_LENGTH (1<<VOLTAGE_HISTORY_ORDER)
+#define LED_STATE_NONE                   -1
+#define LED_STATE_OFF                     0
+#define LED_STATE_ON                      1
+#define LED_STATE_RAMP                    2
+#define LED_STATE_OSCILLATE               3
+
+struct led_state {
+	int state;          // current state
+	int next;           // state after completing current state
+
+	enum led_mode mode; // cached led mode
+	int cur;            // current value
+	int target;         // target value
+	int base;           // bottom/top of oscillation
+
+	long rate;          // rate to change value
+
+	int led_low;        // configured low led level
+	int led_high;       // configured high led level
+};
 
 struct twl6030_charger_device_info {
 	struct device *dev;
@@ -263,6 +288,10 @@ struct twl6030_charger_device_info {
 	int vbus_online;
 
 	int charge_top_off;
+
+	struct led_state led;
+	struct timer_list led_timer;
+	struct work_struct led_work;
 
 	unsigned int recharge_capacity;
 
@@ -293,6 +322,272 @@ struct twl6030_charger_device_info {
 
 	struct workqueue_struct *wq;
 };
+
+/* Intensity curve: 255*((x/255)**2) over [0, 255] */
+static const int led_curve[] = {
+	0x00,  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,
+	0x00,  0x00,  0x00,  0x00,  0x00,  0x00,  0x01,  0x01,  0x01,  0x01,
+	0x01,  0x01,  0x01,  0x02,  0x02,  0x02,  0x02,  0x02,  0x03,  0x03,
+	0x03,  0x03,  0x04,  0x04,  0x04,  0x04,  0x05,  0x05,  0x05,  0x05,
+	0x06,  0x06,  0x06,  0x07,  0x07,  0x07,  0x08,  0x08,  0x09,  0x09,
+	0x09,  0x0a,  0x0a,  0x0b,  0x0b,  0x0b,  0x0c,  0x0c,  0x0d,  0x0d,
+	0x0e,  0x0e,  0x0f,  0x0f,  0x10,  0x10,  0x11,  0x11,  0x12,  0x12,
+	0x13,  0x13,  0x14,  0x14,  0x15,  0x16,  0x16,  0x17,  0x17,  0x18,
+	0x19,  0x19,  0x1a,  0x1b,  0x1b,  0x1c,  0x1d,  0x1d,  0x1e,  0x1f,
+	0x1f,  0x20,  0x21,  0x21,  0x22,  0x23,  0x24,  0x24,  0x25,  0x26,
+	0x27,  0x28,  0x28,  0x29,  0x2a,  0x2b,  0x2c,  0x2c,  0x2d,  0x2e,
+	0x2f,  0x30,  0x31,  0x32,  0x32,  0x33,  0x34,  0x35,  0x36,  0x37,
+	0x38,  0x39,  0x3a,  0x3b,  0x3c,  0x3d,  0x3e,  0x3f,  0x40,  0x41,
+	0x42,  0x43,  0x44,  0x45,  0x46,  0x47,  0x48,  0x49,  0x4a,  0x4b,
+	0x4c,  0x4d,  0x4f,  0x50,  0x51,  0x52,  0x53,  0x54,  0x55,  0x57,
+	0x58,  0x59,  0x5a,  0x5b,  0x5d,  0x5e,  0x5f,  0x60,  0x61,  0x63,
+	0x64,  0x65,  0x66,  0x68,  0x69,  0x6a,  0x6c,  0x6d,  0x6e,  0x70,
+	0x71,  0x72,  0x74,  0x75,  0x76,  0x78,  0x79,  0x7a,  0x7c,  0x7d,
+	0x7f,  0x80,  0x81,  0x83,  0x84,  0x86,  0x87,  0x89,  0x8a,  0x8c,
+	0x8d,  0x8f,  0x90,  0x92,  0x93,  0x95,  0x96,  0x98,  0x99,  0x9b,
+	0x9c,  0x9e,  0xa0,  0xa1,  0xa3,  0xa4,  0xa6,  0xa8,  0xa9,  0xab,
+	0xac,  0xae,  0xb0,  0xb1,  0xb3,  0xb5,  0xb6,  0xb8,  0xba,  0xbc,
+	0xbd,  0xbf,  0xc1,  0xc3,  0xc4,  0xc6,  0xc8,  0xca,  0xcb,  0xcd,
+	0xcf,  0xd1,  0xd3,  0xd4,  0xd6,  0xd8,  0xda,  0xdc,  0xde,  0xe0,
+	0xe1,  0xe3,  0xe5,  0xe7,  0xe9,  0xeb,  0xed,  0xef,  0xf1,  0xf3,
+	0xf5,  0xf7,  0xf9,  0xfb,  0xfd,  0xff,
+};
+
+/* Convert from output curve to linear intensity. Used to convert the
+ * initial boot value of the led into the linear state machine space.
+ * This inverse table selects the mid-points within ranges of equivalent
+ * mappings */
+static const int led_curve_inverse[] = {
+	0x07,  0x13,  0x19,  0x1d,  0x21,  0x25,  0x29,  0x2c,  0x2e,  0x31,
+	0x33,  0x36,  0x38,  0x3a,  0x3c,  0x3e,  0x40,  0x42,  0x44,  0x46,
+	0x48,  0x4a,  0x4b,  0x4d,  0x4f,  0x50,  0x52,  0x53,  0x55,  0x56,
+	0x58,  0x59,  0x5b,  0x5c,  0x5e,  0x5f,  0x60,  0x62,  0x63,  0x64,
+	0x65,  0x67,  0x68,  0x69,  0x6a,  0x6c,  0x6d,  0x6e,  0x6f,  0x70,
+	0x71,  0x73,  0x74,  0x75,  0x76,  0x77,  0x78,  0x79,  0x7a,  0x7b,
+	0x7c,  0x7d,  0x7e,  0x7f,  0x80,  0x81,  0x82,  0x83,  0x84,  0x85,
+	0x86,  0x87,  0x88,  0x89,  0x8a,  0x8b,  0x8c,  0x8d,  0x8d,  0x8e,
+	0x8f,  0x90,  0x91,  0x92,  0x93,  0x94,  0x94,  0x95,  0x96,  0x97,
+	0x98,  0x99,  0x99,  0x9a,  0x9b,  0x9c,  0x9d,  0x9e,  0x9e,  0x9f,
+	0xa0,  0xa1,  0xa2,  0xa2,  0xa3,  0xa4,  0xa5,  0xa5,  0xa6,  0xa7,
+	0xa8,  0xa8,  0xa9,  0xaa,  0xab,  0xab,  0xac,  0xad,  0xae,  0xae,
+	0xaf,  0xb0,  0xb1,  0xb1,  0xb2,  0xb3,  0xb3,  0xb4,  0xb5,  0xb6,
+	0xb6,  0xb7,  0xb8,  0xb8,  0xb9,  0xba,  0xba,  0xbb,  0xbc,  0xbc,
+	0xbd,  0xbe,  0xbe,  0xbf,  0xc0,  0xc0,  0xc1,  0xc2,  0xc2,  0xc3,
+	0xc4,  0xc4,  0xc5,  0xc6,  0xc6,  0xc7,  0xc8,  0xc8,  0xc9,  0xc9,
+	0xca,  0xcb,  0xcb,  0xcc,  0xcd,  0xcd,  0xce,  0xce,  0xcf,  0xd0,
+	0xd0,  0xd1,  0xd2,  0xd2,  0xd3,  0xd3,  0xd4,  0xd5,  0xd5,  0xd6,
+	0xd6,  0xd7,  0xd8,  0xd8,  0xd9,  0xd9,  0xda,  0xda,  0xdb,  0xdc,
+	0xdc,  0xdd,  0xdd,  0xde,  0xde,  0xdf,  0xe0,  0xe0,  0xe1,  0xe1,
+	0xe2,  0xe2,  0xe3,  0xe4,  0xe4,  0xe5,  0xe5,  0xe6,  0xe6,  0xe7,
+	0xe7,  0xe8,  0xe9,  0xe9,  0xea,  0xea,  0xeb,  0xeb,  0xec,  0xec,
+	0xed,  0xed,  0xee,  0xee,  0xef,  0xf0,  0xf0,  0xf1,  0xf1,  0xf2,
+	0xf2,  0xf3,  0xf3,  0xf4,  0xf4,  0xf5,  0xf5,  0xf6,  0xf6,  0xf7,
+	0xf7,  0xf8,  0xf8,  0xf9,  0xf9,  0xfa,  0xfa,  0xfb,  0xfb,  0xfc,
+	0xfc,  0xfd,  0xfd,  0xfe,  0xfe,  0xff,
+};
+
+static int twl6030_get_pwm_level(void)
+{
+	u8 pwm = 0;
+	twl_i2c_read_u8(TWL6030_MODULE_CHARGER, &pwm, LED_PWM_CTRL1);
+	return led_curve_inverse[pwm];
+}
+
+static void twl6030_set_pwm_level(u8 pwm)
+{
+	twl_i2c_write_u8(TWL6030_MODULE_CHARGER, led_curve[pwm], LED_PWM_CTRL1);
+}
+
+static int twl6030_get_led_mode(void)
+{
+	u8 mode = 0;
+	twl_i2c_read_u8(TWL6030_MODULE_CHARGER, &mode, LED_PWM_CTRL2);
+
+	return mode & 0x3;
+}
+
+static void twl6030_set_led_mode(enum led_mode mode)
+{
+	u8 oldval = 0;
+
+	twl_i2c_read_u8(TWL6030_MODULE_CHARGER, &oldval, LED_PWM_CTRL2);
+	oldval = (oldval & 0xfc) | mode;
+	twl_i2c_write_u8(TWL6030_MODULE_CHARGER, oldval, LED_PWM_CTRL2);
+}
+
+static void twl6030_set_led(struct twl6030_charger_device_info *di,
+		enum led_mode mode, int pwm)
+{
+	if (pwm >= 0) {
+		di->led.cur = pwm;
+		twl6030_set_pwm_level(pwm & 0xff);
+	}
+
+	di->led.mode = mode;
+	twl6030_set_led_mode(mode);
+}
+
+static void twl6030_led_timer(unsigned long data)
+{
+	struct twl6030_charger_device_info *di = (struct twl6030_charger_device_info *) data;
+	queue_work(di->wq, &di->led_work);
+}
+
+/*
+ * Read the hardware state and setup the led state struct to match.
+ */
+static void twl6030_init_led_state(struct twl6030_charger_device_info *di)
+{
+	int pwm, mode;
+
+	pwm = twl6030_get_pwm_level();
+	mode = twl6030_get_led_mode();
+
+	switch (di->led.mode) {
+		case LED_PWM_OFF:
+			di->led.state = LED_STATE_OFF;
+			di->led.cur = pwm;
+			di->led.mode = mode;
+			break;
+
+		case LED_PWM_ON:
+			di->led.state = LED_STATE_ON;
+			di->led.cur = pwm;
+			di->led.mode = mode;
+			break;
+
+		default:
+			// set the state to off, since we don't know if the bootloader left the charger on
+			twl6030_set_led(di, LED_PWM_OFF, pwm);
+			di->led.state = LED_STATE_OFF;
+			break;
+	}
+
+	di->led.next = LED_STATE_NONE;
+	di->led.rate = 0;
+	di->led.target = di->led.cur;
+	di->led.base = 0;
+	di->led.led_low = 0x00;
+	di->led.led_high = 0xff;
+
+	setup_timer(&di->led_timer, twl6030_led_timer, (unsigned long) di);
+}
+
+static void twl6030_led_run(struct twl6030_charger_device_info *di)
+{
+	switch (di->led.state) {
+		case LED_STATE_OFF:
+			twl6030_set_led(di, LED_PWM_OFF, -1);
+
+			if (di->led.next > LED_STATE_NONE) {
+				di->led.state = di->led.next;
+				di->led.next = LED_STATE_NONE;
+				mod_timer(&di->led_timer, msecs_to_jiffies(di->led.rate) + jiffies);
+			}
+			break;
+
+		case LED_STATE_ON:
+			twl6030_set_led(di, LED_PWM_ON, di->led.cur);
+
+			if (di->led.next > LED_STATE_NONE) {
+				di->led.state = di->led.next;
+				di->led.next = LED_STATE_NONE;
+				mod_timer(&di->led_timer, msecs_to_jiffies(di->led.rate) + jiffies);
+			}
+			break;
+
+		case LED_STATE_RAMP:
+			if (di->led.mode != LED_PWM_ON)
+				twl6030_set_led(di, LED_PWM_ON, 0);
+
+			if (di->led.cur < di->led.target) {
+				di->led.cur++;
+				twl6030_set_pwm_level(di->led.cur);
+			} else if (di->led.cur > di->led.target) {
+				di->led.cur--;
+				twl6030_set_pwm_level(di->led.cur);
+			}
+
+			if (di->led.cur == di->led.target) {
+				di->led.state = di->led.next;
+				di->led.next = LED_STATE_NONE;
+			}
+
+			mod_timer(&di->led_timer, msecs_to_jiffies(di->led.rate) + jiffies);
+			break;
+
+		case LED_STATE_OSCILLATE:
+			if (di->led.mode != LED_PWM_ON)
+				twl6030_set_led(di, LED_PWM_ON, 0);
+
+			if (di->led.cur < di->led.target) {
+				di->led.cur++;
+				twl6030_set_pwm_level(di->led.cur);
+			} else if (di->led.cur > di->led.target) {
+				di->led.cur--;
+				twl6030_set_pwm_level(di->led.cur);
+			}
+
+			if (di->led.cur == di->led.target) {
+				int temp = di->led.target;
+				di->led.target = di->led.base;
+				di->led.base = temp;
+			}
+
+			mod_timer(&di->led_timer, msecs_to_jiffies(di->led.rate) + jiffies);
+			break;
+	}
+}
+
+static void twl6030_led_work(struct work_struct *work)
+{
+	struct twl6030_charger_device_info *di = container_of(work,
+			struct twl6030_charger_device_info, led_work);
+	twl6030_led_run(di);
+}
+
+static void twl6030_eval_led_state(struct twl6030_charger_device_info *di)
+{
+	if (is_powered(di)) {
+		if (is_charging(di)) {
+			if (di->led.state != LED_STATE_OSCILLATE) {
+				del_timer_sync(&di->led_timer);
+
+				di->led.state = LED_STATE_OSCILLATE;
+				di->led.target = di->led.led_high;
+				di->led.base = di->led.led_low;
+				di->led.rate = 5;
+
+				twl6030_led_run(di);
+			}
+		} else {
+			if (di->led.state != LED_STATE_ON &&
+					!(di->led.state == LED_STATE_RAMP && di->led.next == LED_STATE_ON
+						&& di->led.target == (di->led.led_high >> 2))) {
+				del_timer_sync(&di->led_timer);
+
+				di->led.state = LED_STATE_RAMP;
+				di->led.target = di->led.led_high >> 2;
+				di->led.rate = 5;
+				di->led.next = LED_STATE_ON;
+
+				twl6030_led_run(di);
+			}
+		}
+	} else {
+		if (di->led.state != LED_STATE_OFF && !(di->led.state == LED_STATE_RAMP
+					&& di->led.next == LED_STATE_OFF && di->led.target == 0x00)) {
+			del_timer_sync(&di->led_timer);
+
+			di->led.state = LED_STATE_RAMP;
+			di->led.target = 0x00;
+			di->led.rate = 5;
+			di->led.next = LED_STATE_OFF;
+
+			twl6030_led_run(di);
+		}
+	}
+}
 
 static struct power_supply *get_battery_power_supply(
 		struct twl6030_charger_device_info *di)
@@ -525,6 +820,7 @@ static void twl6030_start_usb_charger(struct twl6030_charger_device_info *di, in
 		if (ret)
 			goto err;
 	}
+
 	printk("battery: CHARGER ON\n");
 	return;
 
@@ -697,6 +993,7 @@ static void twl6030_determine_charge_state(struct twl6030_charger_device_info *d
 		printk("battery: state %s -> %s\n",
 				twl6030_state[di->state], twl6030_state[newstate]);
 		di->state = newstate;
+		twl6030_eval_led_state(di);
 	}
 }
 
@@ -799,6 +1096,7 @@ static void twl6030_monitor_work(struct work_struct *work)
 			di->charge_top_off = 0;
 			di->state = STATE_FULL;
 			twl6030_stop_usb_charger(di);
+			twl6030_eval_led_state(di);
 		}
 	}
 
@@ -806,10 +1104,57 @@ static void twl6030_monitor_work(struct work_struct *work)
 		printk("battery: drained from full to %d%%, charging again\n", capacity);
 		di->state = STATE_USB;
 		twl6030_start_usb_charger(di, 500);
+		twl6030_eval_led_state(di);
 	}
 
 done:
 	twl6030_determine_charge_state(di);
+}
+
+static ssize_t set_led_high(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	long val;
+	int status = count;
+	struct twl6030_charger_device_info *di = dev_get_drvdata(dev);
+
+	if ((strict_strtol(buf, 10, &val) < 0) || (val < 0)
+			|| (val > 0xff))
+		return -EINVAL;
+	di->led.led_high = val;
+
+	return status;
+}
+
+static ssize_t show_led_high(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct twl6030_charger_device_info *di = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%d\n", di->led.led_high);
+}
+
+static ssize_t set_led_low(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	long val;
+	int status = count;
+	struct twl6030_charger_device_info *di = dev_get_drvdata(dev);
+
+	if ((strict_strtol(buf, 10, &val) < 0) || (val < 0)
+			|| (val > 0xff))
+		return -EINVAL;
+	di->led.led_low = val;
+
+	return status;
+}
+
+static ssize_t show_led_low(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct twl6030_charger_device_info *di = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%d\n", di->led.led_low);
 }
 
 static ssize_t show_vbus_voltage(struct device *dev,
@@ -998,6 +1343,8 @@ static DEVICE_ATTR(charge_current, S_IWUSR | S_IRUGO, show_charge_current,
 static DEVICE_ATTR(min_vbus, S_IWUSR | S_IRUGO, show_min_vbus, set_min_vbus);
 static DEVICE_ATTR(recharge_capacity, S_IWUSR | S_IRUGO, show_recharge_capacity,
 		set_recharge_capacity);
+static DEVICE_ATTR(led_low, S_IWUSR | S_IRUGO, show_led_low, set_led_low);
+static DEVICE_ATTR(led_high, S_IWUSR | S_IRUGO, show_led_high, set_led_high);
 
 static struct attribute *twl6030_charger_attributes[] = {
 	&dev_attr_vbus_voltage.attr,
@@ -1008,6 +1355,8 @@ static struct attribute *twl6030_charger_attributes[] = {
 	&dev_attr_charge_current.attr,
 	&dev_attr_min_vbus.attr,
 	&dev_attr_recharge_capacity.attr,
+	&dev_attr_led_low.attr,
+	&dev_attr_led_high.attr,
 	NULL,
 };
 
@@ -1083,6 +1432,7 @@ static int __devinit twl6030_charger_probe(struct platform_device *pdev)
 		goto usb_failed;
 	}
 
+	INIT_WORK(&di->led_work, twl6030_led_work);
 	INIT_WORK(&di->charge_control_work, twl6030_charge_control_work);
 	INIT_WORK(&di->charge_fault_work, twl6030_charge_fault_work);
 	INIT_DELAYED_WORK_DEFERRABLE(&di->monitor_work, twl6030_monitor_work);
@@ -1143,6 +1493,9 @@ static int __devinit twl6030_charger_probe(struct platform_device *pdev)
 	ret = sysfs_create_group(&pdev->dev.kobj, &twl6030_charger_attr_group);
 	if (ret)
 		dev_err(&pdev->dev, "could not create sysfs files\n");
+
+	/* setup the led state */
+	twl6030_init_led_state(di);
 
 	queue_delayed_work(di->wq, &di->monitor_work, 0);
 
