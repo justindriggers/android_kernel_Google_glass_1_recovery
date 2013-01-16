@@ -37,10 +37,10 @@
 
 /* driver name/version */
 #define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.9"
+#define DRIVER_VERSION "0.10"
 
 /* minimum MCU firmware version required for this driver */
-#define MINIMUM_MCU_VERSION		12
+#define MINIMUM_MCU_VERSION		18
 
 /* experimental MCU firmware version */
 #define EXPERIMENTAL_MCU_VERSION	0x8000
@@ -72,7 +72,6 @@
 #define REG_WINK_STATUS			16
 #define REG_DEBUG			17
 #define REG_AMBIENT_ENABLE		18
-#define REG_FRAME_COUNT			19
 
 /* 16-bit registers */
 #define REG16_DETECTOR_BIAS		0x80
@@ -83,6 +82,8 @@
 #define REG16_ADDRESS			0x85
 #define REG16_VIS_DATA			0x86
 #define REG16_IR_DATA			0x87
+#define REG16_FRAME_COUNT		0x88
+#define REG16_DEBUG			0x89
 
 #define CMD_APP_VERSION			0xF6
 #define CMD_BOOTLOADER_VERSION		0xF7
@@ -153,7 +154,7 @@
 #define NUM_CALIBRATION_SAMPLES		3
 
 /* number of samples in prox data buffer, must be a power of 2 */
-#define PROX_QUEUE_SZ			128
+#define PROX_QUEUE_SZ			(1<<6)
 
 /* expected prox sample interval in nanoseconds */
 #define PROX_INTERVAL			(1000000000LL / 32)
@@ -603,9 +604,9 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 		if (glasshub->debug && (prox_count == 0))
 		{
 			unsigned frame_count;
-			rc = _i2c_read_reg(glasshub, REG_FRAME_COUNT, &frame_count);
+			rc = _i2c_read_reg(glasshub, REG16_FRAME_COUNT, &frame_count);
 			if (rc) goto Error;
-			printk("%s: Frame counter = %u\n", __func__, frame_count);
+			printk("%s: Frame count = %u\n", __func__, frame_count);
 		}
 
 		/* Buffer up data (and drop data that exceeds our buffer
@@ -657,7 +658,6 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 
 		/* calculate average sample rate */
 		if (prox_count == 1) {
-			long long drift;
 			if (glasshub->start_timestamp == 0) {
 				glasshub->start_timestamp = timestamp;
 				glasshub->count_for_average = 0;
@@ -1107,6 +1107,12 @@ static ssize_t error_code_show(struct device *dev, struct device_attribute *attr
 	return show_reg(dev, buf, REG_ERROR_CODE);
 }
 
+/* show frame_count value */
+static ssize_t frame_count_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show_reg(dev, buf, REG16_FRAME_COUNT);
+}
+
 /* show debug value */
 static ssize_t mcu_debug_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -1118,6 +1124,19 @@ static ssize_t mcu_debug_store(struct device *dev, struct device_attribute *attr
 		const char *buf, size_t count)
 {
 	return store_reg(dev, buf, count, REG_DEBUG, 0, 255);
+}
+
+/* show debug value */
+static ssize_t mcu_debug16_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show_reg(dev, buf, REG16_DEBUG);
+}
+
+/* write debug value */
+static ssize_t mcu_debug16_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	return store_reg(dev, buf, count, REG16_DEBUG, 0, 255);
 }
 
 /* show disable value */
@@ -1663,12 +1682,14 @@ static DEVICE_ATTR(wink_flag_enable, DEV_MODE_RW, wink_flag_enable_show, wink_fl
 static DEVICE_ATTR(detector_gain, DEV_MODE_RW, detector_gain_show, detector_gain_store);
 static DEVICE_ATTR(detector_bias, DEV_MODE_RW, detector_bias_show, detector_bias_store);
 static DEVICE_ATTR(mcu_debug, DEV_MODE_RW, mcu_debug_show, mcu_debug_store);
+static DEVICE_ATTR(mcu_debug16, DEV_MODE_RW, mcu_debug16_show, mcu_debug16_store);
 static DEVICE_ATTR(error_code, DEV_MODE_RO, error_code_show, NULL);
 static DEVICE_ATTR(irq, DEV_MODE_RO, irq_show, NULL);
 static DEVICE_ATTR(flash_status, DEV_MODE_RO, flash_status_show, NULL);
 static DEVICE_ATTR(sample_count, DEV_MODE_RO, sample_count_show, NULL);
 static DEVICE_ATTR(disable, DEV_MODE_RW, disable_show, disable_store);
 static DEVICE_ATTR(debug, DEV_MODE_RW, debug_show, debug_store);
+static DEVICE_ATTR(frame_count, DEV_MODE_RO, frame_count_show, NULL);
 
 static struct attribute *attrs[] = {
 	&dev_attr_passthru_enable.attr,
@@ -1692,8 +1713,10 @@ static struct attribute *attrs[] = {
 	&dev_attr_detector_gain.attr,
 	&dev_attr_detector_bias.attr,
 	&dev_attr_mcu_debug.attr,
+	&dev_attr_mcu_debug16.attr,
 	&dev_attr_error_code.attr,
 	&dev_attr_sample_count.attr,
+	&dev_attr_frame_count.attr,
 	NULL
 };
 
