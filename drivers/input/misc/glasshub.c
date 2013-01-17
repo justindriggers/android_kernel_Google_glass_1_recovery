@@ -37,10 +37,10 @@
 
 /* driver name/version */
 #define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.10"
+#define DRIVER_VERSION "0.11"
 
 /* minimum MCU firmware version required for this driver */
-#define MINIMUM_MCU_VERSION		18
+#define MINIMUM_MCU_VERSION		19
 
 /* experimental MCU firmware version */
 #define EXPERIMENTAL_MCU_VERSION	0x8000
@@ -72,6 +72,8 @@
 #define REG_WINK_STATUS			16
 #define REG_DEBUG			17
 #define REG_AMBIENT_ENABLE		18
+#define REG_WINK_MIN			19
+#define REG_WINK_MAX			20
 
 /* 16-bit registers */
 #define REG16_DETECTOR_BIAS		0x80
@@ -1075,6 +1077,32 @@ static ssize_t wink_inhibit_store(struct device *dev, struct device_attribute *a
 	return store_reg(dev, buf, count, REG_WINK_INHIBIT, 1, 255);
 }
 
+/* show wink minimum magnitude */
+static ssize_t wink_min_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show_reg(dev, buf, REG_WINK_MIN);
+}
+
+/* set wink minimum magnitude */
+static ssize_t wink_min_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	return store_reg(dev, buf, count, REG_WINK_MIN, 1, 255);
+}
+
+/* show wink maximum magnitude */
+static ssize_t wink_max_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show_reg(dev, buf, REG_WINK_MAX);
+}
+
+/* set wink maximum magnitude */
+static ssize_t wink_max_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	return store_reg(dev, buf, count, REG_WINK_MAX, 1, 255);
+}
+
 /* show detector gain */
 static ssize_t detector_gain_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -1679,6 +1707,8 @@ static DEVICE_ATTR(wink, DEV_MODE_RO, wink_show, NULL);
 static DEVICE_ATTR(wink_enable, DEV_MODE_RW, wink_enable_show, wink_enable_store);
 static DEVICE_ATTR(wink_inhibit, DEV_MODE_RW, wink_inhibit_show, wink_inhibit_store);
 static DEVICE_ATTR(wink_flag_enable, DEV_MODE_RW, wink_flag_enable_show, wink_flag_enable_store);
+static DEVICE_ATTR(wink_min, DEV_MODE_RW, wink_min_show, wink_min_store);
+static DEVICE_ATTR(wink_max, DEV_MODE_RW, wink_max_show, wink_max_store);
 static DEVICE_ATTR(detector_gain, DEV_MODE_RW, detector_gain_show, detector_gain_store);
 static DEVICE_ATTR(detector_bias, DEV_MODE_RW, detector_bias_show, detector_bias_store);
 static DEVICE_ATTR(mcu_debug, DEV_MODE_RW, mcu_debug_show, mcu_debug_store);
@@ -1709,6 +1739,8 @@ static struct attribute *attrs[] = {
 	&dev_attr_wink.attr,
 	&dev_attr_wink_enable.attr,
 	&dev_attr_wink_inhibit.attr,
+	&dev_attr_wink_min.attr,
+	&dev_attr_wink_max.attr,
 	&dev_attr_wink_flag_enable.attr,
 	&dev_attr_detector_gain.attr,
 	&dev_attr_detector_bias.attr,
