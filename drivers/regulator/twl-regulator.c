@@ -603,6 +603,24 @@ static int twl6030ldo_list_voltage(struct regulator_dev *rdev, unsigned index)
 	return ((info->min_mV + (index * 100)) * 1000);
 }
 
+#ifdef CONFIG_MACH_NOTLE
+/* Warm reset sensitivity bit.  When clear (default it reloads
+ *  the default power on values when a warm reset is applied.
+ *  When set, keeps the voltage configuration settings the same value
+ *  as just before warm reset was applied.
+ *
+ * NOTE(CMM) 2013-01-16  This is done to maintain power to the touchpad
+ *  on the Glass notle architecture as there is a feedthrough condition
+ *  in the Synaptics touchpad component that connects VUSIM and VIO.
+ *  This prevents the touchpad from getting a proper reset upon
+ *  warm power cycle.  The fix to to prevent the drop in voltage
+ *  from 3.0 to 1.x or so whereby the touchpad has a small chance
+ *  of hanging until a cold power cycle clears touchpad state.
+ */
+#define VREG_VOLTAGE_WR_S 0x80
+const char *vreg_hack = "VUSIM";
+#endif
+
 static int
 twl6030ldo_set_voltage(struct regulator_dev *rdev, int min_uV, int max_uV,
 		       unsigned *selector)
@@ -619,6 +637,15 @@ twl6030ldo_set_voltage(struct regulator_dev *rdev, int min_uV, int max_uV,
 	 */
 	vsel = (min_uV/1000 - 1000)/100 + 1;
 	*selector = vsel;
+#ifdef CONFIG_MACH_NOTLE
+	/* NOTE(CMM) Hack - see above note */
+	if (!strcmp(vreg_hack, rdev->desc->name)) {
+		/* Set the write reset sensitivity bit */
+		vsel |= VREG_VOLTAGE_WR_S;
+		printk("%s Setting warm reset sensitivity bit %s",
+		       __func__, rdev->desc->name);
+	}
+#endif
 	return twlreg_write(info, TWL_MODULE_PM_RECEIVER, VREG_VOLTAGE, vsel);
 
 }
@@ -629,6 +656,13 @@ static int twl6030ldo_get_voltage(struct regulator_dev *rdev)
 	int		vsel = twlreg_read(info, TWL_MODULE_PM_RECEIVER,
 								VREG_VOLTAGE);
 
+#ifdef CONFIG_MACH_NOTLE
+	/* NOTE(CMM) Hack - see above note */
+	if (!strcmp(vreg_hack, rdev->desc->name)) {
+		/* Clear the write reset sensitivity bit */
+		vsel &= ~(VREG_VOLTAGE_WR_S);
+	}
+#endif
 	if (vsel < 0)
 		return vsel;
 
