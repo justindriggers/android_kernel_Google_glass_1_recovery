@@ -532,6 +532,8 @@ static int twl6040_is_powered(struct twl6040 *twl6040)
 	u8 ldoctl_exp;
 	u8 lppllctl_exp;
 
+	/* TODO(jscarr) remove temporary logging */
+	dev_info(twl6040->dev, "check twl_is_powered\n");
 	/* NCPCTL expected value: NCP enabled */
 	ncpctl_exp = (TWL6040_TSHUTENA | TWL6040_NCPENA);
 
@@ -566,6 +568,8 @@ static int twl6040_is_powered(struct twl6040 *twl6040)
 		return 0;
 	}
 
+	/* TODO(jscarr) remove temporary logging */
+	dev_info(twl6040->dev, "Yes, twl_is_powered\n");
 	return 1;
 }
 
@@ -579,6 +583,8 @@ static int twl6040_power_up_completion(struct twl6040 *twl6040,
 
 	do {
 		INIT_COMPLETION(twl6040->ready);
+		/* TODO(jscarr) remove temporary logging */
+		dev_info(twl6040->dev, "switch audpwron ON\n");
 		gpio_set_value(twl6040->audpwron, 1);
 		time_left = wait_for_completion_timeout(&twl6040->ready,
 							msecs_to_jiffies(700));
@@ -599,6 +605,8 @@ static int twl6040_power_up_completion(struct twl6040 *twl6040,
 		 * Power on seemingly completed.
 		 * READYINT received, but not in expected state, retry.
 		 */
+		/* TODO(jscarr) remove temporary logging */
+		dev_info(twl6040->dev, "switch audpwron OFF for retry\n");
 		gpio_set_value(twl6040->audpwron, 0);
 		usleep_range(1000, 1500);
 	} while (round++ < 3);
@@ -673,6 +681,8 @@ static int twl6040_power(struct twl6040 *twl6040, int enable)
 	} else {
 		if (gpio_is_valid(audpwron)) {
 			/* use AUDPWRON line */
+			/* TODO(jscarr) remove temporary logging */
+			dev_info(twl6040->dev, "switch audpwron OFF\n");
 			gpio_set_value(audpwron, 0);
 
 			/* power-down sequence latency */
