@@ -83,6 +83,8 @@
 #include <plat/omap-pm.h>
 #include <plat/omap-serial.h>
 
+#include <mach/omap_fiq_debugger.h>
+
 #include <video/omapdss.h>
 #include <video/omap-panel-generic-dpi.h>
 #include <video/omap-panel-tc358762.h>
@@ -1082,11 +1084,18 @@ void __init notle_serial_init(void)
 		ARRAY_SIZE(notle_uart1_pads), &omap_serial_port_info[0]);
 	omap_serial_init_port_pads(1, notle_uart2_pads,
 		ARRAY_SIZE(notle_uart2_pads), &omap_serial_port_info[1]);
-	omap_serial_init_port_pads(2, notle_uart3_pads,
-		ARRAY_SIZE(notle_uart3_pads), &omap_serial_port_info[2]);
 	omap_serial_init_port_pads(3, notle_uart4_pads,
 		ARRAY_SIZE(notle_uart4_pads), &omap_serial_port_info[3]);
 }
+
+/* Initialize FIQ Debugger */
+static int __init board_serial_debug_init(void)
+{
+	/* 3rd UART is now owned by fiq debugger */
+	return omap_serial_debug_init(2, false, true,
+		notle_uart3_pads, ARRAY_SIZE(notle_uart3_pads));
+}
+device_initcall(board_serial_debug_init);
 
 static struct platform_device bcm4330_bluetooth_device = {
 	.name = "bcm4330_bluetooth",
