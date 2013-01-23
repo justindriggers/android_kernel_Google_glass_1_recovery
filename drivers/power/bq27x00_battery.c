@@ -47,6 +47,7 @@
 #define BQ27x00_REG_FLAGS		0x0A
 #define BQ27x00_REG_TTE			0x16
 #define BQ27x00_REG_TTF			0x18
+#define BQ27x00_REG_TTES		0x1c
 #define BQ27x00_REG_TTECP		0x26
 #define BQ27x00_REG_NAC			0x0C /* Nominal available capaciy */
 #define BQ27x00_REG_LMD			0x12 /* Last measured discharge */
@@ -276,7 +277,7 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 		cache.capacity = bq27x00_battery_read_rsoc(di);
 		cache.temperature = bq27x00_read(di, BQ27x00_REG_TEMP, false);
 		cache.time_to_empty = bq27x00_battery_read_time(di, BQ27x00_REG_TTE);
-		cache.time_to_empty_avg = bq27x00_battery_read_time(di, BQ27x00_REG_TTECP);
+		cache.time_to_empty_avg = bq27x00_battery_read_time(di, BQ27x00_REG_TTES);
 		cache.time_to_full = bq27x00_battery_read_time(di, BQ27x00_REG_TTF);
 		cache.charge_full = bq27x00_battery_read_lmd(di);
 		cache.cycle_count = bq27x00_battery_read_cyct(di);
