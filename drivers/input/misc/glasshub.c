@@ -37,7 +37,7 @@
 
 /* driver name/version */
 #define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.11"
+#define DRIVER_VERSION "0.12"
 
 /* minimum MCU firmware version required for this driver */
 #define MINIMUM_MCU_VERSION		19
@@ -276,7 +276,6 @@ static DECLARE_WAIT_QUEUE_HEAD(prox_read_wait);
 static DECLARE_KFIFO(prox_fifo, struct glasshub_data_user, PROX_QUEUE_SZ);
 static atomic_t glasshub_opened = ATOMIC_INIT(0);
 
-static void unregister_device_files(struct glasshub_data *glasshub);
 static int register_device_files(struct glasshub_data *glasshub);
 
 /*
@@ -1204,8 +1203,6 @@ err_out:
 static ssize_t update_fw_data_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count);
 
-static DEVICE_ATTR(update_fw_data, DEV_MODE_WO, NULL, update_fw_data_store);
-
 /* hex converter for parsing .S19 files */
 static int convert_hex(const char c, uint32_t *p)
 {
@@ -1242,16 +1239,10 @@ static void exit_flash_mode_l(struct glasshub_data *glasshub)
 		kfree(glasshub->fw_image);
 		glasshub->fw_image = NULL;
 	}
-	device_remove_file(&glasshub->i2c_client->dev, &dev_attr_update_fw_data);
 	clear_bit(FLAG_FLASH_MODE, &glasshub->flags);
 
 	/* get app version number */
 	get_app_version_l(glasshub);
-
-	/* register run mode sysfs files */
-	if (glasshub->app_version_major != BOOTLOADER_FLASHER) {
-		register_device_files(glasshub);
-	}
 }
 
 /* sysfs node to download device firmware to be flashed */
@@ -1486,13 +1477,6 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 				memset(glasshub->fw_dirty, 0, sizeof(glasshub->fw_dirty));
 			}
 
-			/* unregister device files */
-			unregister_device_files(glasshub);
-
-			rc = device_create_file(&glasshub->i2c_client->dev,
-					&dev_attr_update_fw_data);
-			if (rc) goto unlock;
-
 			glasshub->fw_state = FW_STATE_START;
 			set_bit(FLAG_FLASH_MODE, &glasshub->flags);
 			glasshub->flash_status = FLASH_STATUS_READY;
@@ -1686,6 +1670,7 @@ static ssize_t debug_store(struct device *dev, struct device_attribute *attr,
 }
 
 static DEVICE_ATTR(update_fw_enable, DEV_MODE_RW, update_fw_enable_show, update_fw_enable_store);
+static DEVICE_ATTR(update_fw_data, DEV_MODE_WO, NULL, update_fw_data_store);
 static DEVICE_ATTR(version, DEV_MODE_RO, version_show, NULL);
 static DEVICE_ATTR(bootloader_version, DEV_MODE_RO, bootloader_version_show, NULL);
 static DEVICE_ATTR(driver_version, DEV_MODE_RO, driver_version_show, NULL);
@@ -1761,6 +1746,7 @@ static struct attribute *bootmode_attrs[] = {
 	&dev_attr_version.attr,
 	&dev_attr_driver_version.attr,
 	&dev_attr_update_fw_enable.attr,
+	&dev_attr_update_fw_data.attr,
 	&dev_attr_flash_status.attr,
 	&dev_attr_irq.attr,
 	&dev_attr_disable.attr,
@@ -1906,7 +1892,9 @@ static int register_device_files(struct glasshub_data *glasshub)
 		dev_warn(&glasshub->i2c_client->dev,
 				"%s: All functions except firmware update are disabled\n",
 				__FUNCTION__);
-		goto Exit;
+
+		/* set device disable bit */
+		set_bit(FLAG_DEVICE_DISABLED, &glasshub->flags);
 	}
 
 	/* warn if experimental version */
@@ -1939,18 +1927,6 @@ static int register_device_files(struct glasshub_data *glasshub)
 
 Exit:
 	return rc;
-}
-
-/* unregister device files */
-static void unregister_device_files(struct glasshub_data *glasshub)
-{
-	/* are sysfs files created? */
-	if (test_and_clear_bit(FLAG_SYSFS_CREATED, &glasshub->flags)) {
-		sysfs_remove_group(&glasshub->i2c_client->dev.kobj,&attr_group);
-
-		/* deregister misc driver for prox data */
-		misc_deregister(&glasshub_misc);
-	}
 }
 
 static int glasshub_setup(struct glasshub_data *glasshub) {
