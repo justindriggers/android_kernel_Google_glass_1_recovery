@@ -85,6 +85,8 @@
 
 #include <mach/omap_fiq_debugger.h>
 
+#include <linux/power/bq27x00_battery.h>
+
 #include <video/omapdss.h>
 #include <video/omap-panel-generic-dpi.h>
 #include <video/omap-panel-tc358762.h>
@@ -1534,10 +1536,54 @@ static struct rmi_i2c_platformdata __initdata synaptics_platformdata = {
 };
 #endif
 
+/*
+ * Translate temperatures to compensate for thermistor circuit problem (EVT2).
+ * Precision is limited but should provide accurate values.
+ */
+static int notle_translate_temp(int temperature)
+{
+	if (temperature <= 996)
+		temperature = 0;
+	else if (temperature <= 999)
+		temperature = 50;
+	else if (temperature <= 1003)
+		temperature = 100;
+	else if (temperature <= 1008)
+		temperature = 150;
+	else if (temperature <= 1013)
+		temperature = 200;
+	else if (temperature <= 1019)
+		temperature = 250;
+	else if (temperature <= 1026)
+		temperature = 300;
+	else if (temperature <= 1034)
+		temperature = 350;
+	else if (temperature <= 1044)
+		temperature = 400;
+	else if (temperature <= 1055)
+		temperature = 450;
+	else if (temperature <= 1067)
+		temperature = 500;
+	else if (temperature <= 1080)
+		temperature = 550;
+	else if (temperature <= 1095)
+		temperature = 600;
+	else if (temperature <= 1116)
+		temperature = 650;
+	else
+		temperature = 700;
+
+	return temperature;
+}
+
+/* Gas gauge board specific configuration filled in at board init */
+static struct bq27x00_platform_data notle_gasgauge_platform_data;
+
 static struct i2c_board_info __initdata notle_i2c_1_boardinfo[] = {
 #ifdef CONFIG_BATTERY_BQ27x00
 	{
 		I2C_BOARD_INFO("bq27520", 0x55),
+		.platform_data = &notle_gasgauge_platform_data,
 	},
 #endif
 };
@@ -1806,7 +1852,20 @@ static int __init notle_i2c_init(void)
 		/* setup the charger/battery platform data based on board revision */
 		switch (NOTLE_VERSION) {
             case V1_EVT3:
+				notle_gasgauge_platform_data.translate_temp = NULL;
+
+				notle_charger_data.supplied_to = notle_charger_supplicants_evt2;
+				notle_charger_data.num_supplicants =
+					ARRAY_SIZE(notle_charger_supplicants_evt2);
+
+				/* gas gauge is on i2c1, which is registered in the pmic init */
+				i2c_register_board_info(1, notle_i2c_1_boardinfo,
+						ARRAY_SIZE(notle_i2c_1_boardinfo));
+				break;
+
 			case V1_EVT2:
+				notle_gasgauge_platform_data.translate_temp = notle_translate_temp;
+
 				notle_charger_data.supplied_to = notle_charger_supplicants_evt2;
 				notle_charger_data.num_supplicants =
 					ARRAY_SIZE(notle_charger_supplicants_evt2);

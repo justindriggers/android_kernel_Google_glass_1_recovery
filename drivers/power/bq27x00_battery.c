@@ -95,6 +95,8 @@ struct bq27x00_device_info {
 	struct bq27x00_reg_cache cache;
 	int charge_design_full;
 
+	int (*translate_temp)(int temperature);
+
 	unsigned long last_update;
 	struct delayed_work work;
 
@@ -272,8 +274,7 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 	cache.flags = bq27x00_read(di, BQ27x00_REG_FLAGS, is_bq27500);
 	if (cache.flags >= 0) {
 		cache.capacity = bq27x00_battery_read_rsoc(di);
-		/* TODO(eieio): reenable the battery temp once the device FW is updated */
-		cache.temperature = 2731; //bq27x00_read(di, BQ27x00_REG_TEMP, false);
+		cache.temperature = bq27x00_read(di, BQ27x00_REG_TEMP, false);
 		cache.time_to_empty = bq27x00_battery_read_time(di, BQ27x00_REG_TTE);
 		cache.time_to_empty_avg = bq27x00_battery_read_time(di, BQ27x00_REG_TTECP);
 		cache.time_to_full = bq27x00_battery_read_time(di, BQ27x00_REG_TTF);
@@ -320,13 +321,20 @@ static void bq27x00_battery_poll(struct work_struct *work)
 static int bq27x00_battery_temperature(struct bq27x00_device_info *di,
 	union power_supply_propval *val)
 {
+	int temperature;
+
 	if (di->cache.temperature < 0)
 		return di->cache.temperature;
 
 	if (di->chip == BQ27500)
-		val->intval = di->cache.temperature - 2731;
+		temperature = di->cache.temperature - 2731;
 	else
-		val->intval = ((di->cache.temperature * 5) - 5463) / 2;
+		temperature = ((di->cache.temperature * 5) - 5463) / 2;
+
+	if (di->translate_temp)
+		val->intval = di->translate_temp(temperature);
+	else
+		val->intval = temperature;
 
 	return 0;
 }
@@ -650,6 +658,7 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	struct bq27x00_device_info *di;
 	int num;
 	int retval = 0;
+	struct bq27x00_platform_data *pdata = client->dev.platform_data;
 
 	/* Get new ID for the new battery device */
 	retval = idr_pre_get(&battery_id, GFP_KERNEL);
@@ -681,6 +690,11 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	di->bat.name = name;
 	di->bus.read = &bq27x00_read_i2c;
 	di->bus.write = &bq27x00_write_i2c;
+
+	if (pdata && pdata->translate_temp)
+		di->translate_temp = pdata->translate_temp;
+	else
+		dev_warn(&client->dev, "fixup func not set, using default thermistor behavior\n");
 
 	if (bq27x00_powersupply_init(di))
 		goto batt_failed_3;

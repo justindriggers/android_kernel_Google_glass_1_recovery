@@ -16,4 +16,11 @@ struct bq27000_platform_data {
 	int (*read)(struct device *dev, unsigned int);
 };
 
+/*
+ * Optional board specific thermistor translation hook.
+ */
+struct bq27x00_platform_data {
+	int (*translate_temp)(int temperature);
+};
+
 #endif
