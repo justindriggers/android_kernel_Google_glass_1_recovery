@@ -1060,7 +1060,7 @@ static struct omap_uart_port_info omap_serial_port_info[] __initdata = {
                 .auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
                 .wake_peer = bcm_bt_lpm_exit_lpm_locked,
                 .rts_mux_driver_control = 1,
-                .wer = 0,
+                .wer = (OMAP_UART_WER_TX | OMAP_UART_WER_RX | OMAP_UART_WER_CTS),
         },
         { /* ttyO2 console port */
                 .use_dma        = 0,
