@@ -2022,7 +2022,6 @@ static struct omap_board_mux evt2_board_wkup_mux[] __initdata = {
 
 static int omap_audio_init(void) {
         int r;
-        u32 omap4430_cm_clksel_dpll_abe_register;
         int audio_power_on_gpio = GPIO_AUDIO_POWERON;
         int gpio_audio_headset;
 
