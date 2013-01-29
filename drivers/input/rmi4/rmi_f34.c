@@ -881,7 +881,7 @@ static __devinit int f34_probe(struct device *dev)
 	if (fc->fd.function_number != function_handler.func) {
 		dev_dbg(dev, "Device is F%02X, not F%02X.\n",
 			fc->fd.function_number, function_handler.func);
-		return 1;
+		return -ENXIO;
 	}
 
 	return f34_device_init(fc);

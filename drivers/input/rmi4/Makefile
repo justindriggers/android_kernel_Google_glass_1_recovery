@@ -16,7 +16,9 @@ obj-$(CONFIG_RMI4_F41) += rmi_f41.o
 obj-$(CONFIG_RMI4_F54) += rmi_f54.o
 obj-$(CONFIG_RMI4_DEV) += rmi_dev.o
 
-ccflags-$(CONFIG_RMI4_DEBUG) += -DDEBUG
+## CMM Remove this to keep debug code without
+## enabling all debug.
+#ccflags-$(CONFIG_RMI4_DEBUG) += -DDEBUG
 
 ifeq ($(KERNELRELEASE),)
 

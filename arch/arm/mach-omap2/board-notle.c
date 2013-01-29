@@ -1428,27 +1428,8 @@ static int synaptics_touchpad_gpio_setup(void *gpio_data, bool configure)
 	return retval;
 }
 
-static struct rmi_device_platform_data synaptics_platformdata = {
-	.driver_name = "rmi_generic",
-	.sensor_name = "tm2240",
-
-	.attn_polarity = RMI_ATTN_ACTIVE_LOW,
-	.level_triggered = true,
-	.gpio_data = &notle_touchpad_gpio_data,
-	.gpio_config = synaptics_touchpad_gpio_setup,
-
-	.reset_delay_ms = 100,
-
-        /* function handler pdata */
-        .power_management = {
-	        .nosleep = RMI_F01_NOSLEEP_OFF,
-	        .wakeup_threshold = 0,
-	        .doze_holdoff = 0,
-	        .doze_interval = 0,
-	        .allow_sensor_to_wake = 1,
-	},
-
-        .axis_align = {
+static struct rmi_f11_sensor_data rmi_device_platform_data_f11 = {
+	.axis_align = {
 		.swap_axes = false,
 		.flip_x = false,
 		.flip_y = true,
@@ -1460,38 +1441,50 @@ static struct rmi_device_platform_data synaptics_platformdata = {
 
 		.offset_X = 0,
 		.offset_Y = 0,
-		.delta_X = 5,
-		.delta_Y = 2,
 		.rel_report_enabled = 0,
+		.delta_x_threshold = 2,
+		.delta_y_threshold = 2,
+	},
 
-#ifdef CONFIG_RMI4_DEBUG
-		.debugfs_flip = NULL,
-		.debugfs_clip = NULL,
-		.debugfs_offset = NULL,
-		.debugfs_swap = NULL,
-		.reg_debug_addr = 0,
-		.reg_debug_size = 0,
-#endif
-		},
+	.virtual_buttons = {
+		.buttons = 0,
+		.map = NULL,
+	},
+	/* We are using touchpad type A protocol. */
+	.type_a = 1,
+};
 
-        .f19_button_map = NULL,
-        .f1a_button_map = NULL,
-        .gpioled_map = NULL,
-        .f11_button_map = NULL,
-        .f41_button_map = NULL,
+static struct rmi_device_platform_data synaptics_platformdata = {
+	.driver_name = "rmi",
+	.sensor_name = "tm2240",
+
+	.attn_polarity = RMI_ATTN_ACTIVE_LOW,
+	.level_triggered = true,
+	.gpio_data = &notle_touchpad_gpio_data,
+	.gpio_config = synaptics_touchpad_gpio_setup,
+
+	.reset_delay_ms = 100,
+
+	.f11_sensor_data = &rmi_device_platform_data_f11,
+	.f11_sensor_count = 1,
+
+	/* function handler pdata */
+	.power_management = {
+		.nosleep = RMI_F01_NOSLEEP_OFF,
+		.wakeup_threshold = 0,
+		.doze_holdoff = 0,
+		.doze_interval = 0,
+	},
 
 #ifdef CONFIG_RMI4_FWLIB
-        .firmware_name = "firmware_name",
-#endif
-#ifdef CONFIG_RMI4_F11_TYPEB
-        .f11_type_b = false;
+	.firmware_name = "firmware_name",
 #endif
 #ifdef  CONFIG_PM
-        .pm_data = NULL,
-        .pre_suspend = NULL,
-        .post_suspend = NULL,
-        .pre_resume = NULL,
-        .post_resume = NULL,
+	.pm_data = NULL,
+	.pre_suspend = NULL,
+	.post_suspend = NULL,
+	.pre_resume = NULL,
+	.post_resume = NULL,
 #endif
 };
 
@@ -1614,7 +1607,7 @@ static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
 #endif
 #if defined(CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C) || defined(CONFIG_RMI4_BUS)
         {
-                I2C_BOARD_INFO("rmi", 0x20),
+                I2C_BOARD_INFO("rmi_i2c", 0x20),
                 .platform_data = &synaptics_platformdata,
         },
 #endif  /* CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C || CONFIG_RMI4_BUS */

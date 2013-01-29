@@ -1413,8 +1413,16 @@ static struct rmi_function_handler function_handler = {
 
 #ifdef	CONFIG_PM
 #if defined(CONFIG_HAS_EARLYSUSPEND)
+#if 0
+	/* Default suspend/resume behavior puts the touchpad to sleep such that
+	   it's unable to detect finger responses.  The current application requires
+	   that the touchpad be able to wake the device. */
 	.early_suspend = rmi_f01_suspend,
 	.late_resume = rmi_f01_resume,
+#else
+	.early_suspend = NULL,
+	.late_resume = NULL,
+#endif // NOTE(CMM)
 #else
 	.suspend = rmi_f01_suspend,
 	.resume = rmi_f01_resume,
@@ -1434,7 +1442,7 @@ static __devinit int f01_probe(struct device *dev)
 	if (fc->fd.function_number != function_handler.func) {
 		dev_dbg(dev, "Device is F%02X, not F%02X.\n",
 			fc->fd.function_number, function_handler.func);
-		return 1;
+		return -ENXIO;
 	}
 
 	dev_dbg(dev, "Yay! It is F01!\n");

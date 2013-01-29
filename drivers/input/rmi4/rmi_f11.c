@@ -20,6 +20,15 @@
 #define FUNCTION_DATA f11_data
 #define FNUM 11
 
+/* NOTE(CMM) We use wakelocks on input to prevent race conditions where
+ * we may suspend while there is still valid data in transit via the
+ * input module. */
+#ifdef CONFIG_WAKELOCK
+#include <linux/wakelock.h>
+#define WAKELOCK_TIMEOUT_IN_MS 250
+#endif
+/* //NOTE(CMM) */
+
 #include <linux/kernel.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -61,6 +70,32 @@
 #define DEFAULT_MIN_ABS_MT_TRACKING_ID 1
 #define DEFAULT_MAX_ABS_MT_TRACKING_ID 10
 #define MAX_NAME_LENGTH 256
+
+/* NOTE(CMM) Google definitions */
+/* Set or unset to output touchpad decoded gesture information */
+#define DEBUG_GESTURES
+
+/* Offsets added to differentiate gesture information from real information */
+#define GESTURE_OFFSET_X 100
+#define GESTURE_OFFSET_Y 100
+#define GESTURE_MT_MAJOR 15
+#define GESTURE_MT_MINOR 15
+#define GESTURE_PRESSURE 1
+
+/* These values are all added to the well known GESTURE_OFFSET values
+ * above to specify unique gestures based upon absolute motion data.
+ * Flicks are not specified here as they have an inherent locale value */
+
+#define GESTURE_OFFSET_SINGLE_TAP_X 0
+#define GESTURE_OFFSET_SINGLE_TAP_Y 0
+
+#define GESTURE_OFFSET_DOUBLE_TAP_X -1
+#define GESTURE_OFFSET_DOUBLE_TAP_Y -1
+
+#define GESTURE_OFFSET_PRESS_X 1
+#define GESTURE_OFFSET_PRESS_Y 1
+
+/* //NOTE(CMM) */
 
 static ssize_t f11_relreport_show(struct device *dev,
 					struct device_attribute *attr,
@@ -773,10 +808,36 @@ struct f11_data {
 	u16 rezero_wait_ms;
 	struct f11_2d_sensor sensors[F11_MAX_NUM_OF_SENSORS];
 
+	struct {
+		/* Boolean to determine if we are in early suspend or not. */
+		int early_suspended;
+		/* Cached value to determine if we hit suspend or not. */
+		int last_suspend_cnt;
+		/* Number of synthesized events sent during a given suspend cycle. */
+		int synth_events_sent;
+		/* Gesture events cannot cross early suspend boundaries. */
+		int early_tap;
+		/* Number of fingers detected on current iteration. */
+		unsigned int current_finger_pressed_cnt;
+		/* Number of fingers detected on previous iteration. */
+		unsigned int prev_finger_pressed_cnt;
+#ifdef CONFIG_WAKELOCK
+		/* Wakelock to prevent suspension while sensor data in transit. */
+		struct wake_lock wakelock;
+#endif
+		/* Counter of movment sequences per first finger landing and
+		 * last finger leaving. */
+		unsigned int movement_seq_cnt;
+
+	} goog;
 #ifdef CONFIG_RMI4_DEBUG
 	struct dentry *debugfs_rezero_wait;
 #endif
 };
+
+/* NOTE(CMM) External reference to get suspend cycle count */
+extern unsigned int get_suspend_cnt(void);
+/* //NOTE(CMM) */
 
 enum finger_state_values {
 	F11_NO_FINGER	= 0x00,
@@ -904,9 +965,10 @@ static ssize_t delta_threshold_write(struct file *filp,
 		return -EFAULT;
 
 	retval = sscanf(local_buf, "%u %u", &new_X, &new_Y);
-	if (retval != 2 || new_X > 1 || new_Y > 1)
+	/* NOTE(CMM) Bugfix */
+	if (retval != 2 || new_X < 1 || new_Y < 1)
 		return -EINVAL;
-
+	/* //NOTE(CMM) */
 	save_X = ctrl->ctrl0_9->delta_x_threshold;
 	save_Y = ctrl->ctrl0_9->delta_y_threshold;
 
@@ -1161,7 +1223,7 @@ static int setup_sensor_debugfs(struct f11_2d_sensor *sensor)
 
 	retval = snprintf(fname, MAX_NAME_LENGTH, "delta_threshold.%d",
 			  sensor->sensor_index);
-	sensor->debugfs_clip = debugfs_create_file(fname, RMI_RW_ATTR,
+	sensor->debugfs_delta_threshold = debugfs_create_file(fname, RMI_RW_ATTR,
 				fc->debugfs_root, sensor,
 				&delta_threshold_fops);
 	if (!sensor->debugfs_delta_threshold)
@@ -1376,6 +1438,13 @@ static void rmi_f11_abs_pos_report(struct f11_data *f11,
 	if (prev_state && !finger_state) {
 		/* this is a release */
 		x = y = z = w_max = w_min = orient = 0;
+		/*  NOTE(CMM)
+		 * this is a release. Android 4.0 specifies that
+		 * the input device should simply stop sending
+		 * data.  Otherwise it will get interpreted as
+		 * a hover event.*/
+		return;
+		/* //NOTE(CMM) */
 	} else if (!prev_state && !finger_state) {
 		/* nothing to report */
 		return;
@@ -1490,10 +1559,146 @@ static int rmi_f11_virtual_button_handler(struct f11_2d_sensor *sensor)
 #else
 #define rmi_f11_virtual_button_handler(sensor)
 #endif
+
+#ifdef DEBUG_GESTURES
+#define BYTES_LEFT(a,b) (sizeof(a)-(b-a))
+
+/* NOTE(CMM) This is a debug function to understand how the touchpad
+ * responds to gestures.
+ */
+static void rmi_f11_debug_gestures(struct f11_data *f11,
+                                   struct f11_2d_sensor *sensor)
+{
+	const struct f11_2d_data *data = &sensor->data;
+	char buf[255] = {0};
+	char *pbuf = buf;
+	if (data->gest_1->single_tap == 1) {
+		pbuf += snprintf(pbuf, BYTES_LEFT(buf, pbuf), "SingleTap ");
+	}
+	if (data->gest_1->tap_and_hold == 1) {
+		pbuf += snprintf(pbuf, BYTES_LEFT(buf, pbuf), "TapAndHold ");
+	}
+	if (data->gest_1->double_tap == 1) {
+		pbuf += snprintf(pbuf, BYTES_LEFT(buf, pbuf), "DoubleTap ");
+	}
+	if (data->gest_1->early_tap == 1) {
+		pbuf += snprintf(pbuf, BYTES_LEFT(buf, pbuf), "EarlyTap ");
+	}
+	if (data->gest_1->flick == 1) {
+		pbuf += snprintf(pbuf, BYTES_LEFT(buf, pbuf), "Flick x:%d y:%d time:%d ",
+		                data->flick->x_flick_dist,
+		                data->flick->y_flick_dist,
+		                data->flick->flick_time);
+	}
+	if (data->gest_1->press == 1) {
+		pbuf += snprintf(pbuf, BYTES_LEFT(buf, pbuf), "Press ");
+	}
+	if (data->gest_1->pinch == 1) {
+		pbuf += snprintf(pbuf, BYTES_LEFT(buf, pbuf), "Pinch ");
+	}
+	if (data->gest_2->palm_detect == 1) {
+		pbuf += snprintf(pbuf, BYTES_LEFT(buf, pbuf), "PalmDetect ");
+	}
+	if (data->gest_2->rotate == 1) {
+		pbuf += snprintf(pbuf, BYTES_LEFT(buf, pbuf), "Rotate ");
+	}
+	if (data->gest_2->shape == 1) {
+		pbuf += snprintf(pbuf, BYTES_LEFT(buf, pbuf), "Shape ");
+	}
+	if (data->gest_2->scrollzone == 1) {
+		pbuf += snprintf(pbuf, BYTES_LEFT(buf, pbuf), "ScrollZone ");
+	}
+	if (data->gest_2->finger_count) {
+		pbuf += snprintf(pbuf, BYTES_LEFT(buf, pbuf), "FingerCount:%d ",
+		                 data->gest_2->finger_count);
+	}
+	if (buf != pbuf) {
+		printk("%s Debug Gestures:%s\n", __func__, buf);
+	}
+}
+#endif  /* DEBUG_GESTURES */
+
+/*
+ * NOTE(CMM) Google specific function.
+ * Determines if we are actively in early suspend state, a.k.a. screen-off state.
+ * Returns: 1 Early suspend is currently active
+ *          0 Early suspend is not active.
+ */
+static int early_suspend_active(struct f11_data *f11)
+{
+        if (f11->goog.early_suspended) {
+                return 1;
+        }
+        return 0;
+}
+
+/*
+ * NOTE(CMM) Google specific function.
+ * Determines if we immediately came from a suspend state.
+ * Returns: 1 We just came from a suspend state.
+ *          0 We did not just come from a suspend state.
+ */
+static int from_suspend_active(struct f11_data *f11)
+{
+        if (f11->goog.last_suspend_cnt != get_suspend_cnt()) {
+                return 1;
+        }
+        return 0;
+}
+
+/* NOTE(CMM) Google specific function.
+ * Generates an input gesture based upon unique rules specific
+ * to Google product.
+ * name: Gesture name for logging.
+ * x_offset: Artificial x-offset to encode gesture for Android layer.
+ * y_offset: Artificial y-offset to encode gesture for Android layer.
+ */
+static void rmi_f11_input_gesture(struct f11_data *f11,
+                                  struct f11_2d_sensor *sensor,
+                                  const char *name,
+                                  int32_t x_offset, int32_t y_offset)
+{
+#if defined(ABS_MT_PRESSURE)
+	/* We have to supply the minimum values required to get event through
+	   Android InputEvent layer */
+	input_report_abs(sensor->input, ABS_MT_PRESSURE, GESTURE_PRESSURE);
+#endif
+	/* Add well-known gesture offset to indicate it's not a real touchpad point */
+	input_report_abs(sensor->input, ABS_MT_POSITION_X, GESTURE_OFFSET_X + x_offset);
+	input_report_abs(sensor->input, ABS_MT_POSITION_Y, GESTURE_OFFSET_Y + y_offset);
+
+	/* Add well-known major and minor numbers to indicate it's not a real touchpad point */
+	input_report_abs(sensor->input, ABS_MT_TOUCH_MAJOR, GESTURE_MT_MAJOR);
+	input_report_abs(sensor->input, ABS_MT_TOUCH_MINOR, GESTURE_MT_MINOR);
+
+	/* Close out multi touch sequence and entire motion sequence */
+	input_mt_sync(sensor->input);
+	input_sync(sensor->input); /* sync after groups of events */
+
+	/* If there are no fingers, and last time through there were no fingers, we
+	 * need to send an empty mt sync packet with empty mt sync to indicate all fingers
+	 * have left the touchpad.  We send the report sync later. */
+	if ((f11->goog.current_finger_pressed_cnt == 0) && (f11->goog.prev_finger_pressed_cnt == 0)) {
+		input_mt_sync(sensor->input);
+	}
+
+	/* Keep track of count of synthesized keys per suspend cycle. */
+	f11->goog.synth_events_sent++;
+
+	pr_info("%s Created synthesized movement:%s event cnt:%d\n",
+	        __func__, name, f11->goog.synth_events_sent);
+
+	/* Set a wakelock to prevent gesture from getting stuck in input layer
+	 * during a suspend cycle. */
+	wake_lock_timeout(&f11->goog.wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
+}
+
+/* NOTE(CMM) This has been modified by Google */
 static void rmi_f11_finger_handler(struct f11_data *f11,
 				   struct f11_2d_sensor *sensor)
 {
 	const u8 *f_state = sensor->data.f_state;
+        const struct f11_2d_data *data = &sensor->data;
 	u8 finger_state;
 	u8 finger_pressed_count;
 	u8 i;
@@ -1517,7 +1722,86 @@ static void rmi_f11_finger_handler(struct f11_data *f11,
 		if (sensor->data.rel_pos)
 			rmi_f11_rel_pos_report(sensor, i);
 	}
+
+	/* NOTE(CMM) Additional functionality put here */
+	f11->goog.current_finger_pressed_cnt = finger_pressed_count;
+	if (early_suspend_active(f11)) {
+		if (data->gest_1->flick == 1) {
+			rmi_f11_input_gesture(f11, sensor,
+			                      "flick",
+			                      data->flick->x_flick_dist,
+			                      data->flick->y_flick_dist);
+		}
+		if (data->gest_1->early_tap == 1) {
+			f11->goog.early_tap = 1;
+		}
+		if (data->gest_1->single_tap == 1) {
+			if (f11->goog.early_tap == 0) {
+				pr_info("%s Rejecting single tap gesture with no previous early tap\n", __func__);
+			} else {
+				rmi_f11_input_gesture(f11, sensor,
+				                      "single tap",
+				                      GESTURE_OFFSET_SINGLE_TAP_X,
+				                      GESTURE_OFFSET_SINGLE_TAP_Y);
+			}
+		}
+		if (data->gest_1->double_tap == 1) {
+			if (f11->goog.early_tap == 0) {
+				pr_info("%s Rejecting double tap gesture with no previous early tap\n", __func__);
+			} else {
+				rmi_f11_input_gesture(f11, sensor,
+				                      "double tap",
+				                      GESTURE_OFFSET_DOUBLE_TAP_X,
+				                      GESTURE_OFFSET_DOUBLE_TAP_Y);
+			}
+		}
+		if (data->gest_1->press == 1) {
+			rmi_f11_input_gesture(f11, sensor,
+			                      "press",
+			                      GESTURE_OFFSET_PRESS_X,
+			                      GESTURE_OFFSET_PRESS_Y);
+		}
+	}
+
+	/* Debugging logging */
+	if (f11->goog.prev_finger_pressed_cnt == 0 && f11->goog.current_finger_pressed_cnt != 0) {
+		pr_info("%s Starting movement sequence cnt:%d\n", __func__,
+		        f11->goog.movement_seq_cnt);
+	}
+	if (f11->goog.prev_finger_pressed_cnt != 0 && f11->goog.current_finger_pressed_cnt == 0) {
+		pr_info("%s Ending movement sequence cnt:%d\n", __func__,
+		        f11->goog.movement_seq_cnt);
+		f11->goog.movement_seq_cnt = 0;
+	}
+	if (f11->goog.prev_finger_pressed_cnt == 0 && f11->goog.current_finger_pressed_cnt == 0) {
+		pr_info("%s Extraneous event\n", __func__);
+	} else {
+		f11->goog.movement_seq_cnt++;
+	}
+
+	if (f11->goog.current_finger_pressed_cnt) {
+		/* If any fingers are landed set a wakelock to prevent movement
+		   information from getting stuck in the input queue. */
+		wake_lock_timeout(&f11->goog.wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
+	} else {
+		/* An empty report sync will be consumed by the input layer.
+		 * So to get an empty report sync passed the input layer
+		 * we will provide an empty config sync.  Only do this if the
+		 * previous run through here had finger data.
+		 */
+		if (f11->goog.prev_finger_pressed_cnt != 0) {
+			input_mt_sync(sensor->input);
+		}
+	}
+
+	/* Update the previous finger pressed count. */
+	f11->goog.prev_finger_pressed_cnt = f11->goog.current_finger_pressed_cnt;
+
+#if 0
+	/* NOTE(CMM) We don't use touchpad buttons so ignore this statement. */
 	input_report_key(sensor->input, BTN_TOUCH, finger_pressed_count);
+#endif
+	/* NOTE(CMM) End additional functionality and changes. */
 	input_sync(sensor->input);
 }
 
@@ -2264,6 +2548,12 @@ static int rmi_f11_initialize(struct rmi_function_container *fc)
 		}
 	}
 
+	/* NOTE(CMM) Google specific initialization */
+#ifdef CONFIG_WAKELOCK
+	wake_lock_init(&f11->goog.wakelock, WAKE_LOCK_SUSPEND, "touchpad_wakelock");
+#endif
+	/* //NOTE(CMM) */
+
 	if (IS_ENABLED(CONFIG_RMI4_DEBUG)) {
 		rc = setup_f11_debugfs(fc);
 		if (rc < 0)
@@ -2329,8 +2619,8 @@ static int rmi_f11_register_devices(struct rmi_function_container *fc)
 		sensor->input = input_dev;
 		/* TODO how to modify the dev name and
 		* phys name for input device */
-		sprintf(sensor->input_name, "%sfn%02x",
-			dev_name(&rmi_dev->dev), fc->fd.function_number);
+		sprintf(sensor->input_name, "%sfn%02x", "sensor00",
+			fc->fd.function_number);
 		input_dev->name = sensor->input_name;
 		sprintf(sensor->input_phys, "%s/input0",
 			input_dev->name);
@@ -2340,7 +2630,12 @@ static int rmi_f11_register_devices(struct rmi_function_container *fc)
 
 		set_bit(EV_SYN, input_dev->evbit);
 		set_bit(EV_ABS, input_dev->evbit);
+#if 0
+		/* NOTE(CMM) Touchpad by definition does not have a button
+		   at least on Android, so registering this input is
+		   incorrect. */
 		input_set_capability(input_dev, EV_KEY, BTN_TOUCH);
+#endif
 		set_bit(INPUT_PROP_DIRECT, input_dev->propbit);
 
 		f11_set_abs_params(fc, i);
@@ -2509,7 +2804,9 @@ int rmi_f11_attention(struct rmi_function_container *fc, u8 *irq_bits)
 				f11->sensors[i].pkt_size);
 		if (error < 0)
 			return error;
-
+#ifdef DEBUG_GESTURES
+		rmi_f11_debug_gestures(f11, &f11->sensors[i]);
+#endif  /* DEBUG_GESTURES */
 		rmi_f11_finger_handler(f11, &f11->sensors[i]);
 		rmi_f11_virtual_button_handler(&f11->sensors[i]);
 		data_base_addr_offset += f11->sensors[i].pkt_size;
@@ -2519,15 +2816,41 @@ int rmi_f11_attention(struct rmi_function_container *fc, u8 *irq_bits)
 }
 
 #ifdef CONFIG_PM
+/*
+ *  suspend handler for F11, this will be invoked in
+ *  early suspend routine from sensor device.
+ */
+static int rmi_f11_suspend(struct rmi_function_container *fc)
+{
+	struct f11_data *data = fc->data;
+
+	data->goog.early_suspended = 1;
+	data->goog.last_suspend_cnt = get_suspend_cnt();
+	data->goog.synth_events_sent = 0;
+	data->goog.early_tap = 0;
+	dev_info(&fc->dev, "%s Early suspended touchpad\n", __FUNCTION__);
+	return 0;
+}
+
+/*
+ *  resume handler for F11, this will be invoked in
+ *  late resume routine from sensor device.
+ */
 static int rmi_f11_resume(struct rmi_function_container *fc)
+// void rmi_f11_resume(struct rmi_function_info *rmifninfo)
 {
 	struct rmi_device *rmi_dev = fc->rmi_dev;
 	struct f11_data *data = fc->data;
 	/* Command register always reads as 0, so we can just use a local. */
 	union f11_2d_commands commands = {};
-	int retval = 0;
 
-	dev_dbg(&fc->dev, "Resuming...\n");
+	int retval = 0;
+	data->goog.early_suspended = 0;
+	dev_info(&fc->dev, "%s Late resumed touchpad", __FUNCTION__);
+
+	/* NOTE(CMM) Begin original resume functionality.  In our case we do not
+	 * enable the rezero dunctionality so we simply return. */
+
 	if (!data->rezero_wait_ms)
 		return 0;
 
@@ -2589,11 +2912,16 @@ static struct rmi_function_handler function_handler = {
 	.func = 0x11,
 	.config = rmi_f11_config,
 	.attention = rmi_f11_attention,
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	.late_resume = rmi_f11_resume
-#elif defined(CONFIG_PM)
-	.resume = rmi_f11_resume
-#endif  /* defined(CONFIG_HAS_EARLYSUSPEND) */
+/* NOTE(CMM) Additional power management */
+#ifdef  CONFIG_PM
+#if defined(CONFIG_HAS_EARLYSUSPEND)
+        .early_suspend = rmi_f11_suspend,
+        .late_resume = rmi_f11_resume,
+#else
+        .suspend = rmi_f11_suspend,
+        .resume = rmi_f11_resume,
+#endif  /* defined(CONFIG_HAS_EARLYSUSPEND) && !def... */
+#endif  /* CONFIG_PM */
 };
 
 static __devinit int f11_probe(struct device *dev)
@@ -2608,7 +2936,7 @@ static __devinit int f11_probe(struct device *dev)
 	if (fc->fd.function_number != function_handler.func) {
 		dev_dbg(dev, "Device is F%02X, not F%02X.\n",
 			fc->fd.function_number, function_handler.func);
-		return 1;
+		return -ENXIO;
 	}
 
 	return f11_device_init(fc);

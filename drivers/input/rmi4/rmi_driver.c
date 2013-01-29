@@ -1004,7 +1004,7 @@ static int __devinit rmi_driver_probe(struct device *dev)
 
 	if (dev->type != &rmi_sensor_type) {
 		dev_dbg(dev, "Not a sensor device.\n");
-		return 1;
+		return -ENXIO;
 	}
 
 	rmi_dev = to_rmi_device(dev);

@@ -146,7 +146,9 @@ int rmi_register_phys_device(struct rmi_phys_device *phys)
 	rmi_dev->number = atomic_inc_return(&physical_device_count) - 1;
 	rmi_dev->dev.release = release_rmidev_device;
 
-	dev_set_name(&rmi_dev->dev, "sensor%02d", rmi_dev->number);
+	/* NOTE(CMM) Use a name that makes sense for our application */
+	dev_set_name(&rmi_dev->dev, "touchpad");
+	/* //NOTE(CMM) */
 	dev_dbg(phys->dev, "%s: Registered %s as %s.\n", __func__,
 		pdata->sensor_name, dev_name(&rmi_dev->dev));
 
