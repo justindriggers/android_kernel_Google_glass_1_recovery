@@ -781,6 +781,9 @@ static int is_battery_present(struct twl6030_charger_device_info *di)
 	return 1;
 }
 
+/* TODO: remove this hack once notle-usb-mux.c takes over the MUX config completely */
+extern void usb_mux_force(int use_usb);
+
 static void twl6030_stop_usb_charger(struct twl6030_charger_device_info *di)
 {
 	int ret;
@@ -789,6 +792,9 @@ static void twl6030_stop_usb_charger(struct twl6030_charger_device_info *di)
 	if (ret)
 		pr_err("%s: Error access to TWL6030 (%d)\n", __func__, ret);
 	printk("battery: CHARGER OFF\n");
+
+	usb_mux_force(false);
+
 }
 
 static void twl6030_start_usb_charger(struct twl6030_charger_device_info *di, int mA)
@@ -806,6 +812,8 @@ static void twl6030_start_usb_charger(struct twl6030_charger_device_info *di, in
 			goto err;
 		return;
 	}
+
+	usb_mux_force(true);
 
 	twl6030_config_vichrg_reg(di, di->charger_outcurrent_mA);
 	twl6030_config_cinlimit_reg(di, mA);
@@ -1395,6 +1403,7 @@ static int __devinit twl6030_charger_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
+	di->dev = &pdev->dev;
 	di->state = STATE_BATTERY;
 	di->charge_top_off = 0;
 	di->recharge_capacity = 94;

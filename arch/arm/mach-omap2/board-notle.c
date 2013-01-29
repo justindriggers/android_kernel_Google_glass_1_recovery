@@ -17,6 +17,7 @@
  */
 
 #include "board-notle.h"
+#include "notle-usb-mux.h"
 
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -1171,7 +1172,6 @@ static struct twl4030_charger_platform_data notle_charger_data = {
 	.max_charger_voltage_mV   = 4560,
 	.max_bat_voltage_mV       = 4200,
 	.low_bat_voltage_mV       = 3300,
-	
 	/* Fill in supplied_to/num_supplicants based on board revisions */
 };
 
@@ -1535,6 +1535,23 @@ static struct rmi_i2c_platformdata __initdata synaptics_platformdata = {
         .sensordata = &synaptics_sensordata,
 };
 #endif
+
+static struct usb_mux_platform_data usb_mux_platformdata = {
+	// .gpio_cb0 configured in omap_usb_mux_init
+	.gpio_cb0_flags = GPIOF_OUT_INIT_LOW,
+	.gpio_cb0_label = "gpio_usb_mux_cb0",
+
+	// .gpio_cb1 configured in omap_usb_mux_init
+	.gpio_cb1_flags = GPIOF_OUT_INIT_HIGH,
+	.gpio_cb1_label = "gpio_usb_mux_cb1",
+};
+
+static struct platform_device notle_usb_mux = {
+	.name = "usb_mux",
+	.dev	= {
+		.platform_data	= &usb_mux_platformdata,
+	},
+};
 
 /*
  * Translate temperatures to compensate for thermistor circuit problem (EVT2).
@@ -2020,50 +2037,27 @@ static struct omap_board_mux evt2_board_wkup_mux[] __initdata = {
 #define emtpy_board_mux	NULL
 #endif
 
-static int omap_audio_init(void) {
-        int r;
-        int audio_power_on_gpio = GPIO_AUDIO_POWERON;
-        int gpio_audio_headset;
+static int omap_audio_init(void)
+{
+	int audio_power_on_gpio = GPIO_AUDIO_POWERON;
+	twl6040_codec.audpwron_gpio = audio_power_on_gpio;
 
-        gpio_audio_headset = notle_get_gpio(GPIO_USB_MUX_CB0_INDEX);
-        twl6040_codec.audpwron_gpio = audio_power_on_gpio;
+	omap_mux_init_signal("sys_nirq2.sys_nirq2", OMAP_PIN_INPUT_PULLUP);
+	return 0;
+}
 
-        /* GPIO that enables a MUX outside omap to use usb headset */
-        r = gpio_request_one(gpio_audio_headset, GPIOF_OUT_INIT_LOW,
-                "gpio_audio_headset");
-        if (r) {
-                pr_err("Failed to get audio_headset gpio_%d\n", gpio_audio_headset);
-                goto error;
-        }
+static int omap_usb_mux_init(void)
+{
+	int err;
 
-        /* TODO(petermalkin): remove this line for the product compile. */
-        /* Do not expose GPIO to /sys filesystem for security purposes. */
-        r = gpio_export(gpio_audio_headset, false);
-        if (r) {
-                pr_err("Unable to export audio_headset gpio_%d\n", gpio_audio_headset);
-        }
+	usb_mux_platformdata.gpio_cb0 = notle_get_gpio(GPIO_USB_MUX_CB0_INDEX);
+	usb_mux_platformdata.gpio_cb1 = GPIO_USB_MUX_CB1;
 
-        /* GPIO 45 needs export as per Russ request */
-        r = gpio_request_one(GPIO_USB_MUX_CB1, GPIOF_OUT_INIT_HIGH,
-                "gpio_45");
-        if (r) {
-                pr_err("Failed to get gpio_%d\n", GPIO_USB_MUX_CB1);
-                goto error;
-        }
+	err = platform_device_register(&notle_usb_mux);
+	if (err)
+		pr_err("notle_usb_mux registration failed: %d\n", err);
 
-        /* TODO(petermalkin): remove this line for the product compile. */
-        /* Do not expose GPIO to /sys filesystem for security purposes. */
-        r = gpio_export(GPIO_USB_MUX_CB1, false);
-        if (r) {
-                pr_err("Unable to export gpio_%d\n", GPIO_USB_MUX_CB1);
-        }
-
-        omap_mux_init_signal("sys_nirq2.sys_nirq2", \
-                OMAP_PIN_INPUT_PULLUP);
-        return 0;
-
-error:
-        return r;
+	return err;
 }
 
 static int notle_gps_init(void) {
@@ -2305,6 +2299,11 @@ static void __init notle_init(void)
         notle_pmic_mux_init();
 
         printk("Notle board revision: %s(%d)", notle_version_str(NOTLE_VERSION), NOTLE_VERSION);
+
+        err = omap_usb_mux_init();
+        if (err) {
+                pr_err("USB MUX intitialization failed: %d\n", err);
+        }
 
         err = omap_audio_init();
         if (err) {

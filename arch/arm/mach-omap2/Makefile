@@ -298,7 +298,8 @@ obj-$(CONFIG_MACH_NOTLE)		+= board-notle.o \
 					   board-notle-wifi.o \
 					   hsmmc.o \
 					   omap4_apps_brd_id.o \
-					   omap_phy_internal.o
+					   omap_phy_internal.o \
+					   notle-usb-mux.o
 
 obj-$(CONFIG_MACH_OMAP3517EVM)		+= board-am3517evm.o \
 					   omap_phy_internal.o
