@@ -248,7 +248,7 @@ static ssize_t show_mode(struct device *dev, struct device_attribute *attr, char
 	return sprintf(buf, "%s\n", val);
 }
 
-static DEVICE_ATTR(mux_mode, S_IWUSR | S_IRUGO, show_mode, set_mode);
+static DEVICE_ATTR(mux_mode, S_IWUGO | S_IRUGO, show_mode, set_mode);
 
 static struct attribute *usb_mux_attributes[] = {
 	&dev_attr_mux_mode.attr,
