@@ -171,9 +171,8 @@ void usb_mux_force(int use_usb)
 
 	mutex_lock(&di->lock);
 	di->force_usb = !!use_usb;
+	sync_usb_mux_mode(di);
 	mutex_unlock(&di->lock);
-
-	queue_work(di->wq, &di->work);
 }
 EXPORT_SYMBOL(usb_mux_force);
 
@@ -211,7 +210,7 @@ static ssize_t set_mode(struct device *dev, struct device_attribute *attr,
 	int status = count;
 	struct usb_mux_device_info *di = dev_get_drvdata(dev);
 
-	enum usb_mux_mode mode;
+	enum usb_mux_mode mode = USB_MUX_MODE_TTY;
 
 	/* PARANOID: count should be at least 1, but make sure anyway */
 	if (!count)
