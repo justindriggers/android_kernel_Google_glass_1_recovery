@@ -758,6 +758,13 @@ static ssize_t driver_version_show(struct device *dev, struct device_attribute *
 	return sprintf(buf, "%s\n", DRIVER_VERSION);
 }
 
+/* show the driver status */
+static ssize_t driver_flags_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	return sprintf(buf, "0x%08lx\n", glasshub->flags);
+}
+
 /* show don/doff status */
 static ssize_t don_doff_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -1674,6 +1681,7 @@ static DEVICE_ATTR(update_fw_data, DEV_MODE_WO, NULL, update_fw_data_store);
 static DEVICE_ATTR(version, DEV_MODE_RO, version_show, NULL);
 static DEVICE_ATTR(bootloader_version, DEV_MODE_RO, bootloader_version_show, NULL);
 static DEVICE_ATTR(driver_version, DEV_MODE_RO, driver_version_show, NULL);
+static DEVICE_ATTR(driver_flags, DEV_MODE_RO, driver_flags_show, NULL);
 static DEVICE_ATTR(passthru_enable, DEV_MODE_RW, passthru_enable_show, passthru_enable_store);
 static DEVICE_ATTR(proxraw, DEV_MODE_RO, proxraw_show, NULL);
 static DEVICE_ATTR(proxmin, DEV_MODE_RO, proxmin_show, NULL);
@@ -1745,6 +1753,7 @@ static struct attribute *bootmode_attrs[] = {
 	&dev_attr_bootloader_version.attr,
 	&dev_attr_version.attr,
 	&dev_attr_driver_version.attr,
+	&dev_attr_driver_flags.attr,
 	&dev_attr_update_fw_enable.attr,
 	&dev_attr_update_fw_data.attr,
 	&dev_attr_flash_status.attr,
