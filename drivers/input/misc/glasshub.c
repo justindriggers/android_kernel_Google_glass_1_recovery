@@ -186,6 +186,8 @@
 #define FLASH_ERROR_DEVICE_RESET_ERROR	-6
 #define FLASH_ERROR_I2C_DEVICE_COMM	-7
 #define FLASH_ERROR_NO_PAGES_FLASHED	-8
+#define FLASH_ERROR_BOOTLOADER_VERSION	-9
+#define FLASH_ERROR_DEVICE_BOOT_ERROR	-10
 
 /*
  * Basic theory of operation:
@@ -253,9 +255,9 @@ struct glasshub_data {
 	uint32_t fw_value;
 	uint8_t fw_checksum;
 	struct mutex device_lock;
-	long long irq_timestamp;
-	long long last_timestamp;
-	long long start_timestamp;
+	uint64_t irq_timestamp;
+	uint64_t last_timestamp;
+	uint64_t start_timestamp;
 	unsigned long count_for_average;
 	unsigned long average_delta;
 	unsigned long sample_count;
@@ -571,7 +573,7 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 	uint16_t data[PROX_QUEUE_SZ];
 	int prox_count = 0;
 	int i;
-	long long timestamp;
+	uint64_t timestamp;
 
 	/* clear in-service flag */
 	timestamp = glasshub->irq_timestamp;
@@ -638,10 +640,24 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 
 		/* if prox data is not contiguous, start from current timestamp */
 		if (status & STATUS_OVERFLOW || (glasshub->last_timestamp == 0)) {
-			glasshub->last_timestamp = timestamp - prox_count * glasshub->average_delta;
+			uint64_t temp = timestamp - prox_count * glasshub->average_delta;
+
+			/* don't go backwards in time (shouldn't happen) */
+			if (temp > glasshub->last_timestamp) {
+				glasshub->last_timestamp = temp;
+			} else {
+				dev_warn(&glasshub->i2c_client->dev,
+						"%s: Time travel? %llu is earlier than %llu\n",
+						__FUNCTION__,
+						temp,
+						glasshub->last_timestamp);
+			}
+			glasshub->last_timestamp =
+				(temp < glasshub->last_timestamp ? glasshub->last_timestamp : temp);
+
 			glasshub->start_timestamp = 0;
 			if (glasshub->debug) {
-				printk("%s: Resync @ %lld\n", __func__, glasshub->start_timestamp);
+				printk("%s: Resync @ %llu\n", __func__, glasshub->start_timestamp);
 			}
 		}
 
@@ -653,7 +669,7 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 			rec.timestamp = glasshub->last_timestamp;
 			kfifo_put(&prox_fifo, &rec);
 			if (glasshub->debug && (i == 0)) {
-				printk("%s: First sample in packet @ %lld\n", __func__, glasshub->last_timestamp);
+				printk("%s: First sample in packet @ %llu\n", __func__, glasshub->last_timestamp);
 			}
 		}
 
@@ -1504,7 +1520,7 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 			if (bootflasher) {
 				rc = boot_device_l(glasshub);
 				if (rc) {
-					glasshub->flash_status = FLASH_ERROR_DEVICE_RESET_ERROR;
+					glasshub->flash_status = FLASH_ERROR_DEVICE_BOOT_ERROR;
 					goto ExitFlashMode;
 				}
 			}
@@ -1606,7 +1622,7 @@ ExitFlashMode:
 				buffer[0] = CMD_BOOTLOADER_VERSION;
 				rc = _i2c_read(glasshub, buffer, 1, buffer, 1);
 				if (rc) {
-					glasshub->flash_status = FLASH_ERROR_DEVICE_RESET_ERROR;
+					glasshub->flash_status = FLASH_ERROR_BOOTLOADER_VERSION;
 					goto ExitFlashMode;
 				}
 				glasshub->bootloader_version = buffer[0];
