@@ -117,6 +117,7 @@
 #define FLAG_SYSFS_CREATED		3
 #define FLAG_DEVICE_DISABLED		4
 #define FLAG_WINK_FLAG_ENABLE		5
+#define FLAG_DEVICE_MAY_BE_WEDGED	31
 
 /* flags for device permissions */
 #define DEV_MODE_RO (S_IRUSR | S_IRGRP)
@@ -438,6 +439,7 @@ static int _check_part_id(struct glasshub_data *glasshub)
 	rc = _i2c_read_reg8(glasshub, REG_PART_ID, &data);
 	if (rc < 0) {
 		dev_err(&i2c_client->dev, "%s: Unable to read part identifier\n", __FUNCTION__);
+		set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
 		return -EIO;
 	}
 
@@ -486,6 +488,7 @@ int boot_device_l(struct glasshub_data *glasshub)
 		if (rc == 0) break;
 	}
 	if (rc) {
+		set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
 		dev_err(&glasshub->i2c_client->dev, "%s Unable to boot glasshub device\n",
 				__FUNCTION__);
 		goto err_out;
@@ -525,6 +528,7 @@ int reset_device_l(struct glasshub_data *glasshub, int force)
 		if (rc == 0) break;
 	}
 	if (rc) {
+		set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
 		dev_err(&glasshub->i2c_client->dev, "%s Unable to reset glasshub device\n",
 				__FUNCTION__);
 		goto err_out;
@@ -717,6 +721,7 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 
 Error:
 	mutex_unlock(&glasshub->device_lock);
+	set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
 	dev_err(&glasshub->i2c_client->dev, "%s: device read error\n", __FUNCTION__);
 	return IRQ_HANDLED;
 }
@@ -729,7 +734,9 @@ static ssize_t show_reg(struct device *dev, char *buf, uint8_t reg)
 
 	mutex_lock(&glasshub->device_lock);
 	if (boot_device_l(glasshub) == 0) {
-		_i2c_read_reg(glasshub, reg, &value);
+		if (_i2c_read_reg(glasshub, reg, &value)) {
+			set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
+		}
 	}
 	mutex_unlock(&glasshub->device_lock);
 
@@ -747,7 +754,9 @@ static ssize_t store_reg(struct device *dev, const char *buf, size_t count,
 		value = (value > max) ? max : value;
 		mutex_lock(&glasshub->device_lock);
 		if (boot_device_l(glasshub) == 0) {
-			_i2c_write_reg(glasshub, reg, value);
+			if (_i2c_write_reg(glasshub, reg, value)) {
+				set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
+			}
 		}
 		mutex_unlock(&glasshub->device_lock);
 	}
@@ -1244,6 +1253,7 @@ static int get_app_version_l(struct glasshub_data *glasshub)
 	buffer[0] = CMD_APP_VERSION;
 	rc = _i2c_read(glasshub, buffer, 1, buffer, sizeof(buffer));
 	if (rc) {
+		set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
 		dev_err(&glasshub->i2c_client->dev, "%s Error getting firmware version: %d\n",
 				__FUNCTION__, rc);
 	} else {
@@ -1574,6 +1584,7 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 						rc = _i2c_write_mult(glasshub, buffer,
 								sizeof(buffer) - old_boot);
 						if (rc) {
+							set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
 							dev_err(&glasshub->i2c_client->dev,
 									"%s Unable to flash glasshub device\n",
 									__FUNCTION__);
@@ -1586,6 +1597,7 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 							buffer[0] = CMD_FLASH_STATUS;
 							rc = _i2c_read(glasshub, buffer, 1, buffer, 1);
 							if (rc) {
+								set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
 								dev_err(&glasshub->i2c_client->dev,
 										"%s Error reading flash status\n",
 										__FUNCTION__);
@@ -1692,6 +1704,20 @@ static ssize_t debug_store(struct device *dev, struct device_attribute *attr,
 	return count;
 }
 
+/* timestamp of last IRQ */
+static ssize_t irq_timestamp_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	return sprintf(buf, "%llu\n", glasshub->irq_timestamp);
+}
+
+/* timestamp of last sample */
+static ssize_t last_timestamp_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	return sprintf(buf, "%llu\n", glasshub->last_timestamp);
+}
+
 static DEVICE_ATTR(update_fw_enable, DEV_MODE_RW, update_fw_enable_show, update_fw_enable_store);
 static DEVICE_ATTR(update_fw_data, DEV_MODE_WO, NULL, update_fw_data_store);
 static DEVICE_ATTR(version, DEV_MODE_RO, version_show, NULL);
@@ -1729,6 +1755,8 @@ static DEVICE_ATTR(sample_count, DEV_MODE_RO, sample_count_show, NULL);
 static DEVICE_ATTR(disable, DEV_MODE_RW, disable_show, disable_store);
 static DEVICE_ATTR(debug, DEV_MODE_RW, debug_show, debug_store);
 static DEVICE_ATTR(frame_count, DEV_MODE_RO, frame_count_show, NULL);
+static DEVICE_ATTR(irq_timestamp, DEV_MODE_RO, irq_timestamp_show, NULL);
+static DEVICE_ATTR(last_timestamp, DEV_MODE_RO, last_timestamp_show, NULL);
 
 static struct attribute *attrs[] = {
 	&dev_attr_passthru_enable.attr,
@@ -1758,6 +1786,8 @@ static struct attribute *attrs[] = {
 	&dev_attr_error_code.attr,
 	&dev_attr_sample_count.attr,
 	&dev_attr_frame_count.attr,
+	&dev_attr_irq_timestamp.attr,
+	&dev_attr_last_timestamp.attr,
 	NULL
 };
 
