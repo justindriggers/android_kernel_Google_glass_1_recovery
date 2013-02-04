@@ -267,6 +267,7 @@ struct glasshub_data {
 	uint8_t bootloader_version;
 	uint8_t app_version_major;
 	uint8_t app_version_minor;
+	uint8_t last_irq_status;
 	int debug;
 };
 
@@ -588,6 +589,7 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 	/* read the IRQ source */
 	rc = _i2c_read_reg8(glasshub, REG_STATUS, &status);
 	if (rc) goto Error;
+	glasshub->last_irq_status = status;
 
 	/* process prox data */
 	while (status & (IRQ_PASSTHRU | IRQ_WINK)) {
@@ -1718,6 +1720,29 @@ static ssize_t last_timestamp_show(struct device *dev, struct device_attribute *
 	return sprintf(buf, "%llu\n", glasshub->last_timestamp);
 }
 
+/* show current IRQ status without clearing IRQ */
+static ssize_t irq_status_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	unsigned value = 0xffff;
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+
+	mutex_lock(&glasshub->device_lock);
+	if (boot_device_l(glasshub) == 0) {
+		if (_i2c_read_reg(glasshub, REG_DEBUG, &value)) {
+			set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
+		}
+	}
+	mutex_unlock(&glasshub->device_lock);
+	return sprintf(buf, "0x%02x\n", value);
+}
+
+/* show last IRQ status */
+static ssize_t last_irq_status_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	return sprintf(buf, "0x%02x\n", glasshub->last_irq_status);
+}
+
 static DEVICE_ATTR(update_fw_enable, DEV_MODE_RW, update_fw_enable_show, update_fw_enable_store);
 static DEVICE_ATTR(update_fw_data, DEV_MODE_WO, NULL, update_fw_data_store);
 static DEVICE_ATTR(version, DEV_MODE_RO, version_show, NULL);
@@ -1757,6 +1782,8 @@ static DEVICE_ATTR(debug, DEV_MODE_RW, debug_show, debug_store);
 static DEVICE_ATTR(frame_count, DEV_MODE_RO, frame_count_show, NULL);
 static DEVICE_ATTR(irq_timestamp, DEV_MODE_RO, irq_timestamp_show, NULL);
 static DEVICE_ATTR(last_timestamp, DEV_MODE_RO, last_timestamp_show, NULL);
+static DEVICE_ATTR(irq_status, DEV_MODE_RO, irq_status_show, NULL);
+static DEVICE_ATTR(last_irq_status, DEV_MODE_RO, last_irq_status_show, NULL);
 
 static struct attribute *attrs[] = {
 	&dev_attr_passthru_enable.attr,
@@ -1788,6 +1815,8 @@ static struct attribute *attrs[] = {
 	&dev_attr_frame_count.attr,
 	&dev_attr_irq_timestamp.attr,
 	&dev_attr_last_timestamp.attr,
+	&dev_attr_irq_status.attr,
+	&dev_attr_last_irq_status.attr,
 	NULL
 };
 
