@@ -1236,6 +1236,8 @@ struct omap4_dpll_regs {
 	struct dpll_reg_tuple div_m6;
 	struct dpll_reg_tuple div_m7;
 	struct dpll_reg_tuple clkdcoldo;
+	struct dpll_reg_tuple delta_step;
+	struct dpll_reg_tuple mantissa_exp;
 };
 
 static struct omap4_dpll_regs dpll_regs[] = {
@@ -1248,6 +1250,8 @@ static struct omap4_dpll_regs dpll_regs[] = {
 	  .idlest	= {.addr = OMAP4_CM_IDLEST_DPLL_MPU_OFFSET},
 	  .clksel	= {.addr = OMAP4_CM_CLKSEL_DPLL_MPU_OFFSET},
 	  .div_m2	= {.addr = OMAP4_CM_DIV_M2_DPLL_MPU_OFFSET},
+	  .delta_step	= {.addr = OMAP4_CM_SSC_DELTAMSTEP_DPLL_MPU_OFFSET},
+	  .mantissa_exp	= {.addr = OMAP4_CM_SSC_MODFREQDIV_DPLL_MPU_OFFSET},
 	},
 	/* IVA DPLL */
 	{ .name		= "iva",
@@ -1259,6 +1263,8 @@ static struct omap4_dpll_regs dpll_regs[] = {
 	  .clksel	= {.addr = OMAP4_CM_CLKSEL_DPLL_IVA_OFFSET},
 	  .div_m4	= {.addr = OMAP4_CM_DIV_M4_DPLL_IVA_OFFSET},
 	  .div_m5	= {.addr = OMAP4_CM_DIV_M5_DPLL_IVA_OFFSET},
+	  .delta_step	= {.addr = OMAP4_CM_SSC_DELTAMSTEP_DPLL_IVA_OFFSET},
+	  .mantissa_exp	= {.addr = OMAP4_CM_SSC_MODFREQDIV_DPLL_IVA_OFFSET},
 	},
 	/* ABE DPLL */
 	{ .name		= "abe",
@@ -1270,6 +1276,8 @@ static struct omap4_dpll_regs dpll_regs[] = {
 	  .clksel	= {.addr = OMAP4_CM_CLKSEL_DPLL_ABE_OFFSET},
 	  .div_m2	= {.addr = OMAP4_CM_DIV_M2_DPLL_ABE_OFFSET},
 	  .div_m3	= {.addr = OMAP4_CM_DIV_M3_DPLL_ABE_OFFSET},
+	  .delta_step	= {.addr = OMAP4_CM_SSC_DELTAMSTEP_DPLL_ABE_OFFSET},
+	  .mantissa_exp	= {.addr = OMAP4_CM_SSC_MODFREQDIV_DPLL_ABE_OFFSET},
 	},
 	/* USB DPLL */
 	{ .name		= "usb",
@@ -1281,6 +1289,9 @@ static struct omap4_dpll_regs dpll_regs[] = {
 	  .clksel	= {.addr = OMAP4_CM_CLKSEL_DPLL_USB_OFFSET},
 	  .div_m2	= {.addr = OMAP4_CM_DIV_M2_DPLL_USB_OFFSET},
 	  .clkdcoldo	= {.addr = OMAP4_CM_CLKDCOLDO_DPLL_USB_OFFSET},
+	  .delta_step	= {.addr = OMAP4_CM_SSC_DELTAMSTEP_DPLL_USB_OFFSET},
+	  .mantissa_exp	= {.addr = OMAP4_CM_SSC_MODFREQDIV_DPLL_USB_OFFSET},
+
 	 },
 	/* PER DPLL */
 	{ .name		= "per",
@@ -1296,6 +1307,8 @@ static struct omap4_dpll_regs dpll_regs[] = {
 	  .div_m5	= {.addr = OMAP4_CM_DIV_M5_DPLL_PER_OFFSET},
 	  .div_m6	= {.addr = OMAP4_CM_DIV_M6_DPLL_PER_OFFSET},
 	  .div_m7	= {.addr = OMAP4_CM_DIV_M7_DPLL_PER_OFFSET},
+	  .delta_step	= {.addr = OMAP4_CM_SSC_DELTAMSTEP_DPLL_PER_OFFSET},
+	  .mantissa_exp	= {.addr = OMAP4_CM_SSC_MODFREQDIV_DPLL_PER_OFFSET},
 	},
 };
 
@@ -1325,6 +1338,11 @@ void omap4_dpll_prepare_off(void)
 		omap4_dpll_store_reg(dpll_reg, &dpll_reg->div_m7);
 		omap4_dpll_store_reg(dpll_reg, &dpll_reg->clkdcoldo);
 		omap4_dpll_store_reg(dpll_reg, &dpll_reg->idlest);
+
+		/* Spread Spectrum related registers */
+		omap4_dpll_store_reg(dpll_reg, &dpll_reg->delta_step);
+		omap4_dpll_store_reg(dpll_reg, &dpll_reg->mantissa_exp);
+
 	}
 }
 
@@ -1351,6 +1369,8 @@ static void omap4_dpll_dump_regs(struct omap4_dpll_regs *dpll_reg)
 	omap4_dpll_print_reg(dpll_reg, "clkdcoldo", &dpll_reg->clkdcoldo);
 	omap4_dpll_print_reg(dpll_reg, "clkmode", &dpll_reg->clkmode);
 	omap4_dpll_print_reg(dpll_reg, "autoidle", &dpll_reg->autoidle);
+	omap4_dpll_print_reg(dpll_reg, "delta_step", &dpll_reg->delta_step);
+	omap4_dpll_print_reg(dpll_reg, "mantissa_exp", &dpll_reg->mantissa_exp);
 	if (dpll_reg->idlest.addr)
 		pr_warn("idlest - Address offset = 0x%08x, before val=0x%08x"
 			" after = 0x%08x\n", dpll_reg->idlest.addr,
@@ -1398,6 +1418,7 @@ void omap4_dpll_resume_off(void)
 	struct omap4_dpll_regs *dpll_reg = dpll_regs;
 
 	for (i = 0; i < ARRAY_SIZE(dpll_regs); i++, dpll_reg++) {
+
 		omap4_dpll_restore_reg(dpll_reg, &dpll_reg->clksel);
 		omap4_dpll_restore_reg(dpll_reg, &dpll_reg->div_m2);
 		omap4_dpll_restore_reg(dpll_reg, &dpll_reg->div_m3);
@@ -1407,6 +1428,10 @@ void omap4_dpll_resume_off(void)
 		omap4_dpll_restore_reg(dpll_reg, &dpll_reg->div_m7);
 		omap4_dpll_restore_reg(dpll_reg, &dpll_reg->clkdcoldo);
 
+		/* Restore Spread Spectrum related registers */
+		omap4_dpll_restore_reg(dpll_reg, &dpll_reg->delta_step);
+		omap4_dpll_restore_reg(dpll_reg, &dpll_reg->mantissa_exp);
+
 		/* Restore clkmode after the above registers are restored */
 		omap4_dpll_restore_reg(dpll_reg, &dpll_reg->clkmode);
 
@@ -1415,6 +1440,7 @@ void omap4_dpll_resume_off(void)
 		/* Restore autoidle settings after the dpll is locked */
 		omap4_dpll_restore_reg(dpll_reg, &dpll_reg->autoidle);
 	}
+
 }
 
 /*
