@@ -340,6 +340,8 @@ static void gpio_keys_report_event(struct gpio_button_data *bdata)
 		input_event(input, type, button->code, !!state);
 	}
 	input_sync(input);
+
+        dev_info(&input->dev, "Camera button %s\n", ((state)?"pressed":"released"));
 }
 
 static void gpio_keys_work_func(struct work_struct *work)
