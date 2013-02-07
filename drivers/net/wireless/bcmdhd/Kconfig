@@ -35,6 +35,6 @@ config BCMDHD_WEXT
 config DHD_USE_SCHED_SCAN
 	bool "Use CFG80211 sched scan"
 	depends on BCMDHD && CFG80211
-	default y
+	default n
 	---help---
 	  Use CFG80211 sched scan
