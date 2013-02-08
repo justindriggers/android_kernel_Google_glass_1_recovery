@@ -868,7 +868,23 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 		.ops = &sdp4430_dmic_ops,
 		.ignore_suspend = 1,
 	},
+	{
+		.name = "Bluetooth McBSP",
+		.stream_name = "Bluetooth Audio",
 
+		/* ABE components - MCBSP1 */
+		.cpu_dai_name = "omap-mcbsp-dai.0",
+		.platform_name = "omap-pcm-audio",
+
+		/* Bluetooth */
+		.codec_dai_name = "Bluetooth",
+
+		.no_codec = 1, /* TODO: have a dummy CODEC */
+		.be_hw_params_fixup = mcbsp_be_hw_params_fixup,
+		.ops = &sdp4430_mcbsp_ops,
+		.ignore_suspend = 1,
+		.be_id = OMAP_ABE_DAI_BT_VX,
+	},
 /*
  * Backend DAIs - i.e. dynamically matched interfaces, invisible to userspace.
  * Matched to above interfaces at runtime, based upon use case.
@@ -942,43 +958,6 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 		.no_pcm = 1, /* don't create ALSA pcm for this */
 		.ops = &sdp4430_mcpdm_ops,
 		.be_id = OMAP_ABE_DAI_PDM_VIB,
-	},
-	{
-		.name = OMAP_ABE_BE_BT_VX_UL,
-		.stream_name = "BT Capture",
-
-		/* ABE components - MCBSP1 - BT-VX */
-		.cpu_dai_name = "omap-mcbsp-dai.0",
-		.platform_name = "aess",
-
-		/* Bluetooth */
-		.codec_dai_name = "Bluetooth",
-
-		.no_pcm = 1, /* don't create ALSA pcm for this */
-		.no_codec = 1, /* TODO: have a dummy CODEC */
-		.be_hw_params_fixup = mcbsp_be_hw_params_fixup,
-		.ops = &sdp4430_mcbsp_ops,
-		.be_id = OMAP_ABE_DAI_BT_VX,
-		.ignore_suspend = 1,
-	},
-	{
-		.name = OMAP_ABE_BE_BT_VX_DL,
-		.stream_name = "BT Playback",
-
-		/* ABE components - MCBSP1 - BT-VX */
-		.cpu_dai_name = "omap-mcbsp-dai.0",
-		.platform_name = "aess",
-
-		/* Bluetooth */
-		.codec_dai_name = "Bluetooth",
-
-		.no_pcm = 1, /* don't create ALSA pcm for this */
-		.no_codec = 1, /* TODO: have a dummy CODEC */
-		.init = sdp4430_bt_init,
-		.be_hw_params_fixup = mcbsp_be_hw_params_fixup,
-		.ops = &sdp4430_mcbsp_ops,
-		.be_id = OMAP_ABE_DAI_BT_VX,
-		.ignore_suspend = 1,
 	},
 	{
 		.name = OMAP_ABE_BE_MM_EXT0,
