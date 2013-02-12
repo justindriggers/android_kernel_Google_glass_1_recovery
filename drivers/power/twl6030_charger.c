@@ -260,6 +260,8 @@ static const char *twl6030_state[] = {
 #define LED_STATE_ON                      1
 #define LED_STATE_RAMP                    2
 #define LED_STATE_OSCILLATE               3
+#define LED_UPDATE_RATE_MS               66
+#define LED_RAMPUP_TIME_MS             1280
 
 struct led_state {
 	int state;          // current state
@@ -274,6 +276,7 @@ struct led_state {
 
 	int led_low;        // configured low led level
 	int led_high;       // configured high led level
+	int led_step;       // step to increment or decrement per timer tick
 };
 
 struct twl6030_charger_device_info {
@@ -469,8 +472,18 @@ static void twl6030_init_led_state(struct twl6030_charger_device_info *di)
 	di->led.base = 0;
 	di->led.led_low = 0x00;
 	di->led.led_high = 0xff;
+	di->led.led_step = (di->led.led_high - di->led.led_low) / (LED_RAMPUP_TIME_MS / LED_UPDATE_RATE_MS);
 
 	setup_timer(&di->led_timer, twl6030_led_timer, (unsigned long) di);
+}
+
+static int twl6030_clip_led_value(struct twl6030_charger_device_info *di, int value)
+{
+	if (value > di->led.led_high)
+		value = di->led.led_high;
+	else if (value < di->led.led_low)
+		value = di->led.led_low;
+	return value;
 }
 
 static void twl6030_led_run(struct twl6030_charger_device_info *di)
@@ -501,10 +514,12 @@ static void twl6030_led_run(struct twl6030_charger_device_info *di)
 				twl6030_set_led(di, LED_PWM_ON, 0);
 
 			if (di->led.cur < di->led.target) {
-				di->led.cur++;
+				di->led.cur = twl6030_clip_led_value(di, di->led.cur + 
+						di->led.led_step);
 				twl6030_set_pwm_level(di->led.cur);
 			} else if (di->led.cur > di->led.target) {
-				di->led.cur--;
+				di->led.cur = twl6030_clip_led_value(di, di->led.cur -
+						di->led.led_step);
 				twl6030_set_pwm_level(di->led.cur);
 			}
 
@@ -521,10 +536,12 @@ static void twl6030_led_run(struct twl6030_charger_device_info *di)
 				twl6030_set_led(di, LED_PWM_ON, 0);
 
 			if (di->led.cur < di->led.target) {
-				di->led.cur++;
+				di->led.cur = twl6030_clip_led_value(di, di->led.cur + 
+						di->led.led_step);
 				twl6030_set_pwm_level(di->led.cur);
 			} else if (di->led.cur > di->led.target) {
-				di->led.cur--;
+				di->led.cur = twl6030_clip_led_value(di, di->led.cur -
+						di->led.led_step);
 				twl6030_set_pwm_level(di->led.cur);
 			}
 
@@ -556,7 +573,7 @@ static void twl6030_eval_led_state(struct twl6030_charger_device_info *di)
 				di->led.state = LED_STATE_OSCILLATE;
 				di->led.target = di->led.led_high;
 				di->led.base = di->led.led_low;
-				di->led.rate = 5;
+				di->led.rate = LED_UPDATE_RATE_MS;
 
 				twl6030_led_run(di);
 			}
@@ -568,7 +585,7 @@ static void twl6030_eval_led_state(struct twl6030_charger_device_info *di)
 
 				di->led.state = LED_STATE_RAMP;
 				di->led.target = di->led.led_high >> 2;
-				di->led.rate = 5;
+				di->led.rate = LED_UPDATE_RATE_MS;
 				di->led.next = LED_STATE_ON;
 
 				twl6030_led_run(di);
@@ -581,7 +598,7 @@ static void twl6030_eval_led_state(struct twl6030_charger_device_info *di)
 
 			di->led.state = LED_STATE_RAMP;
 			di->led.target = 0x00;
-			di->led.rate = 5;
+			di->led.rate = LED_UPDATE_RATE_MS;
 			di->led.next = LED_STATE_OFF;
 
 			twl6030_led_run(di);
