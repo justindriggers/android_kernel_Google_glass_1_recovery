@@ -37,10 +37,10 @@
 
 /* driver name/version */
 #define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.12"
+#define DRIVER_VERSION "0.13"
 
 /* minimum MCU firmware version required for this driver */
-#define MINIMUM_MCU_VERSION		19
+#define MINIMUM_MCU_VERSION		25
 
 /* experimental MCU firmware version */
 #define EXPERIMENTAL_MCU_VERSION	0x8000
@@ -586,6 +586,14 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 
 	mutex_lock(&glasshub->device_lock);
 
+	/* just in case the glasshub was reset after scheduling this handler */
+	if (!test_bit(FLAG_DEVICE_BOOTED, &glasshub->flags)) {
+		dev_warn(&glasshub->i2c_client->dev,
+				"%s: Ignoring pending interrupt because device is disabled\n",
+				__FUNCTION__);
+		goto Exit;
+	}
+
 	/* read the IRQ source */
 	rc = _i2c_read_reg8(glasshub, REG_STATUS, &status);
 	if (rc) goto Error;
@@ -717,14 +725,14 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 				__FUNCTION__);
 		sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "wink");
 	}
-
-	mutex_unlock(&glasshub->device_lock);
-	return IRQ_HANDLED;
+	goto Exit;
 
 Error:
-	mutex_unlock(&glasshub->device_lock);
-	set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
 	dev_err(&glasshub->i2c_client->dev, "%s: device read error\n", __FUNCTION__);
+	set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
+
+Exit:
+	mutex_unlock(&glasshub->device_lock);
 	return IRQ_HANDLED;
 }
 
