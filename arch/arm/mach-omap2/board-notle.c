@@ -1571,7 +1571,14 @@ static struct platform_device notle_usb_mux = {
  */
 static int notle_translate_temp(int temperature)
 {
-	if (temperature <= 996)
+	if (temperature <= 980)
+		/*
+		 * This indicates that the thermistor is disconnected on EVT2. Return the same
+		 * value as would be measured on EVT3 in case of missing thermistor so that the
+		 * gas gauge driver can recognize the disconnected state.
+		 */
+		temperature = -408;
+	else if (temperature <= 996)
 		temperature = 0;
 	else if (temperature <= 999)
 		temperature = 50;

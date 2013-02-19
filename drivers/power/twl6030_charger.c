@@ -29,6 +29,7 @@
 #include <linux/wakelock.h>
 #include <linux/usb/otg.h>
 #include <asm/div64.h>
+#include <linux/reboot.h>
 
 #define CONTROLLER_INT_MASK               0x00
 #define CONTROLLER_CTRL1                  0x01
@@ -282,13 +283,16 @@ struct led_state {
 struct twl6030_charger_device_info {
 	struct device *dev;
 
-	int voltage_mV;
+	int voltage_uV;
 	int current_uA;
 	int current_avg_uA;
-	int temp_C;
+	int temperature_cC;
 	int bat_health;
 	int state;
 	int vbus_online;
+
+	int current_limit_mA;
+	int temperature_critical;
 
 	int charge_top_off;
 
@@ -808,10 +812,9 @@ static void twl6030_stop_usb_charger(struct twl6030_charger_device_info *di)
 	ret = twl_i2c_write_u8(TWL6030_MODULE_CHARGER, 0, CONTROLLER_CTRL1);
 	if (ret)
 		pr_err("%s: Error access to TWL6030 (%d)\n", __func__, ret);
-	printk("battery: CHARGER OFF\n");
+	dev_warn(di->dev, "battery: CHARGER OFF\n");
 
 	usb_mux_force(false);
-
 }
 
 static void twl6030_start_usb_charger(struct twl6030_charger_device_info *di, int mA)
@@ -824,9 +827,7 @@ static void twl6030_start_usb_charger(struct twl6030_charger_device_info *di, in
 	}
 
 	if (mA < 50) {
-		ret = twl_i2c_write_u8(TWL6030_MODULE_CHARGER, 0, CONTROLLER_CTRL1);
-		if (ret)
-			goto err;
+		twl6030_stop_usb_charger(di);
 		return;
 	}
 
@@ -846,7 +847,7 @@ static void twl6030_start_usb_charger(struct twl6030_charger_device_info *di, in
 			goto err;
 	}
 
-	printk("battery: CHARGER ON\n");
+	dev_warn(di->dev, "battery: CHARGER ON\n");
 	return;
 
 err:
@@ -864,7 +865,7 @@ static irqreturn_t twl6030_charger_ctrl_interrupt(int irq, void *_di)
 {
 	struct twl6030_charger_device_info *di = _di;
 	queue_work(di->wq, &di->charge_control_work);
-	printk("battery: CHARGE CTRL IRQ\n");
+	dev_warn(di->dev, "battery: CHARGE CTRL IRQ\n");
 	return IRQ_HANDLED;
 }
 
@@ -890,7 +891,7 @@ static irqreturn_t twl6030_charger_fault_interrupt(int irq, void *_di)
 	if (ret)
 		goto err;
 
-	printk("battery: CHARGE FAULT IRQ: STS %02x INT1 %02x INT2 %02x\n",
+	dev_warn(di->dev, "battery: CHARGE FAULT IRQ: STS %02x INT1 %02x INT2 %02x\n",
 			usb_charge_sts, usb_charge_sts1, usb_charge_sts2);
 err:
 	queue_work(di->wq, &di->charge_fault_work);
@@ -962,7 +963,6 @@ static void twl6030_determine_charge_state(struct twl6030_charger_device_info *d
 	/* TODO: i2c error -> fault? */
 	twl_i2c_read_u8(TWL6030_MODULE_CHARGER, &stat1, CONTROLLER_STAT1);
 
-	/* TODO: why is STAT1.0 (BAT_TEMP_OVRANGE) always set? */
 	/* printk("battery: determine_charge_state() stat1=%02x int1=%02x\n", stat1, int1); */
 	
 	if (stat1 & VBUS_DET) {
@@ -1010,12 +1010,12 @@ static void twl6030_determine_charge_state(struct twl6030_charger_device_info *d
 
 			/* TODO: high current? */
 			if (!is_charging(di))
-				twl6030_start_usb_charger(di, 500);
+				twl6030_start_usb_charger(di, di->current_limit_mA);
 			break;
 	}
 
 	if (di->state != newstate) {
-		printk("battery: state %s -> %s\n",
+		dev_warn(di->dev, "battery: state %s -> %s\n",
 				twl6030_state[di->state], twl6030_state[newstate]);
 		di->state = newstate;
 		twl6030_eval_led_state(di);
@@ -1036,7 +1036,7 @@ static void twl6030_charge_fault_work(struct work_struct *work)
 		container_of(work, struct twl6030_charger_device_info, charge_fault_work);
 
 	if (is_charging(di))
-		twl6030_start_usb_charger(di, 500);
+		twl6030_start_usb_charger(di, di->current_limit_mA);
 
 	msleep(10);
 
@@ -1055,6 +1055,8 @@ static void twl6030_monitor_work(struct work_struct *work)
 	int voltage_uV;
 	int current_uA;
 	int temperature_cC;
+	int current_limit_mA;
+	int charging;
 	int ret;
 
 	/* pet the charger watchdog */
@@ -1065,26 +1067,25 @@ static void twl6030_monitor_work(struct work_struct *work)
 
 	battery = get_battery_power_supply(di);
 	if (!battery) {
-		printk(KERN_ERR "%s: Failed to get battery power supply supplicant for charger\n",
-				__func__);
-		goto done;
+		dev_err(di->dev, "Failed to get battery power supply supplicant for charger\n");
+		goto error;
 	}
 
 	if (!battery->get_property) {
-		printk(KERN_ERR "%s: bettery power supply has null get_property method\n", __func__);
-		goto done;
+		dev_err(di->dev, "bettery power supply has null get_property method\n");
+		goto error;
 	}
 
 	ret = battery->get_property(battery, POWER_SUPPLY_PROP_CAPACITY, &val);
 	if (ret) {
-		printk(KERN_ERR "%s: Failed to read battery capacity: %d\n", __func__, ret);
-		goto done;
+		dev_err(di->dev, "Failed to read battery capacity: %d\n", ret);
+		goto error;
 	}
 	capacity = val.intval;
 
 	ret = battery->get_property(battery, POWER_SUPPLY_PROP_VOLTAGE_NOW, &val);
 	if (ret) {
-		printk(KERN_WARNING "%s: Failed to read battery voltage: %d\n", __func__, ret);
+		dev_err(di->dev, "Failed to read battery voltage: %d\n", ret);
 		voltage_uV = 0;
 	} else {
 		voltage_uV = val.intval;
@@ -1092,7 +1093,7 @@ static void twl6030_monitor_work(struct work_struct *work)
 
 	ret = battery->get_property(battery, POWER_SUPPLY_PROP_CURRENT_NOW, &val);
 	if (ret) {
-		printk(KERN_WARNING "%s: Failed to read battery current: %d\n", __func__, ret);
+		dev_err(di->dev, "Failed to read battery current: %d\n", ret);
 		current_uA = 0;
 	} else {
 		current_uA = val.intval;
@@ -1100,19 +1101,54 @@ static void twl6030_monitor_work(struct work_struct *work)
 
 	ret = battery->get_property(battery, POWER_SUPPLY_PROP_TEMP, &val);
 	if (ret) {
-		printk(KERN_WARNING "%s: Failed to read battery temperature: %d\n", __func__, ret);
+		dev_warn(di->dev, "Failed to read battery temperature: %d\n", ret);
 		temperature_cC = 0;
 	} else {
 		temperature_cC = val.intval;
 	}
 
-#if 1
-	printk("%s: capacity=%d%% voltage_uV=%d uV current_uA=%d uA temperature_cC=%d %s%s\n",
-			__func__, capacity, voltage_uV, current_uA, temperature_cC,
-			twl6030_state[di->state], is_charging(di) ? " CHG" : "");
-#endif
+	/* store values in device info */
+	di->voltage_uV = voltage_uV;
+	di->current_uA = current_uA;
+	di->temperature_cC = temperature_cC;
 
-	/* TODO: stop charger after a maximum charge timeout or temp threshold */
+	/* manage temperature constraints */
+	current_limit_mA = di->current_limit_mA;
+	charging = is_charging(di);
+
+	if (temperature_cC < 100 || temperature_cC > 450) {
+		di->state = STATE_FAULT;
+		di->current_limit_mA = 0;
+	} else if (temperature_cC < 150) {
+		di->current_limit_mA = 169;
+	} else if (temperature_cC < 250) {
+		di->current_limit_mA = 282;
+	} else {
+		di->current_limit_mA = 500;
+	}
+
+	if (charging && current_limit_mA != di->current_limit_mA) {
+		// update current setting, 0 will stop charging
+		twl6030_start_usb_charger(di, di->current_limit_mA);
+		twl6030_eval_led_state(di);
+	}
+
+	/* with charging state updated, handle hard poweroff points */
+	if (temperature_cC < -100 || temperature_cC > 600) {
+		dev_err(di->dev, "Battery temperature critical! temp=%d\n", temperature_cC);
+		di->temperature_critical++;
+
+		// shut down the device if we get two successive critical readings
+		// this give the device time to log the critical temperature message
+		if (di->temperature_critical >= 2) {
+			dev_err(di->dev, "Powering down!\n");
+			kernel_power_off();
+		}
+	} else {
+		// reset counter if we get a non-critical reading
+		di->temperature_critical = 0;
+	}
+
 	if (is_charging(di) && capacity == 100 && current_uA < 50000) {
 		if (!di->charge_top_off) {
 			di->full_jiffies = msecs_to_jiffies(120 * 1000) + jiffies;
@@ -1126,13 +1162,17 @@ static void twl6030_monitor_work(struct work_struct *work)
 	}
 
 	if (di->state == STATE_FULL && capacity <= di->recharge_capacity) {
-		printk("battery: drained from full to %d%%, charging again\n", capacity);
+		dev_warn(di->dev, "battery: drained from full to %d%%, charging again\n", capacity);
 		di->state = STATE_USB;
-		twl6030_start_usb_charger(di, 500);
+		twl6030_start_usb_charger(di, di->current_limit_mA);
 		twl6030_eval_led_state(di);
 	}
 
-done:
+	dev_warn(di->dev, "capacity=%d%% voltage_uV=%d uV current_uA=%d uA "
+			"temperature_cC=%d current_limit_mA=%d %s%s\n",
+			capacity, voltage_uV, current_uA, temperature_cC, di->current_limit_mA,
+			twl6030_state[di->state], is_charging(di) ? " CHG" : "");
+error:
 	twl6030_determine_charge_state(di);
 }
 
@@ -1396,7 +1436,7 @@ static int __devinit twl6030_charger_probe(struct platform_device *pdev)
 	int irq = -1;
 	int ret;
 
-	printk("%s: enter\n", __func__);
+	dev_warn(&pdev->dev, "enter\n");
 
 	if (!pdata) {
 		dev_dbg(&pdev->dev, "platform_data not available\n");
@@ -1492,6 +1532,10 @@ static int __devinit twl6030_charger_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "otg_get_transceiver failed %d\n", ret);
 
 	di->charger_incurrent_mA = twl6030_get_usb_max_power(di->otg);
+	if (di->charger_incurrent_mA < 500)
+		di->current_limit_mA = di->charger_incurrent_mA;
+	else
+		di->current_limit_mA = 500;
 
 	/* request charger fault interrupt */
 	irq = platform_get_irq(pdev, 1);
@@ -1525,7 +1569,7 @@ static int __devinit twl6030_charger_probe(struct platform_device *pdev)
 
 	queue_delayed_work(di->wq, &di->monitor_work, 0);
 
-	printk("%s: exit\n", __func__);
+	dev_warn(&pdev->dev, "exit\n");
 	return 0;
 
 	/* TODO: fix fail exit mess */
@@ -1544,7 +1588,7 @@ usb_failed:
 	platform_set_drvdata(pdev, NULL);
 	kfree(di);
 
-	printk("%s: exit with error: %d\n", __func__, ret);
+	dev_warn(di->dev, "exit with error: %d\n", ret);
 	return ret;
 }
 

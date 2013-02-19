@@ -77,6 +77,7 @@ enum bq27x00_chip { BQ27000, BQ27500 };
 
 struct bq27x00_reg_cache {
 	int temperature;
+	int internal_temp;
 	int time_to_empty;
 	int time_to_empty_avg;
 	int time_to_full;
@@ -276,6 +277,7 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 	if (cache.flags >= 0) {
 		cache.capacity = bq27x00_battery_read_rsoc(di);
 		cache.temperature = bq27x00_read(di, BQ27x00_REG_TEMP, false);
+		cache.internal_temp = bq27x00_read(di, BQ27x00_REG_INT_TEMP, false);
 		cache.time_to_empty = bq27x00_battery_read_time(di, BQ27x00_REG_TTE);
 		cache.time_to_empty_avg = bq27x00_battery_read_time(di, BQ27x00_REG_TTES);
 		cache.time_to_full = bq27x00_battery_read_time(di, BQ27x00_REG_TTF);
@@ -332,10 +334,35 @@ static int bq27x00_battery_temperature(struct bq27x00_device_info *di,
 	else
 		temperature = ((di->cache.temperature * 5) - 5463) / 2;
 
+	/* let the board translate the thermistor reading if necessary */
 	if (di->translate_temp)
-		val->intval = di->translate_temp(temperature);
-	else
-		val->intval = temperature;
+		temperature = di->translate_temp(temperature);
+
+	/*
+	 * If the reading indicates missing/malfunctioning battery thermistor,
+	 * fall back on the internal temperature reading.
+	 */
+	if (temperature < -350) {
+		static int once = 0;
+
+		if (!once) {
+			dev_warn(di->dev, "Battery thermistor missing or malfunctioning, falling back to "
+					"gas gauge internal temp\n");
+			once = 1;
+		}
+
+		if (di->chip == BQ27500)
+			temperature = di->cache.internal_temp - 2731;
+		else
+			temperature = ((di->cache.internal_temp * 5) - 5463) / 2;
+
+		/*
+		 * Offset by 20 C since the board will run hotter than the battery.
+		 */
+		temperature -= 200;
+	}
+	
+	val->intval = temperature;
 
 	return 0;
 }
