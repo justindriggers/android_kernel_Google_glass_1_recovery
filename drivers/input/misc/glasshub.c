@@ -37,10 +37,10 @@
 
 /* driver name/version */
 #define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.13"
+#define DRIVER_VERSION "0.14"
 
 /* minimum MCU firmware version required for this driver */
-#define MINIMUM_MCU_VERSION		25
+#define MINIMUM_MCU_VERSION		27
 
 /* experimental MCU firmware version */
 #define EXPERIMENTAL_MCU_VERSION	0x8000
@@ -75,6 +75,9 @@
 #define REG_WINK_MIN			19
 #define REG_WINK_MAX			20
 
+/* virtual registers */
+#define REG_STATUS_READ_ONLY		64
+
 /* 16-bit registers */
 #define REG16_DETECTOR_BIAS		0x80
 #define REG16_DON_DOFF_THRESH		0x81
@@ -86,6 +89,7 @@
 #define REG16_IR_DATA			0x87
 #define REG16_FRAME_COUNT		0x88
 #define REG16_DEBUG			0x89
+#define REG16_TIMER_COUNT		0x8a
 
 #define CMD_APP_VERSION			0xF6
 #define CMD_BOOTLOADER_VERSION		0xF7
@@ -1182,6 +1186,12 @@ static ssize_t frame_count_show(struct device *dev, struct device_attribute *att
 	return show_reg(dev, buf, REG16_FRAME_COUNT);
 }
 
+/* show timer value */
+static ssize_t timer_count_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show_reg(dev, buf, REG16_TIMER_COUNT);
+}
+
 /* show debug value */
 static ssize_t mcu_debug_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -1736,7 +1746,7 @@ static ssize_t irq_status_show(struct device *dev, struct device_attribute *attr
 
 	mutex_lock(&glasshub->device_lock);
 	if (boot_device_l(glasshub) == 0) {
-		if (_i2c_read_reg(glasshub, REG_DEBUG, &value)) {
+		if (_i2c_read_reg(glasshub, REG_STATUS_READ_ONLY, &value)) {
 			set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
 		}
 	}
@@ -1788,6 +1798,7 @@ static DEVICE_ATTR(sample_count, DEV_MODE_RO, sample_count_show, NULL);
 static DEVICE_ATTR(disable, DEV_MODE_RW, disable_show, disable_store);
 static DEVICE_ATTR(debug, DEV_MODE_RW, debug_show, debug_store);
 static DEVICE_ATTR(frame_count, DEV_MODE_RO, frame_count_show, NULL);
+static DEVICE_ATTR(timer_count, DEV_MODE_RO, timer_count_show, NULL);
 static DEVICE_ATTR(irq_timestamp, DEV_MODE_RO, irq_timestamp_show, NULL);
 static DEVICE_ATTR(last_timestamp, DEV_MODE_RO, last_timestamp_show, NULL);
 static DEVICE_ATTR(irq_status, DEV_MODE_RO, irq_status_show, NULL);
@@ -1821,6 +1832,7 @@ static struct attribute *attrs[] = {
 	&dev_attr_error_code.attr,
 	&dev_attr_sample_count.attr,
 	&dev_attr_frame_count.attr,
+	&dev_attr_timer_count.attr,
 	&dev_attr_irq_timestamp.attr,
 	&dev_attr_last_timestamp.attr,
 	&dev_attr_irq_status.attr,
