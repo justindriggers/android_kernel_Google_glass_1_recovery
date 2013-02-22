@@ -817,6 +817,8 @@ struct f11_data {
 		int synth_events_sent;
 		/* Gesture events cannot cross early suspend boundaries. */
 		int early_tap;
+		/* We only want to present a single press gesture per suspend/resume cycle. */
+		int press;
 		/* Number of fingers detected on current iteration. */
 		unsigned int current_finger_pressed_cnt;
 		/* Number of fingers detected on previous iteration. */
@@ -1756,10 +1758,24 @@ static void rmi_f11_finger_handler(struct f11_data *f11,
 			}
 		}
 		if (data->gest_1->press == 1) {
-			rmi_f11_input_gesture(f11, sensor,
-			                      "press",
-			                      GESTURE_OFFSET_PRESS_X,
-			                      GESTURE_OFFSET_PRESS_Y);
+			if (f11->goog.press++) {
+				pr_info("%s Rejecting multiple press gesture cnt:%d\n", __func__, f11->goog.press);
+			} else {
+				/* A press gesture may be generated along with a real finger
+				 * sequence.  This would present as multiple fingers without
+				 * unless a sync separates them.
+				 *
+				 * So if we have real fingers data, close out the event packet
+				 * here before starting a new one with the press gesture.
+				 */
+				if (sensor->nbr_fingers) {
+					input_sync(sensor->input); /* sync after groups of events */
+				}
+				rmi_f11_input_gesture(f11, sensor,
+						      "press",
+						      GESTURE_OFFSET_PRESS_X,
+						      GESTURE_OFFSET_PRESS_Y);
+			}
 		}
 	}
 
@@ -2828,6 +2844,7 @@ static int rmi_f11_suspend(struct rmi_function_container *fc)
 	data->goog.last_suspend_cnt = get_suspend_cnt();
 	data->goog.synth_events_sent = 0;
 	data->goog.early_tap = 0;
+	data->goog.press = 0;
 	dev_info(&fc->dev, "%s Early suspended touchpad\n", __FUNCTION__);
 	return 0;
 }
