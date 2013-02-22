@@ -37,7 +37,7 @@
 
 /* driver name/version */
 #define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.14"
+#define DRIVER_VERSION "0.15"
 
 /* minimum MCU firmware version required for this driver */
 #define MINIMUM_MCU_VERSION		27
@@ -90,12 +90,16 @@
 #define REG16_FRAME_COUNT		0x88
 #define REG16_DEBUG			0x89
 #define REG16_TIMER_COUNT		0x8a
+#define REG16_DOFF_THRESH		0x8b
 
-#define CMD_APP_VERSION			0xF6
-#define CMD_BOOTLOADER_VERSION		0xF7
-#define CMD_FLASH_STATUS		0xF8
-#define CMD_FLASH			0xF9
-#define CMD_BOOT			0xFA
+/* virtual 16-bit registers */
+#define REG16_DON_THRESH		0xc1
+
+#define CMD_APP_VERSION			0xf6
+#define CMD_BOOTLOADER_VERSION		0xf7
+#define CMD_FLASH_STATUS		0xf8
+#define CMD_FLASH			0xf9
+#define CMD_BOOT			0xfA
 
 /* interrupt sources in STATUS register */
 #define IRQ_PASSTHRU			0b00000001
@@ -899,6 +903,34 @@ static ssize_t don_doff_threshold_store(struct device *dev, struct device_attrib
 		const char *buf, size_t count)
 {
 	return store_reg(dev, buf, count, REG16_DON_DOFF_THRESH, 1, 5000);
+}
+
+/* show don threshold value */
+static ssize_t don_threshold_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	return show_reg(dev, buf, REG16_DON_THRESH);
+}
+
+/* set don threshold value */
+static ssize_t don_threshold_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	return store_reg(dev, buf, count, REG16_DON_THRESH, 1, 5000);
+}
+
+/* show dof threshold value */
+static ssize_t doff_threshold_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	return show_reg(dev, buf, REG16_DOFF_THRESH);
+}
+
+/* set doff threshold value */
+static ssize_t doff_threshold_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	return store_reg(dev, buf, count, REG16_DOFF_THRESH, 1, 5000);
 }
 
 /* show don/doff hysteresis value */
@@ -1776,6 +1808,8 @@ static DEVICE_ATTR(ir, DEV_MODE_RO, ir_show, NULL);
 static DEVICE_ATTR(don_doff_enable, DEV_MODE_RW, don_doff_enable_show, don_doff_enable_store);
 static DEVICE_ATTR(don_doff, DEV_MODE_RO, don_doff_show, NULL);
 static DEVICE_ATTR(don_doff_threshold, DEV_MODE_RW, don_doff_threshold_show, don_doff_threshold_store);
+static DEVICE_ATTR(don_threshold, DEV_MODE_RW, don_threshold_show, don_threshold_store);
+static DEVICE_ATTR(doff_threshold, DEV_MODE_RW, doff_threshold_show, doff_threshold_store);
 static DEVICE_ATTR(don_doff_hysteresis, DEV_MODE_RW, don_doff_hysteresis_show, don_doff_hysteresis_store);
 static DEVICE_ATTR(led_drive, DEV_MODE_RW, led_drive_show, led_drive_store);
 static DEVICE_ATTR(calibrate, DEV_MODE_WO, NULL, calibrate_store);
@@ -1814,6 +1848,8 @@ static struct attribute *attrs[] = {
 	&dev_attr_don_doff_enable.attr,
 	&dev_attr_don_doff.attr,
 	&dev_attr_don_doff_threshold.attr,
+	&dev_attr_don_threshold.attr,
+	&dev_attr_doff_threshold.attr,
 	&dev_attr_don_doff_hysteresis.attr,
 	&dev_attr_led_drive.attr,
 	&dev_attr_calibrate.attr,
