@@ -105,26 +105,6 @@
 
 static notle_version NOTLE_VERSION = UNVERSIONED;
 
-// gpio pin assignment settings for various board types
-// TODO(jscarr) get rid of common, or put in complete set
-// HOG support is needed for a little longer, HOG & EVT1 were similar
-static int notle_gpio_board_hog[GPIO_MAX_INDEX] = {
-    [GPIO_MPU9000_INT_TIMER_INDEX] = GPIO_MPU9000_INT_TIMER_EVT1,
-    [GPIO_MPU9000_INT_INDEX] = GPIO_MPU9000_INT_EVT1,
-    [GPIO_USB_MUX_CB0_INDEX] = GPIO_USB_MUX_CB0_EVT1,
-    [GPIO_USB_MUX_CB1_INDEX] = GPIO_USB_MUX_CB1,
-    [GPIO_GPS_ON_OFF_INDEX] = GPIO_GPS_ON_OFF_EVT1,
-    [GPIO_GPS_RESET_N_INDEX] = GPIO_GPS_RESET_N_EVT1,
-    [GPIO_LCD_RST_N_INDEX] = GPIO_LCD_RST_N_EVT1,
-    [GPIO_DISP_ENB_INDEX] = GPIO_DISP_ENB,
-    [GPIO_BT_RST_N_INDEX] = GPIO_BT_RST_N_EVT1,
-    [GPIO_CAM_PWDN_INDEX] = GPIO_CAM_PWDN_EVT1,
-    [GPIO_TOUCHPAD_INT_N_INDEX] = GPIO_TOUCHPAD_INT_N_EVT1,
-    [GPIO_PROX_INT_INDEX] = GPIO_PROX_INT_EVT1,
-    [GPIO_BT_RST_N_INDEX] = GPIO_BT_RST_N_EVT1,
-    [GPIO_BCM_BT_HOST_WAKE_INDEX] = GPIO_BCM_BT_HOST_WAKE_EVT1,
-    [GPIO_BCM_WLAN_HOST_WAKE_INDEX] = GPIO_BCM_WLAN_HOST_WAKE_HOG,
-};
 static int notle_gpio_board_evt1[GPIO_MAX_INDEX] = {
     [GPIO_MPU9000_INT_TIMER_INDEX] = GPIO_MPU9000_INT_TIMER_EVT1,
     [GPIO_MPU9000_INT_INDEX] = GPIO_MPU9000_INT_EVT1,
@@ -206,19 +186,32 @@ static char * notle_version_str(notle_version board_ver)
 {
         switch (board_ver)
         {
-        case V1_HOG:
-                return "V1 HOG";
         case V1_EVT1:
                 return "V1 EVT1";
         case V1_EVT2:
                 return "V1 EVT2";
         case V1_EVT3:
                 return "V1 EVT3";
+        case V1_DVT1:
+                return "V1 DVT1";
         default:
                 return "UNVERSIONED";
         }
         return "UNVERSIONED";
 }
+
+int notle_version_supported() {
+        return ( (NOTLE_VERSION>=SUPPORTED_FROM) && (NOTLE_VERSION<=SUPPORTED_TO) );
+}
+
+int notle_version_before( notle_version then ) {
+        return ( then > NOTLE_VERSION );
+}
+
+int notle_version_after( notle_version then ) {
+        return ( then < NOTLE_VERSION );
+}
+
 
 #ifdef CONFIG_OMAP4_DUTY_CYCLE_GOVERNOR
 
@@ -339,28 +332,21 @@ notle_get_gpio(int gpio_index)
 {
     int ret = -1;
 
+    if (!notle_version_supported()) {
+        return ret;
+    }
+
     switch (NOTLE_VERSION) {
-    case V1_HOG:
-        ret = notle_gpio_board_hog[gpio_index];
-        break;
     case V1_EVT1:
         ret = notle_gpio_board_evt1[gpio_index];
         break;
-    case V1_EVT2:
-        ret = notle_gpio_board_evt2[gpio_index];
-        break;
-    case V1_EVT3:
-        // Note(petermalkin): electically EVT3 is the same as EVT2
-        ret = notle_gpio_board_evt2[gpio_index];
-        break;
     default:
-        pr_err("No get_gpio for Notle version: %s\n",
-               notle_version_str(NOTLE_VERSION));
+        ret = notle_gpio_board_evt2[gpio_index];
         break;
     }
+
     // Special case gpio_wk0
-    if (ret == 0 && NOTLE_VERSION != V1_HOG &&
-            gpio_index != GPIO_BCM_WLAN_HOST_WAKE_INDEX) {
+    if (ret == 0 && gpio_index != GPIO_BCM_WLAN_HOST_WAKE_INDEX) {
         pr_err("%s:Uninitialized index %d\n", __FUNCTION__, gpio_index);
         ret = -1;
     }
@@ -410,14 +396,14 @@ static void notle_disable_dpi(struct omap_dss_device *dssdev) {
 }
 
 static int notle_enable_panel(void) {
-        if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
+        if (NOTLE_VERSION == V1_EVT1) {
             gpio_set_value(GPIO_DISP_ENB, 1);
         }
         return 0;
 };
 
 static void notle_disable_panel(void) {
-        if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
+        if (NOTLE_VERSION == V1_EVT1) {
             gpio_set_value(GPIO_DISP_ENB, 0);
         }
 };
@@ -569,7 +555,7 @@ int __init notle_dpi_init(void)
 {
         int r;
 
-        if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
+        if (notle_version_before(V1_EVT2)) {
             r = gpio_request_one(GPIO_DISP_ENB, GPIOF_OUT_INIT_LOW, "disp_enable");
             if (r) {
                     pr_err("Failed to get display enable gpio\n");
@@ -582,13 +568,13 @@ int __init notle_dpi_init(void)
                              GPIOF_OUT_INIT_HIGH, "panel_reset");
         if (r) {
                 pr_err("Failed to get panel reset powerdown GPIO\n");
-                if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
+                if (notle_version_before(V1_EVT2)) {
                     gpio_free(GPIO_DISP_ENB);
                 }
                 return r;
         }
 
-        if (NOTLE_VERSION == V1_EVT2 || NOTLE_VERSION == V1_EVT3) {
+        if (notle_version_after(V1_EVT1)) {
                 struct panel_notle_data *panel_data = &panel_notle;
 
                 panel_data->gpio_fpga_cdone = notle_get_gpio(GPIO_FPGA_CDONE_INDEX);
@@ -597,7 +583,7 @@ int __init notle_dpi_init(void)
                 if (r) {
                         pr_err("Failed to get fpga_cdone GPIO\n");
                         gpio_free(panel_notle_device.reset_gpio);
-                        if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
+                        if (notle_version_before(V1_EVT2)) {
                             gpio_free(GPIO_DISP_ENB);
                         }
                         return r;
@@ -610,15 +596,14 @@ int __init notle_dpi_init(void)
                         pr_err("Failed to get fpga_creset_b GPIO\n");
                         gpio_free(panel_data->gpio_fpga_cdone);
                         gpio_free(panel_notle_device.reset_gpio);
-                        if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
+                        if (notle_version_before(V1_EVT2)) {
                             gpio_free(GPIO_DISP_ENB);
                         }
                         return r;
                 }
         }
 
-        if (NOTLE_VERSION == V1_HOG || NOTLE_VERSION == V1_EVT1 ||
-            NOTLE_VERSION == V1_EVT2 || NOTLE_VERSION == V1_EVT3) {
+        if (notle_version_supported()) {
           spi_register_board_info(ice40_spi_board_info,
                                   ARRAY_SIZE(ice40_spi_board_info));
         }
@@ -1839,7 +1824,7 @@ static void __init notle_i2c_irq_fixup(void)
 
     // XXX TODO(jscarr) REMOVE this when pre EVT2 units are destroyed
     // first batch of evt2 had prox_int on blink_int
-    if (NOTLE_VERSION == V1_EVT2 || NOTLE_VERSION == V1_EVT3) {
+    if ( notle_version_after(V1_EVT1) ) {
         pr_err("Forcing prox_int to %d instead of %d\n", gpio_blink, gpio_prox); 
         gpio_prox = gpio_blink;
     }
@@ -1895,16 +1880,13 @@ static int __init notle_i2c_init(void)
 
 		/* setup the charger/battery platform data based on board revision */
 		switch (NOTLE_VERSION) {
-            case V1_EVT3:
-				notle_gasgauge_platform_data.translate_temp = NULL;
-
-				notle_charger_data.supplied_to = notle_charger_supplicants_evt2;
+			case V1_EVT1:
+				notle_charger_data.supplied_to = notle_charger_supplicants_evt1;
 				notle_charger_data.num_supplicants =
-					ARRAY_SIZE(notle_charger_supplicants_evt2);
+					ARRAY_SIZE(notle_charger_supplicants_evt1);
 
-				/* gas gauge is on i2c1, which is registered in the pmic init */
-				i2c_register_board_info(1, notle_i2c_1_boardinfo,
-						ARRAY_SIZE(notle_i2c_1_boardinfo));
+				/* EVT1 uses the PMIC gas gauge to poorly monitory the state of charge */
+				notle_twldata.battery = &notle_battery_data;
 				break;
 
 			case V1_EVT2:
@@ -1919,78 +1901,45 @@ static int __init notle_i2c_init(void)
 						ARRAY_SIZE(notle_i2c_1_boardinfo));
 				break;
 
-			case V1_HOG:
-			case V1_EVT1:
-			default:
-				notle_charger_data.supplied_to = notle_charger_supplicants_evt1;
-				notle_charger_data.num_supplicants =
-					ARRAY_SIZE(notle_charger_supplicants_evt1);
+                        case V1_EVT3:
+                        case V1_DVT1:
+                        default:
+				notle_gasgauge_platform_data.translate_temp = NULL;
 
-				/* EVT1 uses the PMIC gas gauge to poorly monitory the state of charge */
-				notle_twldata.battery = &notle_battery_data;
+				notle_charger_data.supplied_to = notle_charger_supplicants_evt2;
+				notle_charger_data.num_supplicants =
+					ARRAY_SIZE(notle_charger_supplicants_evt2);
+
+				/* gas gauge is on i2c1, which is registered in the pmic init */
+				i2c_register_board_info(1, notle_i2c_1_boardinfo,
+						ARRAY_SIZE(notle_i2c_1_boardinfo));
 				break;
+
 		}
 
-        switch (NOTLE_VERSION) {
-          case V1_HOG:
-          case V1_EVT1:
-          case V1_EVT2:
-          case V1_EVT3:
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
-            synaptics_f11_data.flip_X = false;
-            synaptics_f11_data.flip_Y = true;
-            synaptics_f11_data.swap_axes = false;
-            synaptics_sensordata.attn_gpio_number = notle_get_gpio(GPIO_TOUCHPAD_INT_N_INDEX);
-#endif  /* CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C */
-            omap4_pmic_init("twl6030", &notle_twldata);
-            notle_i2c_irq_fixup();
-            omap_register_i2c_bus(2, 400, NULL, 0);
-            omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
-                            ARRAY_SIZE(notle_i2c_3_boardinfo));
-            omap_register_i2c_bus(4, 400, notle_i2c_4_boardinfo,
-                            ARRAY_SIZE(notle_i2c_4_boardinfo));
-            break;
-          default:
+        if (!notle_version_supported()) {
             pr_err("Unrecognized Notle version: %i\n", NOTLE_VERSION);
             return -1;
-            break;
         }
+
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
+        synaptics_f11_data.flip_X = false;
+        synaptics_f11_data.flip_Y = true;
+        synaptics_f11_data.swap_axes = false;
+        synaptics_sensordata.attn_gpio_number = notle_get_gpio(GPIO_TOUCHPAD_INT_N_INDEX);
+#endif  /* CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C */
+        omap4_pmic_init("twl6030", &notle_twldata);
+        notle_i2c_irq_fixup();
+        omap_register_i2c_bus(2, 400, NULL, 0);
+        omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
+                        ARRAY_SIZE(notle_i2c_3_boardinfo));
+        omap_register_i2c_bus(4, 400, notle_i2c_4_boardinfo,
+                        ARRAY_SIZE(notle_i2c_4_boardinfo));
         return 0;
 }
 
 #ifdef CONFIG_OMAP_MUX
 // Board specific MUX settings
-// HOG Core:
-static struct omap_board_mux hog_board_mux[] __initdata = {
-    OMAP4_MUX(GPMC_AD12,            OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BCM_BT_WAKE
-    OMAP4_MUX(GPMC_A19,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // WL_RST_N
-    OMAP4_MUX(GPMC_A20,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // USB_MUX_CB0
-    OMAP4_MUX(GPMC_A21,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // USB_MUX_CB1
-    OMAP4_MUX(GPMC_A24,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // WL_BT_REG_ON
-    OMAP4_MUX(GPMC_A25,             OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GPS_ON_OFF
-    OMAP4_MUX(GPMC_NCS2,            OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GPS_RESET_N
-    OMAP4_MUX(GPMC_NCS3,            OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // LCD_RST_N
-    OMAP4_MUX(USBB1_ULPITLL_CLK,    OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // DISP_ENB
-    OMAP4_MUX(USBB1_HSIC_STROBE,    OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),  // BCM_WLAN_HOST_WAKE_HOG
-    OMAP4_MUX(USBB2_HSIC_STROBE,    OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BCM_WLAN_WAKE
-    OMAP4_MUX(MCSPI4_CLK,           OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BT_RST_N
-    OMAP4_MUX(MCSPI4_CS0,           OMAP_MUX_MODE3 | OMAP_PIN_INPUT),   // BCM_BT_HOST_WAKE
-    OMAP4_MUX(USBB1_ULPITLL_DAT3,   OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // CAM_PWDN
-    OMAP4_MUX(USBB1_ULPITLL_DAT5,   OMAP_MUX_MODE7 | OMAP_PULL_ENA),    // BACKLIGHT XXX Remove? NC on EVT1
-    OMAP4_MUX(ABE_DMIC_DIN2,        OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN),    // CAMERA, TOP_SW
-    OMAP4_MUX(GPMC_AD8,             OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN),    // TOUCHPAD_INT_N
-    OMAP4_MUX(USBB1_ULPITLL_DAT2,   OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // PROX_INT
-    OMAP4_MUX(USBB1_ULPITLL_DAT7,   OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),           // MPU9000_INT
-    OMAP4_MUX(USBB1_ULPITLL_DAT4,   OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),           // MPU9000_INT_TIMER
-	{ .reg_offset = OMAP_MUX_TERMINATOR },
-};
-// HOG WakeUp:
-static struct omap_board_mux hog_board_wkup_mux[] __initdata = {
-    OMAP4_MUX(FREF_CLK4_REQ, OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // GREEN_LED
-    OMAP4_MUX(FREF_CLK4_OUT, OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // YELLOW_LED
-	{ .reg_offset = OMAP_MUX_TERMINATOR },
-};
-
 // EVT1 Core:
 static struct omap_board_mux evt1_board_mux[] __initdata = {
     OMAP4_MUX(GPMC_AD12,            OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BCM_BT_WAKE
@@ -2132,7 +2081,7 @@ static int notle_gps_init(void) {
         }
 
         /* EVT2 added the GPS_AWAKE connection, was NC in EVT1 */
-        if (NOTLE_VERSION == V1_EVT2 || NOTLE_VERSION == V1_EVT3) {
+        if ( notle_version_after(V1_EVT1) ) {
             r = gpio_request_one(GPIO_GPS_AWAKE_EVT2, GPIOF_IN, "gps_awake");
             if (r) {
                     pr_err("Failed to get gps_awake gpio\n");
@@ -2189,7 +2138,7 @@ static int __init notle_imu_init(void) {
 
         /* Configuration of requested GPIO line */
 
-        if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
+        if (NOTLE_VERSION == V1_EVT1) {
             gpio_mpu9000_int_timer = notle_get_gpio(GPIO_MPU9000_INT_TIMER_INDEX);
             r = gpio_request_one(gpio_mpu9000_int_timer, GPIOF_IN, "mpuirq_timer");
             if (r) {
@@ -2277,13 +2226,14 @@ static void __init notle_init(void)
         if (omap_rev() == OMAP4430_REV_ES1_0)
                 package = OMAP_PACKAGE_CBL;
         notle_version_init();
-        switch (NOTLE_VERSION) {
-        case V1_HOG:
-            omap_emif_setup_device_details(&emif_devices_evt1, &emif_devices_evt1);
-            omap4_mux_init(hog_board_mux, hog_board_wkup_mux, package);
-            break;
 
-        case V1_EVT1:
+        if (!notle_version_supported()) {
+            omap_emif_setup_device_details(&emif_devices_evt1, &emif_devices_evt1);
+            pr_err("No mux init for Notle version: %s\n",
+                   notle_version_str(NOTLE_VERSION));
+        }
+
+        if ( notle_version_before(V1_EVT2) ) {
             omap_emif_setup_device_details(&emif_devices_evt1, &emif_devices_evt1);
             omap4_mux_init(evt1_board_mux, evt1_board_wkup_mux, package);
 
@@ -2293,10 +2243,7 @@ static void __init notle_init(void)
             //and before you set it to input
             omap4_ctrl_wk_pad_writel(OMAP4_USIM_PWRDNZ_MASK,
                     OMAP4_CTRL_MODULE_PAD_WKUP_CONTROL_USIMIO);
-            break;
-
-        case V1_EVT3:
-        case V1_EVT2:
+	} else {
             omap_emif_setup_device_details(&emif_devices_evt2, &emif_devices_evt2);
             omap4_mux_init(evt2_board_mux, evt2_board_wkup_mux, package);
 
@@ -2315,13 +2262,6 @@ static void __init notle_init(void)
             omap_reg |= OMAP4_USIM_PBIASLITE_PWRDNZ_MASK;
             omap_reg &= ~OMAP4_USIM_PBIASLITE_VMODE_MASK;
             omap4_ctrl_pad_writel(omap_reg, OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_PBIASLITE);
-            break;
-
-        default:
-            omap_emif_setup_device_details(&emif_devices_evt1, &emif_devices_evt1);
-            pr_err("No mux init for Notle version: %s\n",
-                   notle_version_str(NOTLE_VERSION));
-            break;
         }
         notle_pmic_mux_init();
 
@@ -2388,7 +2328,7 @@ static void __init notle_init(void)
         }
 #endif
 
-        if (NOTLE_VERSION == V1_EVT1 || NOTLE_VERSION == V1_HOG) {
+        if ( notle_version_before(V1_EVT2) ) {
             panel_notle_device.data = &panel_notle_preevt2;
         }
         err = notle_dpi_init();

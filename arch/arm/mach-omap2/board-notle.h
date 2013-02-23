@@ -112,8 +112,14 @@ typedef enum {
         V1_EVT1     = 1,
         V1_EVT2     = 2,
         V1_EVT3     = 3,
-        V1_HOG      = 6,
+        V1_DVT1     = 4,
+        SUPPORTED_FROM = V1_EVT1,
+        SUPPORTED_TO = V1_DVT1,
 } notle_version;
+
+int notle_version_before( notle_version then );
+int notle_version_after( notle_version then );
+int notle_version_supported(void);
 
 extern struct mmc_platform_data tuna_wifi_data;
 // Elton V6 uses GPIO_WL_RST_N to control wifi power; previous versions use

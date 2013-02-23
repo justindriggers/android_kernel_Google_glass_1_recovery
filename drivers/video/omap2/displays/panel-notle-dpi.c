@@ -70,14 +70,12 @@
 
 typedef enum {
         UNVERSIONED = 7,
-        V1_DOG      = 7,
-        V3_EMU      = 0,
-        V4_FLY      = 4,
-        V5_GNU      = 5,
-        V6_HOG      = 6,
         V1_EVT1     = 1,
         V1_EVT2     = 2,
         V1_EVT3     = 3,
+        V1_DVT1     = 4,
+        SUPPORTED_FROM = V1_EVT1,
+        SUPPORTED_TO = V1_DVT1,
 } notle_version;
 
 enum {
@@ -272,6 +270,18 @@ struct notle_drv_data {
         testpattern pattern;
 };
 
+static inline int notle_version_before( notle_version then ) {
+        return version < then;
+}
+
+static inline int notle_version_after( notle_version then ) {
+        return version > then;
+}
+
+static inline int notle_version_supported( void ) {
+        return ( version>=SUPPORTED_FROM && version <= SUPPORTED_TO );
+}
+
 static inline const char* testpattern_name(testpattern pattern) {
         return testpattern_names[pattern];
 }
@@ -293,8 +303,6 @@ static int ice40_read_register(u8 reg_addr);
 static int ice40_write_register(u8 reg_addr, u8 reg_value);
 static int ice40_set_backlight(int led_en, int r, int g, int b);
 static int fpga_read_revision(void);
-static void led_config_to_fpga_config(struct led_config *led,
-                                      struct actel_fpga_config *fpga);
 static void led_config_to_linecuts(struct omap_dss_device *dssdev,
                                    struct led_config *led, int *red_linecut,
                                    int *green_linecut, int *blue_linecut);
@@ -334,10 +342,7 @@ static ssize_t dump_regs(struct notle_drv_data *notle_data,
         int i, val;
 
         *buf = '\0';
-        if (version == V6_HOG ||
-            version == V1_EVT1 ||
-            version == V1_EVT2 ||
-            version == V1_EVT3) {
+        if (notle_version_supported()) {
           for (i = 0; i < sizeof(ice40_regs); ++i) {
             val = ice40_read_register(ice40_regs[i]);
             if (val < 0) {
@@ -441,32 +446,18 @@ static ssize_t colormix_store(struct notle_drv_data *notle_data,
          * If the display is enabled, write the new FPGA config immediately,
          * otherwise it will be written when the display is enabled.
          */
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
+        }
+
         if (notle_data->enabled && led_config.brightness) {
-          switch (version) {
-            case V4_FLY:
-            case V5_GNU:
-              led_config_to_fpga_config(&led_config, &actel_fpga_config);
-              if (actel_fpga_write_config(&actel_fpga_config)) {
-                printk(KERN_ERR LOG_TAG "Failed to colormix_store:"
-                       " i2c write failed\n");
-              }
-              break;
-            case V6_HOG:
-            case V1_EVT1:
-            case V1_EVT2:
-            case V1_EVT3:
               led_config_to_linecuts(notle_data->dssdev, &led_config,
                                      &red, &green, &blue);
               if (ice40_set_backlight(1, red, green, blue)) {
                 printk(KERN_ERR LOG_TAG "Failed to colormix_store:"
                        " spi write failed\n");
               }
-              break;
-            default:
-              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
-                     " %d\n", version);
-              break;
-          }
         }
 
         return size;
@@ -502,31 +493,23 @@ static ssize_t testpattern_store(struct notle_drv_data *notle_data,
                 }
         }
 
-        switch (version) {
-          case V6_HOG:
-          case V1_EVT1:
-          case V1_EVT2:
-          case V1_EVT3:
-                i = ice40_read_register(ICE40_PIPELINE);
-                if (i < 0) {
-                        printk(KERN_ERR LOG_TAG "Failed to testpattern_store: "
-                               "register read failed: %i\n", i);
-                        return -EIO;
-                }
-                i = (i & ~ICE40_PIPELINE_TESTPAT) | notle_data->pattern;
-                if ((i = ice40_write_register(ICE40_PIPELINE, (u8)(i & 0xff))) < 0) {
-                        printk(KERN_ERR LOG_TAG "Failed to testpattern_store: "
-                               "register write failed: %i\n", i);
-                        return -EIO;
-                }
-                break;
-          case V1_DOG:
-          case V3_EMU:
-          case V4_FLY:
-          case V5_GNU:
-                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
-                       version);
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
                 return -EINVAL;
+        }
+
+        i = ice40_read_register(ICE40_PIPELINE);
+        if (i < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to testpattern_store: "
+                       "register read failed: %i\n", i);
+                return -EIO;
+        }
+        i = (i & ~ICE40_PIPELINE_TESTPAT) | notle_data->pattern;
+        if ((i = ice40_write_register(ICE40_PIPELINE, (u8)(i & 0xff))) < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to testpattern_store: "
+                       "register write failed: %i\n", i);
+                return -EIO;
         }
 
         return size;
@@ -548,46 +531,32 @@ static ssize_t testmono_store(struct notle_drv_data *notle_data,
           actel_fpga_config.config &= ~ACTEL_FPGA_CONFIG_TEST_MONO;
         }
 
-        switch (version) {
-          case V4_FLY:
-          case V5_GNU:
-                if (actel_fpga_write_config(&actel_fpga_config)) {
-                        printk(KERN_ERR LOG_TAG "Failed to testmono_store: "
-                               "i2c write failed\n");
-                        return -EIO;
-                }
-                break;
-          case V6_HOG:
-          case V1_EVT1:
-          case V1_EVT2:
-          case V1_EVT3:
-                value = ice40_read_register(ICE40_BACKLIGHT);
-                if (value < 0) {
-                        printk(KERN_ERR LOG_TAG "Failed to testmono_store: "
-                               "spi read failed: %i\n", value);
-                        return -EIO;
-                }
-                if (actel_fpga_config.config & ACTEL_FPGA_CONFIG_TEST_MONO) {
-                        value |= ICE40_BACKLIGHT_FORCER |
-                                 ICE40_BACKLIGHT_FORCEG |
-                                 ICE40_BACKLIGHT_FORCEB;
-                } else {
-                        value &= ~(ICE40_BACKLIGHT_FORCER |
-                                   ICE40_BACKLIGHT_FORCEG |
-                                   ICE40_BACKLIGHT_FORCEB);
-                }
-                value = ice40_write_register(ICE40_BACKLIGHT, (u8)(value & 0xff));
-                if (value < 0) {
-                        printk(KERN_ERR LOG_TAG "Failed to testmono_store: "
-                               "spi write failed: %i\n", value);
-                        return -EIO;
-                }
-                break;
-          case V1_DOG:
-          case V3_EMU:
-                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
-                       version);
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
                 return -EINVAL;
+        }
+
+        value = ice40_read_register(ICE40_BACKLIGHT);
+        if (value < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to testmono_store: "
+                       "spi read failed: %i\n", value);
+                return -EIO;
+        }
+        if (actel_fpga_config.config & ACTEL_FPGA_CONFIG_TEST_MONO) {
+                value |= ICE40_BACKLIGHT_FORCER |
+                         ICE40_BACKLIGHT_FORCEG |
+                         ICE40_BACKLIGHT_FORCEB;
+        } else {
+                value &= ~(ICE40_BACKLIGHT_FORCER |
+                           ICE40_BACKLIGHT_FORCEG |
+                           ICE40_BACKLIGHT_FORCEB);
+        }
+        value = ice40_write_register(ICE40_BACKLIGHT, (u8)(value & 0xff));
+        if (value < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to testmono_store: "
+                       "spi write failed: %i\n", value);
+                return -EIO;
         }
 
         return size;
@@ -595,12 +564,9 @@ static ssize_t testmono_store(struct notle_drv_data *notle_data,
 static ssize_t forcer_show(struct notle_drv_data *notle_data, char *buf) {
         int val;
 
-        if (version != V6_HOG &&
-            version != V1_EVT1 &&
-            version != V1_EVT2 &&
-            version != V1_EVT3) {
-                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
-                       version);
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
                 return -EINVAL;
         }
 
@@ -617,12 +583,9 @@ static ssize_t forcer_store(struct notle_drv_data *notle_data,
                                  const char *buf, size_t size) {
         int r, val;
 
-        if (version != V6_HOG &&
-            version != V1_EVT1 &&
-            version != V1_EVT2 &&
-            version != V1_EVT3) {
-                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
-                       version);
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
                 return -EINVAL;
         }
 
@@ -655,12 +618,9 @@ static ssize_t forcer_store(struct notle_drv_data *notle_data,
 static ssize_t forceg_show(struct notle_drv_data *notle_data, char *buf) {
         int val;
 
-        if (version != V6_HOG &&
-            version != V1_EVT1 &&
-            version != V1_EVT2 &&
-            version != V1_EVT3) {
-                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
-                       version);
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
                 return -EINVAL;
         }
 
@@ -677,12 +637,9 @@ static ssize_t forceg_store(struct notle_drv_data *notle_data,
                                  const char *buf, size_t size) {
         int r, val;
 
-        if (version != V6_HOG &&
-            version != V1_EVT1 &&
-            version != V1_EVT2 &&
-            version != V1_EVT3) {
-                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
-                       version);
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
                 return -EINVAL;
         }
 
@@ -715,12 +672,9 @@ static ssize_t forceg_store(struct notle_drv_data *notle_data,
 static ssize_t forceb_show(struct notle_drv_data *notle_data, char *buf) {
         int val;
 
-        if (version != V6_HOG &&
-            version != V1_EVT1 &&
-            version != V1_EVT2 &&
-            version != V1_EVT3) {
-                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
-                       version);
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
                 return -EINVAL;
         }
 
@@ -737,12 +691,9 @@ static ssize_t forceb_store(struct notle_drv_data *notle_data,
                                  const char *buf, size_t size) {
         int r, val;
 
-        if (version != V6_HOG &&
-            version != V1_EVT1 &&
-            version != V1_EVT2 &&
-            version != V1_EVT3) {
-                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
-                       version);
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
                 return -EINVAL;
         }
 
@@ -775,12 +726,9 @@ static ssize_t forceb_store(struct notle_drv_data *notle_data,
 static ssize_t cpsel_show(struct notle_drv_data *notle_data, char *buf) {
         int val;
 
-        if (version != V6_HOG &&
-            version != V1_EVT1 &&
-            version != V1_EVT2 &&
-            version != V1_EVT3) {
-                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
-                       version);
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
                 return -EINVAL;
         }
 
@@ -797,12 +745,9 @@ static ssize_t cpsel_store(struct notle_drv_data *notle_data,
                                  const char *buf, size_t size) {
         int r, val;
 
-        if (version != V6_HOG &&
-            version != V1_EVT1 &&
-            version != V1_EVT2 &&
-            version != V1_EVT3) {
-                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
-                       version);
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
                 return -EINVAL;
         }
 
@@ -835,27 +780,19 @@ static ssize_t cpsel_store(struct notle_drv_data *notle_data,
 static ssize_t mono_show(struct notle_drv_data *notle_data, char *buf) {
         int val;
 
-        switch (version) {
-            case V4_FLY:
-            case V5_GNU:
-              val = !!(actel_fpga_config.config & ACTEL_FPGA_CONFIG_MONO);
-              break;
-            case V6_HOG:
-            case V1_EVT1:
-            case V1_EVT2:
-            case V1_EVT3:
-              val = ice40_read_register(ICE40_BACKLIGHT);
-              if (val < 0) {
-                printk(KERN_ERR LOG_TAG "Failed to read iCE40 register: "
-                       "0x%02x\n", ICE40_BACKLIGHT);
-                return -EIO;
-              }
-              val = !!(val & ICE40_BACKLIGHT_MONO);
-              break;
-            default:
-              printk(KERN_ERR LOG_TAG "Unsupported Notle version: %d\n", version);
-              return -EINVAL;
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
+                return -EINVAL;
         }
+
+        val = ice40_read_register(ICE40_BACKLIGHT);
+        if (val < 0) {
+            printk(KERN_ERR LOG_TAG "Failed to read iCE40 register: "
+                   "0x%02x\n", ICE40_BACKLIGHT);
+            return -EIO;
+        }
+        val = !!(val & ICE40_BACKLIGHT_MONO);
 
         return snprintf(buf, PAGE_SIZE, "%d\n", val);
 }
@@ -866,44 +803,28 @@ static ssize_t mono_store(struct notle_drv_data *notle_data,
         if (r)
                 return r;
 
-        switch (version) {
-            case V4_FLY:
-            case V5_GNU:
-              if (value) {
-                actel_fpga_config.config |= ACTEL_FPGA_CONFIG_MONO;
-              } else {
-                actel_fpga_config.config &= ~ACTEL_FPGA_CONFIG_MONO;
-              }
-              if (actel_fpga_write_config(&actel_fpga_config)) {
-                printk(KERN_ERR LOG_TAG "Failed to mono_store: i2c write failed\n");
-                return -EIO;
-              }
-              break;
-            case V6_HOG:
-            case V1_EVT1:
-            case V1_EVT2:
-            case V1_EVT3:
-              r = ice40_read_register(ICE40_BACKLIGHT);
-              if (r < 0) {
-                printk(KERN_ERR LOG_TAG "Failed to read iCE40 register: "
-                       "0x%02x\n", ICE40_BACKLIGHT);
-                return -EIO;
-              }
-              if (value) {
-                r |= ICE40_BACKLIGHT_MONO;
-              } else {
-                r &= ~ICE40_BACKLIGHT_MONO;
-              }
-              r = ice40_write_register(ICE40_BACKLIGHT, r);
-              if (r < 0) {
-                printk(KERN_ERR LOG_TAG "Failed to write iCE40 register: "
-                       "0x%02x\n", ICE40_BACKLIGHT);
-                return -EIO;
-              }
-              break;
-            default:
-              printk(KERN_ERR LOG_TAG "Unsupported Notle version: %d\n", version);
-              return -EINVAL;
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
+                return -EINVAL;
+        }
+
+        r = ice40_read_register(ICE40_BACKLIGHT);
+        if (r < 0) {
+            printk(KERN_ERR LOG_TAG "Failed to read iCE40 register: "
+                   "0x%02x\n", ICE40_BACKLIGHT);
+            return -EIO;
+        }
+        if (value) {
+            r |= ICE40_BACKLIGHT_MONO;
+        } else {
+            r &= ~ICE40_BACKLIGHT_MONO;
+        }
+        r = ice40_write_register(ICE40_BACKLIGHT, r);
+        if (r < 0) {
+            printk(KERN_ERR LOG_TAG "Failed to write iCE40 register: "
+                   "0x%02x\n", ICE40_BACKLIGHT);
+            return -EIO;
         }
 
         return size;
@@ -926,44 +847,28 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
 
         led_config.brightness = value;
 
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
+                return -EINVAL;
+        }
+
         /*
          * If the display is enabled, write the new FPGA config immediately,
          * otherwise it will be written when the display is enabled.
          */
-        if (notle_data->enabled) {
-          switch (version) {
-            case V4_FLY:
-            case V5_GNU:
-              led_config_to_fpga_config(&led_config, &actel_fpga_config);
-              if (actel_fpga_write_config(&actel_fpga_config)) {
+        if (led_config.brightness) {
+            led_config_to_linecuts(notle_data->dssdev, &led_config,
+                                   &r, &g, &b);
+            if (ice40_set_backlight(1, r, g, b)) {
+                  printk(KERN_ERR LOG_TAG "Failed to brightness_store: "
+                         "spi write failed\n");
+            }
+        } else {
+            if (ice40_set_backlight(0, -1, -1, -1)) {
                 printk(KERN_ERR LOG_TAG "Failed to brightness_store: "
-                       "i2c write failed\n");
-                return -EIO;
-              }
-              break;
-            case V6_HOG:
-            case V1_EVT1:
-            case V1_EVT2:
-            case V1_EVT3:
-              if (led_config.brightness) {
-                led_config_to_linecuts(notle_data->dssdev, &led_config,
-                                       &r, &g, &b);
-                if (ice40_set_backlight(1, r, g, b)) {
-                  printk(KERN_ERR LOG_TAG "Failed to brightness_store: "
-                         "spi write failed\n");
-                }
-              } else {
-                if (ice40_set_backlight(0, -1, -1, -1)) {
-                  printk(KERN_ERR LOG_TAG "Failed to brightness_store: "
-                         "spi write failed\n");
-                }
-              }
-              break;
-            default:
-              printk(KERN_ERR LOG_TAG "Unsupported Notle version: %d\n",
-                     version);
-              break;
-          }
+                       "spi write failed\n");
+            }
         }
 
         return size;
@@ -1203,76 +1108,6 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
         return;
 }
 
-static void led_config_to_fpga_config(struct led_config *led,
-                                      struct actel_fpga_config *fpga) {
-        int total_lines;
-        int red_max_mw;    /* LED power when full on */
-        int green_max_mw;
-        int blue_max_mw;
-        int limit_mw;      /* Max backlight power */
-
-        /*
-         * See arch/arm/mach-omap2/board-notle.c for the
-         * enum with these values.
-         */
-        switch (version) {
-          case V4_FLY:
-            red_max_mw = 41;
-            green_max_mw = 62;
-            blue_max_mw = 62;
-            limit_mw = 40;
-            break;
-          case V5_GNU:
-            red_max_mw = 63;
-            green_max_mw = 96;
-            blue_max_mw = 96;
-            limit_mw = 60;
-            break;
-          default:  /* Some reasonable defaults */
-            printk(KERN_ERR LOG_TAG "Unsupported notle_version in "
-                   "led_config_to_fpga_config: %d\n", version);
-            return;
-        };
-
-        switch (fpga->revision & 0xF0) {
-          case 0x10:
-            total_lines = 380;  /* Display height + vertical blanking */
-            break;
-          case 0x20:
-            total_lines = 358;  /* Display height - 2 */
-            break;
-          default:
-            total_lines = 358;  /* Default to minimum of above cases */
-            printk(KERN_ERR LOG_TAG "Unrecognized FPGA revision: 0x%02x\n", fpga->revision);
-            break;
-        }
-
-        fpga->red =   (total_lines *
-                        (10000 - (
-                          (3 * led->red_percent * led->brightness * limit_mw) /
-                          (red_max_mw * MAX_BRIGHTNESS)))) /
-                      10000;
-        fpga->green = (total_lines *
-                        (10000 - (
-                          (3 * led->green_percent * led->brightness * limit_mw) /
-                          (green_max_mw * MAX_BRIGHTNESS)))) /
-                      10000;
-        fpga->blue =  (total_lines *
-                        (10000 - (
-                          (3 * led->blue_percent * led->brightness * limit_mw) /
-                          (blue_max_mw * MAX_BRIGHTNESS)))) /
-                      10000;
-
-        /* 0 is a special case for disabling the backlight LED */
-        if (led->brightness == 0) {
-          fpga->config &= ~ACTEL_FPGA_CONFIG_LED_EN;
-        } else {
-          fpga->config |= ACTEL_FPGA_CONFIG_LED_EN;
-        }
-
-        return;
-}
-
 static int panel_write_register(u8 reg, u8 value) {
         static int printed_error = 0;
         u8 buf[2];
@@ -1367,36 +1202,12 @@ static int ice40_set_backlight(int led_en, int r, int g, int b) {
 }
 
 static int fpga_read_revision(void) {
-      struct actel_fpga_config actel_config;
-      int r, rev = -1;
+        int r, rev = -1;
 
-      switch (version) {
-        case V4_FLY:
-        case V5_GNU:
-                if ((r = actel_fpga_read_config(&actel_config)) < 0) {
-                        printk(KERN_ERR LOG_TAG "Failed to read actel FPGA config: %i\n", r);
-                        break;
-                }
-                rev = actel_config.revision;
-                break;
-        case V6_HOG:
-        case V1_EVT1:
-        case V1_EVT2:
-        case V1_EVT3:
-                if ((r = ice40_read_register(ICE40_REVISION)) < 0) {
-                        printk(KERN_ERR LOG_TAG "Failed to read iCE40 FPGA config: %i\n", r);
-                        break;
-                }
-                rev = r;
-
-                break;
-        case V1_DOG:
-        case V3_EMU:
-        default:
-                printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
-                       version);
-                break;
+        if ((r = ice40_read_register(ICE40_REVISION)) < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to read iCE40 FPGA config: %i\n", r);
         }
+        rev = r;
 
         if (rev > 0) {
           printk(KERN_INFO LOG_TAG "FPGA Revision: 0x%02x, Notle Version: %i\n",
@@ -1496,7 +1307,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
 
         for (i = 0; i < ARRAY_SIZE(panel_init_regs); ++i) {
           if (panel_init_regs[i].reg == REG_DELAY) {
-            if (version == V1_EVT2 || version == V1_EVT3) {
+            if ( notle_version_after(V1_EVT1) ){
               r = ice40_write_register(ICE40_LCOS, ICE40_LCOS_DISP_ENB);
               if (r) {
                 printk(KERN_ERR LOG_TAG "Failed to panel_enable\n");
@@ -1542,44 +1353,22 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
           }
         }
 
-        /* Load defaults */
-        switch (version) {
-          case V6_HOG:
-          case V1_EVT1:
-          case V1_EVT2:
-          case V1_EVT3:
-            ice40_write_register(ICE40_PIPELINE, ice40_defaults.pipeline);
-            ice40_write_register(ICE40_BACKLIGHT, ice40_defaults.backlight);
-            break;
-          default:
-            break;
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
+              goto err1;
         }
+
+        /* Load defaults */
+        ice40_write_register(ICE40_PIPELINE, ice40_defaults.pipeline);
+        ice40_write_register(ICE40_BACKLIGHT, ice40_defaults.backlight);
         fpga_read_revision();
 
         /* Enable LED backlight if we have nonzero brightness */
         if (led_config.brightness > 0) {
-          switch (version) {
-            case V4_FLY:
-            case V5_GNU:
-                  led_config_to_fpga_config(&led_config, &actel_fpga_config);
-                  actel_fpga_config.config |= ACTEL_FPGA_CONFIG_LED_EN;
-                  if (actel_fpga_write_config(&actel_fpga_config)) {
-                    printk(KERN_ERR LOG_TAG "Failed to enable FPGA LED_EN\n");
-                  }
-                  break;
-            case V6_HOG:
-            case V1_EVT1:
-            case V1_EVT2:
-            case V1_EVT3:
-                  msleep(1);
-                  led_config_to_linecuts(dssdev, &led_config, &r, &g, &b);
-                  ice40_set_backlight(1, r, g, b);
-                  break;
-            default:
-                  printk(KERN_ERR LOG_TAG "Unsupported Notle version: 0x%02x\n",
-                         version);
-                  break;
-          }
+              msleep(1);
+              led_config_to_linecuts(dssdev, &led_config, &r, &g, &b);
+              ice40_set_backlight(1, r, g, b);
         }
 
         drv_data->enabled = 1;
@@ -1602,32 +1391,21 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
 
         printk(KERN_INFO LOG_TAG "Powering off\n");
 
+        if (!notle_version_supported()) {
+              printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
+                     " %d\n", version);
+              return;
+        }
+
         /* Disable LED backlight */
-        switch (version) {
-          case V4_FLY:
-          case V5_GNU:
-            actel_fpga_config.config &= ~ACTEL_FPGA_CONFIG_LED_EN;
-            if (actel_fpga_write_config(&actel_fpga_config)) {
-              printk(KERN_ERR LOG_TAG "Failed to disable actel FPGA LED_EN\n");
-            }
-            break;
-          case V6_HOG:
-          case V1_EVT1:
-          case V1_EVT2:
-          case V1_EVT3:
-            /* Don't change the color mix, just disable the backlight. */
-            if (ice40_set_backlight(0, -1, -1, -1)) {
-              printk(KERN_ERR LOG_TAG "Failed to disable iCE40 FPGA LED_EN\n");
-            }
-            /* Save register values so we can restore them when we power on. */
-            i = ice40_read_register(ICE40_BACKLIGHT);
-            if (i > 0) {
-              ice40_defaults.backlight = i;
-            }
-            break;
-          default:
-            printk(KERN_ERR LOG_TAG "Unrecognized Notle version: %d\n", version);
-            break;
+        /* Don't change the color mix, just disable the backlight. */
+        if (ice40_set_backlight(0, -1, -1, -1)) {
+          printk(KERN_ERR LOG_TAG "Failed to disable iCE40 FPGA LED_EN\n");
+        }
+        /* Save register values so we can restore them when we power on. */
+        i = ice40_read_register(ICE40_BACKLIGHT);
+        if (i > 0) {
+          ice40_defaults.backlight = i;
         }
 
         for (i = 0; i < ARRAY_SIZE(panel_shutdown_regs); ++i) {
@@ -1641,7 +1419,7 @@ static void panel_notle_power_off(struct omap_dss_device *dssdev) {
         }
 
         /* Disable DISP_ENB */
-        if (version == V1_EVT2 || version == V1_EVT3) {
+        if ( notle_version_after(V1_EVT1) ) {
           ice40_write_register(ICE40_LCOS, 0x0);
         } else if (panel_data->panel_disable) {
           panel_data->panel_disable();
