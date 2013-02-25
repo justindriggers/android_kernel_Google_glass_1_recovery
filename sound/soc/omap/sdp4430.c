@@ -220,7 +220,7 @@ static int sdp4430_mcbsp_hw_params(struct snd_pcm_substream *substream,
 	 if (be_id == OMAP_ABE_DAI_BT_VX) {
 		ret = snd_soc_dai_set_fmt(cpu_dai,
 			SND_SOC_DAIFMT_DSP_B |
-			SND_SOC_DAIFMT_NB_IF |
+			SND_SOC_DAIFMT_NB_NF |
 			SND_SOC_DAIFMT_CBM_CFM);
 	} else {
 		/* Set cpu DAI configuration */
