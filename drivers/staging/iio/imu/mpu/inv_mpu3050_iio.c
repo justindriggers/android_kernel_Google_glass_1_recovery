@@ -131,7 +131,7 @@ int inv_switch_3050_gyro_engine(struct inv_mpu_iio_s *st, bool en)
 	int result;
 	reg = &st->reg;
 	if (en) {
-		data = INV_CLK_PLL;
+		data = INV_CLK_PLL_X;
 		p = (BITS_3050_POWER1 | data);
 		result = inv_i2c_single_write(st, reg->pwr_mgmt_1, p);
 		if (result)
@@ -252,17 +252,17 @@ int set_power_mpu3050(struct inv_mpu_iio_s *st, bool power_on)
 		data = BIT_SLEEP;
 	}
 	if (st->chip_config.gyro_enable) {
-		p = (BITS_3050_POWER1 | INV_CLK_PLL);
+		p = (BITS_3050_POWER1 | INV_CLK_PLL_X);
 		result = inv_i2c_single_write(st, reg->pwr_mgmt_1, data | p);
 		if (result)
 			return result;
 
-		p = (BITS_3050_POWER2 | INV_CLK_PLL);
+		p = (BITS_3050_POWER2 | INV_CLK_PLL_X);
 		result = inv_i2c_single_write(st, reg->pwr_mgmt_1, data | p);
 		if (result)
 			return result;
 
-		p = INV_CLK_PLL;
+		p = INV_CLK_PLL_X;
 		result = inv_i2c_single_write(st, reg->pwr_mgmt_1, data | p);
 		if (result)
 			return result;
