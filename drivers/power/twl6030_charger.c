@@ -293,6 +293,7 @@ struct twl6030_charger_device_info {
 
 	int current_limit_mA;
 	int temperature_critical;
+	int charge_disabled;
 
 	int charge_top_off;
 
@@ -826,6 +827,9 @@ static void twl6030_start_usb_charger(struct twl6030_charger_device_info *di, in
 		return;
 	}
 
+	if (di->charge_disabled)
+		return;
+
 	if (mA < 50) {
 		twl6030_stop_usb_charger(di);
 		return;
@@ -1116,7 +1120,7 @@ static void twl6030_monitor_work(struct work_struct *work)
 	current_limit_mA = di->current_limit_mA;
 	charging = is_charging(di);
 
-	if (temperature_cC < 100 || temperature_cC > 450) {
+	if (temperature_cC < 100 || temperature_cC > 450 || di->charge_disabled) {
 		di->state = STATE_FAULT;
 		di->current_limit_mA = 0;
 	} else if (temperature_cC < 150) {
@@ -1395,6 +1399,44 @@ static ssize_t show_recharge_capacity(struct device *dev, struct device_attribut
 	return sprintf(buf, "%u\n", val);
 }
 
+static ssize_t set_charge_disabled(struct device *dev, struct device_attribute *attr,
+				  const char *buf, size_t count)
+{
+	long val;
+	int charge_disabled;
+	int status = count;
+	struct twl6030_charger_device_info *di = dev_get_drvdata(dev);
+
+	charge_disabled = di->charge_disabled;
+
+	if (strict_strtol(buf, 10, &val) < 0)
+		return -EINVAL;
+
+	di->charge_disabled = !!val;
+
+	if (di->charge_disabled != charge_disabled) {
+		if (di->charge_disabled) {
+			di->state = STATE_FAULT;
+			twl6030_stop_usb_charger(di);
+			twl6030_eval_led_state(di);
+		} else {
+			queue_delayed_work(di->wq, &di->monitor_work, 0);
+		}
+	}
+
+	return status;
+}
+
+static ssize_t show_charge_disabled(struct device *dev, struct device_attribute *attr,
+				  char *buf)
+{
+	unsigned int val;
+	struct twl6030_charger_device_info *di = dev_get_drvdata(dev);
+
+	val = di->charge_disabled;
+	return sprintf(buf, "%u\n", !!val);
+}
+
 static DEVICE_ATTR(vbus_voltage, S_IRUGO, show_vbus_voltage, NULL);
 static DEVICE_ATTR(id_level, S_IRUGO, show_id_level, NULL);
 static DEVICE_ATTR(regulation_voltage, S_IWUSR | S_IRUGO,
@@ -1410,6 +1452,8 @@ static DEVICE_ATTR(recharge_capacity, S_IWUSR | S_IRUGO, show_recharge_capacity,
 		set_recharge_capacity);
 static DEVICE_ATTR(led_low, S_IWUSR | S_IRUGO, show_led_low, set_led_low);
 static DEVICE_ATTR(led_high, S_IWUSR | S_IRUGO, show_led_high, set_led_high);
+static DEVICE_ATTR(charge_disabled, S_IWUSR | S_IRUGO, show_charge_disabled,
+		set_charge_disabled);
 
 static struct attribute *twl6030_charger_attributes[] = {
 	&dev_attr_vbus_voltage.attr,
@@ -1422,6 +1466,7 @@ static struct attribute *twl6030_charger_attributes[] = {
 	&dev_attr_recharge_capacity.attr,
 	&dev_attr_led_low.attr,
 	&dev_attr_led_high.attr,
+	&dev_attr_charge_disabled.attr,
 	NULL,
 };
 
