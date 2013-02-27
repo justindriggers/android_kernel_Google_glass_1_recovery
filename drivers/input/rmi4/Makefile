@@ -4,6 +4,7 @@ obj-$(CONFIG_RMI4_SPI) += rmi_spi.o
 obj-$(CONFIG_RMI4_SMB) += rmi_smbus.o
 obj-$(CONFIG_RMI4_GENERIC) += rmi_driver.o rmi_f01.o
 obj-$(CONFIG_RMI4_FWLIB) += rmi_fw_update.o
+obj-$(CONFIG_RMI4_F05) += rmi_f05.o
 obj-$(CONFIG_RMI4_F09) += rmi_f09.o
 obj-$(CONFIG_RMI4_F1A) += rmi_f1a.o
 obj-$(CONFIG_RMI4_F11) += rmi_f11.o
