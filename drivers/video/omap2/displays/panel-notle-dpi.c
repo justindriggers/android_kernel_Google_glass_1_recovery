@@ -782,17 +782,19 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
          * If the display is enabled, write the new FPGA config immediately,
          * otherwise it will be written when the display is enabled.
          */
-        if (led_config.brightness) {
-            led_config_to_linecuts(notle_data->dssdev, &led_config,
+        if (notle_data->enabled) {
+            if (led_config.brightness) {
+                led_config_to_linecuts(notle_data->dssdev, &led_config,
                                    &r, &g, &b);
-            if (ice40_set_backlight(1, r, g, b)) {
-                  printk(KERN_ERR LOG_TAG "Failed to brightness_store: "
+                if (ice40_set_backlight(1, r, g, b)) {
+                    printk(KERN_ERR LOG_TAG "Failed to brightness_store: "
                          "spi write failed\n");
-            }
-        } else {
-            if (ice40_set_backlight(0, -1, -1, -1)) {
-                printk(KERN_ERR LOG_TAG "Failed to brightness_store: "
+                }
+            } else {
+                if (ice40_set_backlight(0, -1, -1, -1)) {
+                    printk(KERN_ERR LOG_TAG "Failed to brightness_store: "
                        "spi write failed\n");
+                }
             }
         }
 
