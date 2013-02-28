@@ -1123,10 +1123,12 @@ static void twl6030_monitor_work(struct work_struct *work)
 	if (temperature_cC < 100 || temperature_cC > 450 || di->charge_disabled) {
 		di->state = STATE_FAULT;
 		di->current_limit_mA = 0;
+#if 0
 	} else if (temperature_cC < 150) {
 		di->current_limit_mA = 169;
 	} else if (temperature_cC < 250) {
 		di->current_limit_mA = 282;
+#endif
 	} else {
 		di->current_limit_mA = 500;
 	}
