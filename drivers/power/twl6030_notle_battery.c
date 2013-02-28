@@ -283,7 +283,6 @@ struct twl6030_bci_device_info {
 	int			voltage_index;
 	int			current_uA;
 	int			current_avg_uA;
-	int			temp_C;
 	int			bat_health;
 	int			state;
 	int			vbus_online;
@@ -1229,7 +1228,7 @@ static int twl6030_bci_battery_get_property(struct power_supply *psy,
 		val->intval = di->capacity_uAh;
 		break;
 	case POWER_SUPPLY_PROP_TEMP:
-		val->intval = di->temp_C;
+		val->intval = 275; // simulate a healthy battery temp
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
 		val->intval = 1;
