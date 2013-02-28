@@ -73,7 +73,7 @@
 
 /* NOTE(CMM) Google definitions */
 /* Set or unset to output touchpad decoded gesture information */
-#define DEBUG_GESTURES
+// #define DEBUG_GESTURES
 
 /* Offsets added to differentiate gesture information from real information */
 #define GESTURE_OFFSET_X 100
@@ -1759,7 +1759,12 @@ static void rmi_f11_finger_handler(struct f11_data *f11,
 		}
 		if (data->gest_1->press == 1) {
 			if (f11->goog.press++) {
+#ifdef DEBUG_GESTURES
+				/* This log message is especially verbose because the gesture
+				   is sent during a real finger event so bracket it in
+				   gesture debug logging. */
 				pr_info("%s Rejecting multiple press gesture cnt:%d\n", __func__, f11->goog.press);
+#endif  /* DEBUG_GESTURES */
 			} else {
 				/* A press gesture may be generated along with a real finger
 				 * sequence.  This would present as multiple fingers without
