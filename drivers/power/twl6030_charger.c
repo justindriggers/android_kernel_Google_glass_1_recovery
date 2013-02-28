@@ -223,6 +223,10 @@ enum led_mode {
 	LED_PWM_OFF= 0x2,
 };
 
+#if defined(CONFIG_MACH_NOTLE)
+extern int notle_version_support_battery_temperature(void);
+#endif
+
 /* To get VBUS input limit from twl6030_usb */
 #if CONFIG_TWL6030_USB
 extern unsigned int twl6030_get_usb_max_power(struct otg_transceiver *x);
@@ -1110,6 +1114,13 @@ static void twl6030_monitor_work(struct work_struct *work)
 	} else {
 		temperature_cC = val.intval;
 	}
+
+#if defined(CONFIG_MACH_NOTLE)
+        if (!notle_version_support_battery_temperature()) {
+                // Use a default temp of 275 for 500mA charging on EVT1
+		temperature_cC = 275;
+        }
+#endif
 
 	/* store values in device info */
 	di->voltage_uV = voltage_uV;

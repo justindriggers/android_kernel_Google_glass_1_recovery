@@ -212,6 +212,9 @@ int notle_version_after( notle_version then ) {
         return ( then < NOTLE_VERSION );
 }
 
+int notle_version_support_battery_temperature() {
+        return (NOTLE_VERSION >= V1_EVT2);
+}
 
 #ifdef CONFIG_OMAP4_DUTY_CYCLE_GOVERNOR
 
