@@ -817,7 +817,7 @@ struct f11_data {
 		int synth_events_sent;
 		/* Gesture events cannot cross early suspend boundaries. */
 		int early_tap;
-		/* We only want to present a single press gesture per suspend/resume cycle. */
+		/* We only want to present a single press gesture per touch sequence. */
 		int press;
 		/* Number of fingers detected on current iteration. */
 		unsigned int current_finger_pressed_cnt;
@@ -1813,6 +1813,8 @@ static void rmi_f11_finger_handler(struct f11_data *f11,
 		if (f11->goog.prev_finger_pressed_cnt != 0) {
 			input_mt_sync(sensor->input);
 		}
+		/* Reset the gesture long press since all fingers have lifted. */
+		f11->goog.press = 0;
 	}
 
 	/* Update the previous finger pressed count. */
