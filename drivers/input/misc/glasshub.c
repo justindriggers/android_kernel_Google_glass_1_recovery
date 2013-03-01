@@ -68,7 +68,7 @@
 #define REG_DETECTOR_GAIN		12
 #define REG_PROX_PART_ID		13
 #define REG_PROX_SEQ_ID			14
-#define REG_WINK_INHIBIT		15
+#define REG_PAUSE			15
 #define REG_WINK_STATUS			16
 #define REG_DEBUG			17
 #define REG_AMBIENT_ENABLE		18
@@ -1141,17 +1141,17 @@ err_out:
 	return count;
 }
 
-/* show wink inhibit period */
-static ssize_t wink_inhibit_show(struct device *dev, struct device_attribute *attr, char *buf)
+/* show pause*/
+static ssize_t pause_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return show_reg(dev, buf, REG_WINK_INHIBIT);
+	return show_reg(dev, buf, REG_PAUSE);
 }
 
-/* set wink inhibit period */
-static ssize_t wink_inhibit_store(struct device *dev, struct device_attribute *attr,
+/* set pause */
+static ssize_t pause_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_WINK_INHIBIT, 1, 255);
+	return store_reg(dev, buf, count, REG_PAUSE, 0, 1);
 }
 
 /* show wink minimum magnitude */
@@ -1817,7 +1817,7 @@ static DEVICE_ATTR(calibration_values, DEV_MODE_RO, calibration_values_show, NUL
 static DEVICE_ATTR(prox_version, DEV_MODE_RO, prox_version_show, NULL);
 static DEVICE_ATTR(wink, DEV_MODE_RO, wink_show, NULL);
 static DEVICE_ATTR(wink_enable, DEV_MODE_RW, wink_enable_show, wink_enable_store);
-static DEVICE_ATTR(wink_inhibit, DEV_MODE_RW, wink_inhibit_show, wink_inhibit_store);
+static DEVICE_ATTR(pause, DEV_MODE_RW, pause_show, pause_store);
 static DEVICE_ATTR(wink_flag_enable, DEV_MODE_RW, wink_flag_enable_show, wink_flag_enable_store);
 static DEVICE_ATTR(wink_min, DEV_MODE_RW, wink_min_show, wink_min_store);
 static DEVICE_ATTR(wink_max, DEV_MODE_RW, wink_max_show, wink_max_store);
@@ -1857,7 +1857,7 @@ static struct attribute *attrs[] = {
 	&dev_attr_prox_version.attr,
 	&dev_attr_wink.attr,
 	&dev_attr_wink_enable.attr,
-	&dev_attr_wink_inhibit.attr,
+	&dev_attr_pause.attr,
 	&dev_attr_wink_min.attr,
 	&dev_attr_wink_max.attr,
 	&dev_attr_wink_flag_enable.attr,
