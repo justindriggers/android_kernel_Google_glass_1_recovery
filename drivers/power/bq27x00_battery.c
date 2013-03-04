@@ -96,6 +96,7 @@ struct bq27x00_device_info {
 
 	struct bq27x00_reg_cache cache;
 	int charge_design_full;
+	int fake_battery;
 
 	int (*translate_temp)(int temperature);
 
@@ -349,6 +350,7 @@ static int bq27x00_battery_temperature(struct bq27x00_device_info *di,
 			dev_warn(di->dev, "Battery thermistor missing or malfunctioning, falling back to "
 					"gas gauge internal temp\n");
 			once = 1;
+			di->fake_battery = 1;
 		}
 
 		if (di->chip == BQ27500)
@@ -519,7 +521,12 @@ static int bq27x00_battery_get_property(struct power_supply *psy,
 		ret = bq27x00_battery_current(di, val);
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
-		ret = bq27x00_simple_value(di->cache.capacity, val);
+		if (di->fake_battery) {
+			val->intval = 96;
+			ret = 0;
+		} else {
+			ret = bq27x00_simple_value(di->cache.capacity, val);
+		}
 		break;
 	case POWER_SUPPLY_PROP_TEMP:
 		ret = bq27x00_battery_temperature(di, val);
