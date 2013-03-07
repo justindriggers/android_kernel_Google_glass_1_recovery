@@ -46,7 +46,7 @@
 #include <net/bluetooth/hci_core.h>
 
 static int enable_le;
-
+static unsigned int sco_accept_packet_type_mask;
 /* Handle HCI Event packets */
 
 static void hci_cc_inquiry_cancel(struct hci_dev *hdev, struct sk_buff *skb)
@@ -1496,7 +1496,9 @@ static inline void hci_conn_request_evt(struct hci_dev *hdev, struct sk_buff *sk
 		conn = hci_conn_hash_lookup_ba(hdev, ev->link_type, &ev->bdaddr);
 		if (!conn) {
 			/* pkt_type not yet used for incoming connections */
-			conn = hci_conn_add(hdev, ev->link_type, 0, &ev->bdaddr);
+			conn = hci_conn_add(hdev, ev->link_type,
+					sco_accept_packet_type_mask,
+					&ev->bdaddr);
 			if (!conn) {
 				BT_ERR("No memory for new connection");
 				hci_dev_unlock(hdev);
@@ -3116,3 +3118,7 @@ void hci_si_event(struct hci_dev *hdev, int type, int dlen, void *data)
 
 module_param(enable_le, bool, 0444);
 MODULE_PARM_DESC(enable_le, "Enable LE support");
+
+module_param(sco_accept_packet_type_mask, uint, 0644);
+MODULE_PARM_DESC(sco_packet_type_mask,
+		"Packet type mask for accepting new connections");
