@@ -827,10 +827,11 @@ struct f11_data {
 		/* Wakelock to prevent suspension while sensor data in transit. */
 		struct wake_lock wakelock;
 #endif
-		/* Counter of movment sequences per first finger landing and
-		 * last finger leaving. */
-		unsigned int movement_seq_cnt;
-
+		/* Counter of events per movement sequence starting at first finger landing
+		 * and ending with last finger lifting. */
+		unsigned int movement_event_cnt;
+		/* Counter of individual finger events per movement sequence. */
+		unsigned int movement_finger_cnt[F11_MAX_NUM_OF_FINGERS];
 	} goog;
 #ifdef CONFIG_RMI4_DEBUG
 	struct dentry *debugfs_rezero_wait;
@@ -1716,6 +1717,7 @@ static void rmi_f11_finger_handler(struct f11_data *f11,
 		} else if ((finger_state == F11_PRESENT) ||
 				(finger_state == F11_INACCURATE)) {
 			finger_pressed_count++;
+			f11->goog.movement_finger_cnt[i]++;
 		}
 
 		if (sensor->data.abs_pos)
@@ -1786,18 +1788,20 @@ static void rmi_f11_finger_handler(struct f11_data *f11,
 
 	/* Debugging logging */
 	if (f11->goog.prev_finger_pressed_cnt == 0 && f11->goog.current_finger_pressed_cnt != 0) {
-		pr_info("%s Starting movement sequence cnt:%d\n", __func__,
-		        f11->goog.movement_seq_cnt);
+		pr_info("%s Starting movement event cnt:%d\n", __func__,
+		        f11->goog.movement_event_cnt);
 	}
 	if (f11->goog.prev_finger_pressed_cnt != 0 && f11->goog.current_finger_pressed_cnt == 0) {
-		pr_info("%s Ending movement sequence cnt:%d\n", __func__,
-		        f11->goog.movement_seq_cnt);
-		f11->goog.movement_seq_cnt = 0;
+		pr_info("%s Ending movement event cnt:%d fing0:%d fing1:%d fing2:%d\n", __func__,
+		        f11->goog.movement_event_cnt, f11->goog.movement_finger_cnt[0],
+		        f11->goog.movement_finger_cnt[1], f11->goog.movement_finger_cnt[2]);
+		f11->goog.movement_event_cnt = 0;
+		memset(f11->goog.movement_finger_cnt, 0, sizeof(f11->goog.movement_finger_cnt));
 	}
 	if (f11->goog.prev_finger_pressed_cnt == 0 && f11->goog.current_finger_pressed_cnt == 0) {
-		pr_info("%s Extraneous event\n", __func__);
+		pr_debug("%s Extraneous event\n", __func__);
 	} else {
-		f11->goog.movement_seq_cnt++;
+		f11->goog.movement_event_cnt++;
 	}
 
 	if (f11->goog.current_finger_pressed_cnt) {
