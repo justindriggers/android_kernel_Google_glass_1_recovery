@@ -508,9 +508,9 @@ static struct panel_notle_data panel_notle = {
         .green_max_mw             = 96,
         .blue_max_mw              = 96,
         .limit_mw                 = 76,
-        .red_percent              = 1100,
-        .green_percent            = 2000,
-        .blue_percent             = 1400,
+        .red_percent              = 2444,
+        .green_percent            = 4444,
+        .blue_percent             = 3111,
         .cpr_enable               = 1,
         .cpr_coefs                = {
             205, 9, 17, 25, 209, 11, 9, -1, 247

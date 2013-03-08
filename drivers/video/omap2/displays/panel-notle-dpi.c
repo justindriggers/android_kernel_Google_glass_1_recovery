@@ -156,13 +156,11 @@ struct led_config {
   unsigned brightness;      /* Total brightness, max of MAX_BRIGHTNESS */
 };
 
-/* Some reasonable defaults */
-static struct led_config led_config = {
-  .red_percent = 1667,    /* 16.67% Red by default */
-  .green_percent = 5416,  /* 54.16% Green by default */
-  .blue_percent = 2917,   /* 29.17% Blue by default */
-  .brightness = 0,        /* 0 brightness by default */
-};
+/*
+ * Initialized in probe from board-notle.c with normalized values where 10,000
+ * is 100%.  If formula in colormix_store changes, revise board file values
+ */
+static struct led_config led_config;
 
 static struct {
   u8 pipeline;
