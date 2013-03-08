@@ -321,10 +321,71 @@ static struct pcb_section omap4_duty_governor_pcb_sections[] = {
 	},
 };
 
+static struct pcb_section omap4_duty_governor_turbo_sprint_pcb_sections[] = {
+    {
+        .pcb_temp_level         = 65000,
+        .max_opp                = 1008000,
+        .duty_cycle_enabled     = false,
+        .tduty_params = {
+            .nitro_rate         = 1008000,
+            .cooling_rate       = 800000,
+            .nitro_interval     = 20000,
+            .nitro_percentage   = 80,
+        },
+    },
+    {
+        .pcb_temp_level         = 70000,
+        .max_opp                = 600000,
+        .duty_cycle_enabled     = true,
+        .tduty_params = {
+            .nitro_rate         = 800000,
+            .cooling_rate       = 600000,
+            .nitro_interval     = 20000,
+            .nitro_percentage   = 80,
+        },
+    },
+    {
+        .pcb_temp_level         = 75000,
+        .max_opp                = 600000,
+        .duty_cycle_enabled     = true,
+        .tduty_params = {
+            .nitro_rate         = 600000,
+            .cooling_rate       = 300000,
+            .nitro_interval     = 20000,
+            .nitro_percentage   = 3,
+        },
+    },
+    {
+        .pcb_temp_level         = 80000,
+        .max_opp                = 600000,
+        .duty_cycle_enabled     = true,
+        .tduty_params = {
+            .nitro_rate         = 600000,
+            .cooling_rate       = 300000,
+            .nitro_interval     = 20000,
+            .nitro_percentage   = 2,
+        },
+    },
+
+    {
+        .pcb_temp_level         = 85000,
+        .max_opp                = 600000,
+        .duty_cycle_enabled     = true,
+        .tduty_params = {
+            .nitro_rate         = 600000,
+            .cooling_rate       = 300000,
+            .nitro_interval     = 20000,
+            .nitro_percentage   = 1,
+        },
+    },
+};
+
 void init_duty_governor(void)
 {
 	omap4_duty_pcb_section_reg(omap4_duty_governor_pcb_sections,
 		ARRAY_SIZE(omap4_duty_governor_pcb_sections));
+	omap4_duty_turbo_sprint_pcb_section_reg(omap4_duty_governor_turbo_sprint_pcb_sections,
+	    ARRAY_SIZE(omap4_duty_governor_turbo_sprint_pcb_sections));
 }
 #else
 void init_duty_governor(void){}
