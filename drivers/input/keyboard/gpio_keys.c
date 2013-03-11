@@ -44,6 +44,13 @@ struct gpio_keys_drvdata {
 	struct gpio_button_data data[0];
 };
 
+/* Google specific enums for logging gpio key presses. */
+typedef enum {
+	GPIO_KEYS_PROBE = 0,
+	GPIO_KEYS_WORK = 1,
+	GPIO_KEYS_RESUME = 2
+} gpio_key_caller_t;
+
 /*
  * SYSFS interface for enabling/disabling keys and switches:
  *
@@ -317,13 +324,18 @@ static struct attribute_group gpio_keys_attr_group = {
 	.attrs = gpio_keys_attrs,
 };
 
-static void gpio_keys_report_event(struct gpio_button_data *bdata)
+static void gpio_keys_report_event(struct gpio_button_data *bdata, gpio_key_caller_t caller)
 {
 	struct gpio_keys_button *button = bdata->button;
 	struct input_dev *input = bdata->input;
 	unsigned int type = button->type ?: EV_KEY;
+	int synthesized = 0;
 	int state = (gpio_get_value_cansleep(button->gpio) ? 1 : 0) ^ button->active_low;
 
+	/* last_state is a tri-state value.  If last_state is -1 then we are not in
+	   a suspend/resume cycle.  If last_state is 0 or 1, it means that its the
+	   cached value of the last state of the gpio when we entered the suspend
+	   cycle and we have not exited via a resume. */
 	if (button->last_state == state) {
 		/* Synthesize a new state here because we are here
 		   due to an interrupt while suspended.  However, the
@@ -331,6 +343,7 @@ static void gpio_keys_report_event(struct gpio_button_data *bdata)
 		   the interrupt due to the time required to resume power
 		   and read this pin. */
 		state = (state ^ 1);
+		synthesized = 1;
 	}
 
 	if (type == EV_ABS) {
@@ -341,7 +354,10 @@ static void gpio_keys_report_event(struct gpio_button_data *bdata)
 	}
 	input_sync(input);
 
-        dev_info(&input->dev, "Camera button %s\n", ((state)?"pressed":"released"));
+	dev_info(&input->dev, "Camera button caller:%d %s %s\n",
+	         caller,
+	         ((state)?"pressed":"released"),
+	         ((synthesized)?"synthesized":"polled"));
 }
 
 static void gpio_keys_work_func(struct work_struct *work)
@@ -349,7 +365,7 @@ static void gpio_keys_work_func(struct work_struct *work)
 	struct gpio_button_data *bdata =
 		container_of(work, struct gpio_button_data, work);
 
-	gpio_keys_report_event(bdata);
+	gpio_keys_report_event(bdata, GPIO_KEYS_WORK);
 }
 
 static void gpio_keys_timer(unsigned long _data)
@@ -542,7 +558,7 @@ static int __devinit gpio_keys_probe(struct platform_device *pdev)
 
 	/* get current state of buttons */
 	for (i = 0; i < pdata->nbuttons; i++)
-		gpio_keys_report_event(&ddata->data[i]);
+		gpio_keys_report_event(&ddata->data[i], GPIO_KEYS_PROBE);
 	input_sync(input);
 
 	device_init_wakeup(&pdev->dev, wakeup);
@@ -634,7 +650,7 @@ static int gpio_keys_resume(struct device *dev)
 			button->last_state = -1;
 		}
 
-		gpio_keys_report_event(&ddata->data[i]);
+		gpio_keys_report_event(&ddata->data[i], GPIO_KEYS_RESUME);
 	}
 	input_sync(ddata->input);
 
