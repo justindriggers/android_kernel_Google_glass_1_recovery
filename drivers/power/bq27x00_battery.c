@@ -350,7 +350,6 @@ static int bq27x00_battery_temperature(struct bq27x00_device_info *di,
 			dev_warn(di->dev, "Battery thermistor missing or malfunctioning, falling back to "
 					"gas gauge internal temp\n");
 			once = 1;
-			di->fake_battery = 1;
 		}
 
 		if (di->chip == BQ27500)
@@ -362,6 +361,10 @@ static int bq27x00_battery_temperature(struct bq27x00_device_info *di,
 		 * Offset by 20 C since the board will run hotter than the battery.
 		 */
 		temperature -= 200;
+		di->fake_battery = 1;
+	} else {
+		/* if we ever get a valid reading we must not have a fake battery */
+		di->fake_battery = 0;
 	}
 	
 	val->intval = temperature;
@@ -586,6 +589,16 @@ static int bq27x00_powersupply_init(struct bq27x00_device_info *di)
 	INIT_DELAYED_WORK(&di->work, bq27x00_battery_poll);
 	mutex_init(&di->lock);
 
+	/*
+	 * Read the battery temp now to prevent races between userspace reading
+	 * properties and battery "detection" logic.
+	 */
+	di->cache.temperature = bq27x00_read(di, BQ27x00_REG_TEMP, false);
+	di->cache.internal_temp = bq27x00_read(di, BQ27x00_REG_INT_TEMP, false);
+
+	/*
+	 * NOTE: Properties can be read as soon as we register the power supply.
+	 */
 	ret = power_supply_register(di->dev, &di->bat);
 	if (ret) {
 		dev_err(di->dev, "failed to register battery: %d\n", ret);
