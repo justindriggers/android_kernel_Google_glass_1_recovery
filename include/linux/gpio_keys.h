@@ -12,7 +12,9 @@ struct gpio_keys_button {
 	int debounce_interval;	/* debounce ticks interval in msecs */
 	bool can_disable;
 	int value;		/* axis value for EV_ABS */
+	/* Google additions */
 	int last_state;         /* last state before suspend */
+	int cache_state;        /* last state cached */
 };
 
 struct gpio_keys_platform_data {

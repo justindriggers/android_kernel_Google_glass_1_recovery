@@ -344,6 +344,17 @@ static void gpio_keys_report_event(struct gpio_button_data *bdata, gpio_key_call
 		   and read this pin. */
 		state = (state ^ 1);
 		synthesized = 1;
+	} else if (button->cache_state == state && caller == GPIO_KEYS_WORK) {
+		/* HACK */
+		/* We were called here from the work queue indicating that there
+		   was work to be done.  However, we found that the current
+		   gpio state has not changed from the previous gpio state.
+		   So we make up an event! */
+		input_event(input, type, button->code, !state);
+		input_sync(input);
+		dev_info(&input->dev, "Camera button caller:%d %s inferred\n",
+			 caller,
+			 ((!state)?"pressed":"released"));
 	}
 
 	if (type == EV_ABS) {
@@ -353,6 +364,9 @@ static void gpio_keys_report_event(struct gpio_button_data *bdata, gpio_key_call
 		input_event(input, type, button->code, !!state);
 	}
 	input_sync(input);
+
+	/* Store away current state */
+	button->cache_state = state;
 
 	dev_info(&input->dev, "Camera button caller:%d %s %s\n",
 	         caller,
@@ -449,8 +463,10 @@ static int __devinit gpio_keys_setup_key(struct platform_device *pdev,
 		goto fail3;
 	}
 
-	/* Initialize last state before suspend to invalid value */
+	/* Initialize last state to indicate not in suspend */
 	button->last_state = -1;
+	/* Initialize cache state to invalid value */
+	button->cache_state = -1;
 	return 0;
 
 fail3:
