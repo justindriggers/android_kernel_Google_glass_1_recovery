@@ -291,7 +291,7 @@ static int adc_to_temp_conversion(int adc_val)
 	return adc_to_temp[adc_val];
 }
 
-static int pcb_read_current_temp(void)
+static int pcb_read_current_thermistor(void)
 {
 	int temp = 0;
 	struct twl6030_gpadc_request req;
@@ -303,17 +303,32 @@ static int pcb_read_current_temp(void)
 	ret = twl6030_gpadc_conversion(&req);
 	if (ret < 0) {
 		pr_err("%s:TWL6030_GPADC conversion is invalid %d\n",
-			__func__, ret);
+		       __func__, ret);
 		return -EINVAL;
 	}
-	temp = adc_to_temp_conversion(req.rbuf[TWL6030_GPADC_CHANNEL]);
+	temp = req.rbuf[TWL6030_GPADC_CHANNEL];
 
 	return temp;
+}
+
+static int pcb_read_current_temp(void)
+{
+	int temp = pcb_read_current_thermistor();
+	return adc_to_temp_conversion(temp);
 }
 
 /*
  * sysfs hook functions
  */
+static int pcb_temp_sensor_read_thermistor(struct device *dev,
+					   struct device_attribute *devattr,
+					   char *buf)
+{
+	int temp = pcb_read_current_thermistor();
+
+	return sprintf(buf, "%d\n", temp);
+}
+
 static int pcb_temp_sensor_read_temp(struct device *dev,
 				      struct device_attribute *devattr,
 				      char *buf)
@@ -323,10 +338,13 @@ static int pcb_temp_sensor_read_temp(struct device *dev,
 	return sprintf(buf, "%d\n", temp);
 }
 
+static DEVICE_ATTR(thermistor, S_IRUGO, pcb_temp_sensor_read_thermistor,
+                   NULL);
 static DEVICE_ATTR(temperature, S_IRUGO, pcb_temp_sensor_read_temp,
 			  NULL);
 
 static struct attribute *pcb_temp_sensor_attributes[] = {
+	&dev_attr_thermistor.attr,
 	&dev_attr_temperature.attr,
 	NULL
 };
