@@ -9,19 +9,9 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
  */
-/**
- *  @addtogroup  DRIVERS
- *  @brief       Hardware drivers.
- *
- *  @{
- *      @file    dmpDefaultMPU6050.c
- *      @brief   dmp Default data
- *      @details This file is part of invensense mpu driver code
- *
- */
-
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+#include "inv_mpu_iio.h"
 #include "dmpKey.h"
 #include "dmpmap.h"
 
@@ -253,6 +243,7 @@ static const struct tKeyLabel dmpTConfig[] = {
 	{KEY_D_1_92,               D_1_92},
 	{KEY_D_1_160,               D_1_160},
 	{KEY_D_1_176,               D_1_176},
+	{KEY_D_1_178,               D_1_178},
 	{KEY_D_1_218,               D_1_218},
 	{KEY_D_1_232,               D_1_232},
 	{KEY_D_1_250,               D_1_250},
@@ -324,13 +315,11 @@ static const struct tKeyLabel dmpTConfig[] = {
 };
 
 #define NUM_LOCAL_KEYS (sizeof(dmpTConfig)/sizeof(dmpTConfig[0]))
-
-
 static struct tKeyLabel keys[NUM_KEYS];
-
 unsigned short inv_dmp_get_address(unsigned short key)
 {
 	static int isSorted;
+
 	if (!isSorted) {
 		int kk;
 		for (kk = 0; kk < NUM_KEYS; ++kk) {
@@ -342,10 +331,13 @@ unsigned short inv_dmp_get_address(unsigned short key)
 
 		isSorted = 1;
 	}
-	if (key >= NUM_KEYS)
+	if (key >= NUM_KEYS) {
+		pr_err("ERROR!! key not exist=%d!\n", key);
 		return 0xffff;
+	}
+	if (0xffff == keys[key].addr)
+		pr_err("ERROR!!key not local=%d!\n", key);
+
 	return keys[key].addr;
 }
-/**
- *  @}
- */
+
