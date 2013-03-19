@@ -54,6 +54,8 @@ s64 get_time_ns(void)
 	return read_robust_clock();
 }
 
+void   inv_recover_setting(struct inv_mpu_iio_s *st);
+
 static const short AKM8975_ST_Lower[3] = {-100, -100, -1000};
 static const short AKM8975_ST_Upper[3] = {100, 100, -300};
 
@@ -483,6 +485,7 @@ static int mpu_read_raw(struct iio_dev *indio_dev,
 		if (st->chip_config.self_test_run_once == 0) {
 			result = inv_do_test(st, 0,  st->gyro_bias,
 				st->accel_bias);
+			inv_recover_setting(st);
 			if (result)
 				return result;
 			st->chip_config.self_test_run_once = 1;

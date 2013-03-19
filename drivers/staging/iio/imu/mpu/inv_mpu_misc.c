@@ -769,7 +769,7 @@ int inv_do_test(struct inv_mpu_iio_s *st, int self_test_flag,
  *  inv_recover_setting() recover the old settings after everything is done
  */
 
-static void   inv_recover_setting(struct inv_mpu_iio_s *st)
+void   inv_recover_setting(struct inv_mpu_iio_s *st)
 {
 	struct inv_reg_map_s *reg;
 	int data;
