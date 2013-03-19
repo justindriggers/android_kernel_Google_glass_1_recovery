@@ -1122,11 +1122,7 @@ static ssize_t inv_attr_show(struct device *dev,
 				       f[st->chip_config.lpa_freq]);
 	}
 	case ATTR_SELF_TEST:
-		if (INV_MPU3050 == st->chip_type)
-			result = 0;
-		else
-			result = inv_hw_self_test(st);
-		return sprintf(buf, "%d\n", result);
+		return sprintf(buf, "%d\n", st->chip_config.self_test_result);
 	case ATTR_KEY:
 		key = st->plat_data.key;
 		result = 0;
@@ -1395,13 +1391,20 @@ static ssize_t inv_attr_store(struct device *dev,
 	struct iio_dev_attr *this_attr = to_iio_dev_attr(attr);
 	int data;
 	int result;
-	if (check_enable(st))
+	// Self-test doesn't require enable bit to already be set.
+	if (check_enable(st) && this_attr->address != ATTR_SELF_TEST)
 		return -EPERM;
 	result = kstrtoint(buf, 10, &data);
 	if (result)
 		return -EINVAL;
 
 	switch (this_attr->address) {
+	case ATTR_SELF_TEST:
+		if (INV_MPU3050 != st->chip_type)
+			st->chip_config.self_test_result = inv_hw_self_test(st);
+		// Allow the next calibration-read to redo inv_do_test.
+		st->chip_config.self_test_run_once = 0;
+		break;
 	case ATTR_GYRO_ENABLE:
 		result = inv_gyro_enable(st, ring, !!data);
 		break;
@@ -1552,8 +1555,8 @@ static IIO_DEVICE_ATTR(lpa_mode, S_IRUGO | S_IWUGO, inv_attr_show,
 static IIO_DEVICE_ATTR(lpa_freq, S_IRUGO | S_IWUGO, inv_attr_show,
 	inv_attr_store, ATTR_LPA_FREQ);
 static DEVICE_ATTR(reg_dump, S_IRUGO, inv_reg_dump_show, NULL);
-static IIO_DEVICE_ATTR(self_test, S_IRUGO, inv_attr_show, NULL,
-	ATTR_SELF_TEST);
+static IIO_DEVICE_ATTR(self_test, S_IRUGO | S_IWUGO, inv_attr_show,
+	inv_attr_store, ATTR_SELF_TEST);
 static IIO_DEVICE_ATTR(key, S_IRUGO, inv_attr_show, NULL, ATTR_KEY);
 static IIO_DEVICE_ATTR(gyro_matrix, S_IRUGO, inv_attr_show, NULL,
 	ATTR_GYRO_MATRIX);

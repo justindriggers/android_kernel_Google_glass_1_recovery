@@ -120,6 +120,7 @@ struct inv_hw_s {
  *  @lpf:		Digital low pass filter frequency.
  *  @accl_fs:		accel full scale range.
  *  @self_test_run_once flag for self test run ever.
+ *  @self_test_result:	result of last self_test
  *  @has_footer:	MPU3050 specific work around.
  *  @has_compass:	has compass or not.
  *  @enable:		master enable to enable output
@@ -150,6 +151,7 @@ struct inv_chip_config_s {
 	u32 lpf:3;
 	u32 accl_fs:2;
 	u32 self_test_run_once:1;
+	u32 self_test_result:3;
 	u32 has_footer:1;
 	u32 has_compass:1;
 	u32 enable:1;

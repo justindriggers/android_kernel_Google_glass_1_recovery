@@ -161,9 +161,9 @@ Check which clock-source is used by the chip.
 power_state (Read/write)
 turn on/off the power supply
 
-self_test (read-only)
-read this entry trigger self test. The return value is D.
-D is the success/fail.
+self_test (Read/write)
+Write to this entry to trigger self test. Read to get result of self test.
+The return value is D. D is the success/fail.
 For different chip, the result is different for success/fail.
 1 means success 0 means fail. The LSB of D is for gyro; the bit
 next to LSB of D is for accel. The bit 2 of D is for compass result.
