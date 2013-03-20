@@ -1581,21 +1581,21 @@ static int notle_translate_temp(int temperature)
 		 * gas gauge driver can recognize the disconnected state.
 		 */
 		temperature = -408;
-	else if (temperature <= 996)
+	else if (temperature <= 986)
 		temperature = 0;
-	else if (temperature <= 999)
+	else if (temperature <= 989)
 		temperature = 50;
-	else if (temperature <= 1003)
+	else if (temperature <= 993)
 		temperature = 100;
-	else if (temperature <= 1008)
+	else if (temperature <= 998)
 		temperature = 150;
-	else if (temperature <= 1013)
+	else if (temperature <= 1003)
 		temperature = 200;
-	else if (temperature <= 1019)
+	else if (temperature <= 1009)
 		temperature = 250;
-	else if (temperature <= 1026)
+	else if (temperature <= 1016)
 		temperature = 300;
-	else if (temperature <= 1034)
+	else if (temperature <= 1024)
 		temperature = 350;
 	else if (temperature <= 1044)
 		temperature = 400;
