@@ -1058,6 +1058,7 @@ static void twl6030_monitor_work(struct work_struct *work)
 
 	struct power_supply *battery;
 	union power_supply_propval val;
+	struct timespec ts;
 
 	int capacity;
 	int voltage_uV;
@@ -1185,10 +1186,11 @@ static void twl6030_monitor_work(struct work_struct *work)
 		twl6030_eval_led_state(di);
 	}
 
+	getnstimeofday(&ts);
 	dev_warn(di->dev, "capacity=%d%% voltage_uV=%d uV current_uA=%d uA "
-			"temperature_cC=%d current_limit_mA=%d %s%s\n",
+			"temperature_cC=%d current_limit_mA=%d %s%s [%016lu]\n",
 			capacity, voltage_uV, current_uA, temperature_cC, di->current_limit_mA,
-			twl6030_state[di->state], is_charging(di) ? " CHG" : "");
+			twl6030_state[di->state], is_charging(di) ? " CHG" : "", (unsigned long) ts.tv_sec);
 error:
 	twl6030_determine_charge_state(di);
 }
