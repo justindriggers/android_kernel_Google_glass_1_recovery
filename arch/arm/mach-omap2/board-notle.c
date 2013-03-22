@@ -1657,8 +1657,8 @@ static struct mpu_platform_data mpu9150_notle_data = {
         .secondary_i2c_addr = 0x0C,
         .key = {221, 22, 205, 7, 217, 186, 151, 55,
             206, 254, 35, 144, 225, 102, 47, 50},
-        .secondary_orientation = { 0, 0, 1,
-                                   1, 0, 0,
+        .secondary_orientation = { 1, 0, 0,
+                                   0, 0, -1,
                                    0, 1, 0 },
 };
 
