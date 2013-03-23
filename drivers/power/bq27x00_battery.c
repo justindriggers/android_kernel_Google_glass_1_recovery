@@ -73,6 +73,9 @@ struct bq27x00_access_methods {
 			bool single);
 };
 
+static int bq27x00_dump_dataflash(struct bq27x00_device_info *di);
+static int bq27x00_control_cmd(struct bq27x00_device_info *di, u16 cmd);
+
 enum bq27x00_chip { BQ27000, BQ27500 };
 
 struct bq27x00_reg_cache {
@@ -699,6 +702,259 @@ static int bq27x00_write_i2c(struct bq27x00_device_info *di, u8 reg, int value, 
 	return 0;
 }
 
+static int bq27x00_control_cmd(struct bq27x00_device_info *di, u16 cmd)
+{
+	struct i2c_client *client = to_i2c_client(di->dev);
+	struct i2c_msg msg[3];
+	unsigned char cmd_write[3];
+	unsigned char cmd_read[2];
+	int ret;
+
+	if (!client->adapter)
+		return -ENODEV;
+
+	cmd_write[0] = 0x0;
+	put_unaligned_le16(cmd, cmd_write + 1);
+
+	msg[0].addr = client->addr;
+	msg[0].flags = 0;
+	msg[0].buf = cmd_write;
+	msg[0].len = sizeof(cmd_write);
+	msg[1].addr = client->addr;
+	msg[1].flags = 0;
+	msg[1].buf = cmd_write;
+	msg[1].len = 1;
+	msg[2].addr = client->addr;
+	msg[2].flags = I2C_M_RD;
+	msg[2].buf = cmd_read;
+	msg[2].len = sizeof(cmd_read);
+
+	ret = i2c_transfer(client->adapter, msg, ARRAY_SIZE(msg));
+	if (ret < 0)
+		return ret;
+
+	ret = get_unaligned_le16(cmd_read);
+
+	return ret;
+}
+
+static int bq27x00_read_block_i2c(struct bq27x00_device_info *di, u8 reg,
+		unsigned char *buf, size_t len)
+{
+	struct i2c_client *client = to_i2c_client(di->dev);
+	struct i2c_msg msg[2];
+	int ret;
+
+	if (!client->adapter)
+		return -ENODEV;
+
+	msg[0].addr = client->addr;
+	msg[0].flags = 0;
+	msg[0].buf = &reg;
+	msg[0].len = sizeof(reg);
+	msg[1].addr = client->addr;
+	msg[1].flags = I2C_M_RD;
+	msg[1].buf = buf;
+	msg[1].len = len;
+
+	ret = i2c_transfer(client->adapter, msg, ARRAY_SIZE(msg));
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}
+
+#define SLAVE_LATENCY_DELAY 100
+
+static int dump_subclass(struct bq27x00_device_info *di, u8 subclass, size_t len)
+{
+	int ret;
+	size_t i, offset, remaining;
+	unsigned char data[64];
+
+	memset(data, 0x00, sizeof(data));
+
+	//printk("%s: enter subclass=%02x len=%u\n", __func__, subclass, len);
+
+	/* enable block flash control */
+	ret = bq27x00_write_i2c(di, 0x61, 0x00, true);
+	if (ret) {
+		dev_warn(di->dev, "Failed to write (enable block flash control): %d\n", ret);
+		goto error;
+	}
+
+	msleep(SLAVE_LATENCY_DELAY);
+
+	/* set subclass */
+	ret = bq27x00_write_i2c(di, 0x3e, subclass, true);
+	if (ret) {
+		dev_warn(di->dev, "Failed to write (set subclass 0x%02x): %d\n", subclass, ret);
+		goto error;
+	}
+
+	offset = 0;
+	remaining = len;
+
+	while (remaining > 0) {
+		size_t count = remaining < 32 ? remaining : 32;
+
+		msleep(SLAVE_LATENCY_DELAY);
+
+		/* set sebclass offset 0x00 */
+		ret = bq27x00_write_i2c(di, 0x3f, offset, true);
+		if (ret) {
+			dev_warn(di->dev, "Failed to write (set subclass offset %d): %d\n", offset, ret);
+			goto error;
+		}
+
+		msleep(SLAVE_LATENCY_DELAY);
+
+		/* read in subclass block */
+		ret = bq27x00_read_block_i2c(di, 0x40, data, count);
+		if (ret) {
+			dev_warn(di->dev, "Failed to read block count=%d: %d\n", count, ret);
+			goto error;
+		}
+
+		printk("subclass=0x%02x len=%02u blk=%u count=%02u: ", subclass, len, offset, count);
+
+		for (i=0; i < count; i++)
+			printk("0x%02x ", data[i]);
+
+		printk("\n");
+
+		remaining -= count;
+		offset++;
+	}
+
+	return 0;
+
+error:
+	return ret;
+}
+
+#define dump_value(name, reg) do { \
+	int value = bq27x00_read_i2c(di, reg, false); \
+	printk("bq27x00: %s=0x%04x\n", #name, value); \
+} while(0)
+
+static int bq27x00_dump_dataflash(struct bq27x00_device_info *di)
+{
+	int ret;
+
+	printk("bq27x00: Control=0x%04x\n", bq27x00_control_cmd(di, 0x0000));
+	dump_value(Temperature, 0x06);
+	dump_value(Voltage, 0x08);
+	dump_value(Flags, 0x0a);
+	dump_value(NominalAvailableCapacity, 0x0c);
+	dump_value(FullAvailableCapacity, 0x0e);
+	dump_value(RemainingCapacity, 0x10);
+	dump_value(FullChargeCapacity, 0x12);
+	dump_value(AverageCurrent, 0x14);
+	dump_value(StateOfHealth, 0x28);
+	dump_value(CycleCount, 0x2a);
+	dump_value(StateOfCharge, 0x2c);
+	dump_value(OperationConfiguration, 0x3a);
+
+	/* unseal device */
+	ret = bq27x00_write_i2c(di, 0x00, 0x0414, false);
+	if (ret) {
+		dev_err(di->dev, "Failed to write (unseal part 1): %d\n", ret);
+		goto error;
+	}
+
+	msleep(SLAVE_LATENCY_DELAY);
+
+	ret = bq27x00_write_i2c(di, 0x00, 0x3672, false);
+	if (ret) {
+		dev_err(di->dev, "Failed to write (unseal part 2): %d\n", ret);
+		goto error;
+	}
+
+	msleep(SLAVE_LATENCY_DELAY);
+
+#if 0
+	ret = bq27x00_write_i2c(di, 0x00, 0xffff, false);
+	if (ret) {
+		dev_err(di->dev, "Failed to write (unseal part 3): %d\n", ret);
+		goto error;
+	}
+
+	ret = bq27x00_write_i2c(di, 0x00, 0xffff, false);
+	if (ret) {
+		dev_err(di->dev, "Failed to write (unseal part 4): %d\n", ret);
+		goto error;
+	}
+#endif
+
+	ret = dump_subclass(di, 0x02, 10);
+	ret = dump_subclass(di, 0x20, 6);
+	ret = dump_subclass(di, 0x22, 10);
+	ret = dump_subclass(di, 0x24, 15);
+	ret = dump_subclass(di, 0x30, 26);
+	ret = dump_subclass(di, 0x31, 25);
+	ret = dump_subclass(di, 0x38, 10);
+	ret = dump_subclass(di, 0x40, 14);
+	ret = dump_subclass(di, 0x44, 17);
+	ret = dump_subclass(di, 0x50, 79);
+	ret = dump_subclass(di, 0x51, 14);
+	ret = dump_subclass(di, 0x52, 28);
+	ret = dump_subclass(di, 0x53, 46);
+	ret = dump_subclass(di, 0x54, 46);
+	ret = dump_subclass(di, 0x55, 66);
+	ret = dump_subclass(di, 0x56, 66);
+	ret = dump_subclass(di, 0x57, 20);
+	ret = dump_subclass(di, 0x58, 20);
+	ret = dump_subclass(di, 0x59, 20);
+	ret = dump_subclass(di, 0x5a, 20);
+	ret = dump_subclass(di, 0x5b, 20);
+	ret = dump_subclass(di, 0x5c, 20);
+	ret = dump_subclass(di, 0x5d, 20);
+	ret = dump_subclass(di, 0x5e, 20);
+	ret = dump_subclass(di, 0x68, 16);
+	ret = dump_subclass(di, 0x69, 19);
+	ret = dump_subclass(di, 0x6a, 45);
+	ret = dump_subclass(di, 0x6b, 19);
+	ret = dump_subclass(di, 0x6c, 20);
+	ret = dump_subclass(di, 0x6d, 20);
+
+#if 0
+	/* seal device */
+	ret = bq27x00_write_i2c(di, 0x00, 0x0020, false);
+	if (ret) {
+		dev_err(di->dev, "Failed to write (seal part): %d\n", ret);
+		goto error;
+	}
+#endif
+
+	return 0;
+
+error:
+	return ret;
+}
+
+static ssize_t show_dump_data_flash(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct bq27x00_device_info *di = dev_get_drvdata(dev);
+
+	dev_warn(di->dev, "Dump data flash:\n");
+	bq27x00_dump_dataflash(di);
+
+	return sprintf(buf, "okay\n");
+}
+
+static DEVICE_ATTR(dump_data_flash, S_IRUGO, show_dump_data_flash, NULL);
+
+static struct attribute *bq27x00_attributes[] = {
+	&dev_attr_dump_data_flash.attr,
+	NULL
+};
+
+static const struct attribute_group bq27x00_attr_group = {
+	.attrs = bq27x00_attributes,
+};
+
 static int bq27x00_battery_probe(struct i2c_client *client,
 				 const struct i2c_device_id *id)
 {
@@ -748,6 +1004,10 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 		goto batt_failed_3;
 
 	i2c_set_clientdata(client, di);
+
+	retval = sysfs_create_group(&client->dev.kobj, &bq27x00_attr_group);
+	if (retval)
+		dev_err(&client->dev, "could not create sysfs files\n");
 
 	return 0;
 
