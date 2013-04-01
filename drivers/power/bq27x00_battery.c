@@ -111,6 +111,8 @@ struct bq27x00_device_info {
 	struct bq27x00_access_methods bus;
 
 	struct mutex lock;
+
+	int fw_ver;
 };
 
 static enum power_supply_property bq27x00_battery_props[] = {
@@ -129,6 +131,7 @@ static enum power_supply_property bq27x00_battery_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
 	POWER_SUPPLY_PROP_CYCLE_COUNT,
 	POWER_SUPPLY_PROP_ENERGY_NOW,
+	POWER_SUPPLY_PROP_SERIAL_NUMBER
 };
 
 static unsigned int poll_interval = 360;
@@ -496,6 +499,7 @@ static int bq27x00_simple_value(int value,
 #define to_bq27x00_device_info(x) container_of((x), \
 				struct bq27x00_device_info, bat);
 
+static char serial_number[10];
 static int bq27x00_battery_get_property(struct power_supply *psy,
 					enum power_supply_property psp,
 					union power_supply_propval *val)
@@ -563,6 +567,10 @@ static int bq27x00_battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_ENERGY_NOW:
 		ret = bq27x00_battery_energy(di, val);
+		break;
+	case POWER_SUPPLY_PROP_SERIAL_NUMBER:
+		sprintf(serial_number, "%d", di->fw_ver);
+		val->strval = serial_number;
 		break;
 	default:
 		return -EINVAL;
@@ -764,6 +772,14 @@ static int bq27x00_read_block_i2c(struct bq27x00_device_info *di, u8 reg,
 	return 0;
 }
 
+static int bq27x00_battery_read_fw_version(struct bq27x00_device_info *di)
+{
+	bq27x00_write_i2c(di, 0x00, 0x0002, false);
+
+	msleep(10);
+
+	return bq27x00_read_i2c(di, 0x00, false);
+}
 #define SLAVE_LATENCY_DELAY 100
 
 static int dump_subclass(struct bq27x00_device_info *di, u8 subclass, size_t len)
@@ -999,6 +1015,9 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 		di->translate_temp = pdata->translate_temp;
 	else
 		dev_warn(&client->dev, "fixup func not set, using default thermistor behavior\n");
+
+	di->fw_ver = bq27x00_battery_read_fw_version(di);
+	dev_info(&client->dev, "Gas Guage fw version is 0x%04x\n", di->fw_ver);
 
 	if (bq27x00_powersupply_init(di))
 		goto batt_failed_3;
