@@ -542,6 +542,8 @@ static int process_interrupt_requests(struct rmi_device *rmi_dev)
 
 	u8_and(irq_status, irq_status, data->current_irq_mask,
 	       data->irq_count);
+	mutex_unlock(&data->irq_mutex);
+
 	/* At this point, irq_status has all bits that are set in the
 	 * interrupt status register and are enabled.
 	 */
@@ -551,7 +553,6 @@ static int process_interrupt_requests(struct rmi_device *rmi_dev)
 			process_one_interrupt(entry, irq_status,
 					      data);
 
-	mutex_unlock(&data->irq_mutex);
 	return 0;
 }
 

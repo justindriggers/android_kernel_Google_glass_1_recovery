@@ -20,12 +20,17 @@
 #ifndef _RMI_F05_H
 #define _RMI_F05_H
 
-#define IDLE_STATUS 0
-#define RUN_STATUS 1
+#define F05_STATE_IDLE		0
+#define F05_STATE_READY		1
+#define F05_STATE_RUN		2
+#define F05_STATE_PENDING	3
+#define F05_STATE_ERROR		4
 
 #define F05_REPORT_STOP		0
 #define F05_REPORT_START	1
 #define F05_REPORT_SET_TYPE	2
 #define F05_REPORT_FORCE_ZERO	3
+// PAUSE should eventually replace STOP.
+#define F05_REPORT_PAUSE	4
 
 #endif
