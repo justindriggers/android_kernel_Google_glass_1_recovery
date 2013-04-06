@@ -1602,7 +1602,7 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 						glasshub->fw_dirty[3]);
 #endif
 
-				for (page = 0; page < FIRMWARE_TOTAL_PAGES; page++) {
+				for (page = FIRMWARE_TOTAL_PAGES - 1; page >= 0; page--) {
 					/* flash only dirty pages */
 					if (glasshub->fw_dirty[page / 32] &
 							(1 << (page & 31))) {
