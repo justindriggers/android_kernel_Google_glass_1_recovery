@@ -27,3 +27,14 @@ config FB_OMAP2_NUM_FBS
 	help
 	  Select the number of framebuffers created. OMAP2/3 has 3 overlays
 	  so normally this would be 3.
+
+config FB_OMAP_CONSISTENT_DMA_SIZE
+	int "Consistent DMA memory size (MB)"
+	depends on FB_OMAP2
+	range 1 14
+	default 2
+	help
+	  Increase the DMA consistent memory size according to your video
+	  memory needs, for example if you want to use multiple planes.
+	  The size must be 2MB aligned.
+	  If unsure say 1.
