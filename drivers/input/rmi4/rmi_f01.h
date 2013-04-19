@@ -74,8 +74,11 @@ union f01_basic_queries {
 		bool q3_bit_7:1;
 
 		u8 year:5;
+		u8 year_rsvd:3;
 		u8 month:4;
+		u8 month_rsvd:4;
 		u8 day:5;
+		u8 day_rsvd:3;
 		bool cp1:1;
 		bool cp2:1;
 		u8 wafer_id1_lsb:8;
