@@ -33,11 +33,11 @@
 #include <linux/i2c/glasshub.h>
 
 /* module debug flags */
-#define DEBUG_FLASH_MODE 0
+#define DEBUG_FIRMWARE_UPDATE		0
 
 /* driver name/version */
-#define DEVICE_NAME "glasshub"
-#define DRIVER_VERSION "0.15"
+#define DEVICE_NAME			"glasshub"
+#define DRIVER_VERSION			"0.16"
 
 /* minimum MCU firmware version required for this driver */
 #define MINIMUM_MCU_VERSION		27
@@ -47,6 +47,12 @@
 
 /* special app code to flash the bootloader */
 #define BOOTLOADER_FLASHER		0xff
+
+/* values to write to update_fw_enable register to flash firmware */
+#define FW_ENABLE_FLASH_APP_CODE	0x00
+#define FW_ENABLE_FLASH_MODE		0x01
+#define FW_ENABLE_FLASH_BOOT_CODE	0xff
+#define FW_ENABLE_CHECKSUM		0xfe
 
 /* number of retries */
 #define NUMBER_OF_I2C_RETRIES		3
@@ -99,7 +105,8 @@
 #define CMD_BOOTLOADER_VERSION		0xf7
 #define CMD_FLASH_STATUS		0xf8
 #define CMD_FLASH			0xf9
-#define CMD_BOOT			0xfA
+#define CMD_BOOT			0xfa
+#define CMD_CHECKSUM_PAGE		0xfb
 
 /* interrupt sources in STATUS register */
 #define IRQ_PASSTHRU			0b00000001
@@ -136,6 +143,7 @@
 #define FIRMWARE_PAGE_SIZE		64
 #define FIRMWARE_TOTAL_SIZE		(8*1024)
 #define FIRMWARE_TOTAL_PAGES		(FIRMWARE_TOTAL_SIZE / FIRMWARE_PAGE_SIZE)
+#define FIRMWARE_PERSISTENT_DATA_PAGE	123
 #define FIRMWARE_NUM_DIRTY_BITS		((FIRMWARE_TOTAL_PAGES+ 31) / 32)
 #define FIRMWARE_BASE_ADDRESS		0x8000
 #define FIRMWARE_END_ADDRESS		(FIRMWARE_BASE_ADDRESS + FIRMWARE_TOTAL_SIZE - 1)
@@ -197,6 +205,8 @@
 #define FLASH_ERROR_NO_PAGES_FLASHED	-8
 #define FLASH_ERROR_BOOTLOADER_VERSION	-9
 #define FLASH_ERROR_DEVICE_BOOT_ERROR	-10
+#define FLASH_ERROR_CHECKSUM_ERROR	-11
+#define FLASH_ERROR_CHECKSUM_MISMATCH	-12
 
 /*
  * Basic theory of operation:
@@ -919,7 +929,7 @@ static ssize_t don_threshold_store(struct device *dev, struct device_attribute *
 	return store_reg(dev, buf, count, REG16_DON_THRESH, 1, 5000);
 }
 
-/* show dof threshold value */
+/* show doff threshold value */
 static ssize_t doff_threshold_show(struct device *dev, struct device_attribute *attr,
 		char *buf)
 {
@@ -1338,7 +1348,7 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 	int i;
 	int pageNum;
 
-#if DEBUG_FLASH_MODE
+#if DEBUG_FIRMWARE_UPDATE
 	dev_info(&glasshub->i2c_client->dev, "%s Rx SREC %u bytes\n", __FUNCTION__, count);
 #endif
 
@@ -1346,7 +1356,7 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 
 	for (i = 0; i < count; i++) {
 
-#if DEBUG_FLASH_MODE
+#if DEBUG_FIRMWARE_UPDATE
 		dev_dbg(&glasshub->i2c_client->dev,
 				"%s SREC state = %d count = %d input = %c\n",
 				__FUNCTION__, glasshub->fw_state, glasshub->fw_count, buf[i]);
@@ -1356,7 +1366,7 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 			case FW_STATE_START:
 				if (buf[i] == 'S') {
 					glasshub->fw_state = FW_STATE_TYPE;
-#if DEBUG_FLASH_MODE
+#if DEBUG_FIRMWARE_UPDATE
 					dev_dbg(&glasshub->i2c_client->dev,
 							"%s Start of SREC\n", __FUNCTION__);
 #endif
@@ -1371,7 +1381,7 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 
 				/* process only S1-S3 records */
 				if (buf[i] >= '1' && buf[i] <= '3') {
-#if DEBUG_FLASH_MODE
+#if DEBUG_FIRMWARE_UPDATE
 					dev_dbg(&glasshub->i2c_client->dev,
 							"%s SREC type %c\n", __FUNCTION__, buf[i]);
 #endif
@@ -1419,7 +1429,7 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 					goto err_out;
 				}
 				glasshub->fw_checksum += glasshub->fw_value & 0xff;
-#if DEBUG_FLASH_MODE
+#if DEBUG_FIRMWARE_UPDATE
 				dev_dbg(&glasshub->i2c_client->dev, "%s SREC byte count %u\n",
 						__FUNCTION__, glasshub->fw_value);
 #endif
@@ -1437,7 +1447,7 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 					goto err_out;
 				}
 				glasshub->fw_checksum += glasshub->fw_value & 0xff;
-#if DEBUG_FLASH_MODE
+#if DEBUG_FIRMWARE_UPDATE
 				dev_dbg(&glasshub->i2c_client->dev, "%s SREC address %04xh\n",
 						__FUNCTION__, glasshub->fw_value);
 #endif
@@ -1475,7 +1485,7 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 
 				/* check for end of data */
 				if (--glasshub->fw_count == 1) {
-#if DEBUG_FLASH_MODE
+#if DEBUG_FIRMWARE_UPDATE
 					dev_dbg(&glasshub->i2c_client->dev,
 							"%s SREC all bytes received\n",
 							__FUNCTION__);
@@ -1498,7 +1508,7 @@ static ssize_t update_fw_data_store(struct device *dev, struct device_attribute 
 					glasshub->flash_status = FLASH_ERROR_SREC_CHECKSUM_ERROR;
 					goto err_out;
 				}
-#if DEBUG_FLASH_MODE
+#if DEBUG_FIRMWARE_UPDATE
 				dev_dbg(&glasshub->i2c_client->dev, "%s SREC checksum OK\n",
 						__FUNCTION__);
 #endif
@@ -1517,38 +1527,170 @@ err_out:
 	return -EINVAL;
 }
 
+/* flash firmware to MCU */
+static int flash_firmware_l(struct glasshub_data *glasshub, int no_line_checksum)
+{
+	int pages_flashed = 0;
+	int page;
+	int rc = 0;
+
+	for (page = FIRMWARE_TOTAL_PAGES - 1; page >= 0; page--) {
+		/* flash only dirty pages */
+		if (glasshub->fw_dirty[page / 32] &
+				(1 << (page & 31))) {
+			uint8_t buffer[FIRMWARE_PAGE_SIZE+3];
+			uint8_t line_checksum;
+			int i, j;
+
+			/* initalize command and page number */
+			buffer[0] = CMD_FLASH;
+			buffer[1] = page;
+
+			/* seed line checksum */
+			line_checksum = 0xa5;
+
+			/* copy firmware into buffer */
+			for (i = 2, j = page * FIRMWARE_PAGE_SIZE;
+					i < FIRMWARE_PAGE_SIZE + 2;
+					i++, j++) {
+				buffer[i] = glasshub->fw_image[j];
+				line_checksum = (line_checksum << 1) ^ buffer[i] ^ (line_checksum >> 7);
+			}
+
+			/* add checksum to buffer */
+			buffer[66] = line_checksum;
+
+#if DEBUG_FIRMWARE_UPDATE
+			dev_info(&glasshub->i2c_client->dev,
+					"%s: Flash page %d\n",
+					__FUNCTION__, page);
+#endif
+			/* don't send checksum for older bootloader version */
+			rc = _i2c_write_mult(glasshub, buffer,
+					sizeof(buffer) - no_line_checksum);
+			if (rc) {
+				set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
+				dev_err(&glasshub->i2c_client->dev,
+						"%s Unable to flash glasshub device\n",
+						__FUNCTION__);
+				return FLASH_ERROR_I2C_DEVICE_COMM;
+			}
+
+			/* new bootloader: check status for error */
+			if (!no_line_checksum) {
+				buffer[0] = CMD_FLASH_STATUS;
+				rc = _i2c_read(glasshub, buffer, 1, buffer, 1);
+				if (rc) {
+					set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
+					dev_err(&glasshub->i2c_client->dev,
+							"%s Error reading flash status\n",
+							__FUNCTION__);
+					return FLASH_ERROR_I2C_DEVICE_COMM;
+				} else if (buffer[0] != 0) {
+					dev_err(&glasshub->i2c_client->dev,
+							"%s Device rejected packet: %u\n",
+							__FUNCTION__, buffer[0]);
+					return FLASH_ERROR_DEV_REJECTED_PKT;
+				}
+			}
+			++pages_flashed;
+		}
+	}
+
+	dev_info(&glasshub->i2c_client->dev,
+			"%s: %d code page(s) flashed\n",
+			__FUNCTION__, pages_flashed);
+	if (!pages_flashed)
+		return FLASH_ERROR_NO_PAGES_FLASHED;
+	return FLASH_STATUS_OK;
+}
+
+static int checksum_firmware_l(struct glasshub_data *glasshub)
+{
+	uint8_t buffer[2];
+	int page_count = 0;
+	int page;
+	int rc = 0;
+
+	/* checksum dirty pages */
+	for (page = 0; page < FIRMWARE_TOTAL_PAGES; page++) {
+		if (glasshub->fw_dirty[page / 32] &
+				(1 << (page & 31))) {
+			int start;
+			int i;
+			uint8_t checksum = 0xa5;
+
+			/* skip persistent data page */
+			if (page == FIRMWARE_PERSISTENT_DATA_PAGE)
+				continue;
+
+			/* calculate checksum */
+			page_count++;
+			start = page * FIRMWARE_PAGE_SIZE;
+			for (i = start; i < start + FIRMWARE_PAGE_SIZE; i++) {
+				checksum = (checksum << 1) ^ glasshub->fw_image[i] ^ (checksum >> 7);
+			}
+
+			/* fetch checksum for this page */
+			buffer[0] = CMD_CHECKSUM_PAGE;
+			buffer[1] = page;
+			rc = _i2c_read(glasshub, buffer, 2, buffer, 1);
+			if (rc)
+				return FLASH_ERROR_CHECKSUM_ERROR;
+
+			/* compare to calculated value */
+			if (buffer[0] != checksum) {
+				dev_err(&glasshub->i2c_client->dev,
+						"%s: page %d checksum calculated = 0x%02x received = 0x%02x\n",
+						__FUNCTION__, page, checksum, buffer[0]);
+
+				return FLASH_ERROR_CHECKSUM_MISMATCH;
+			}
+		}
+	}
+	dev_info(&glasshub->i2c_client->dev,
+			"%s: %d code page(s) checked\n",
+			__FUNCTION__, page_count);
+	return FLASH_STATUS_OK;
+}
+
 /* sysfs node to enter/exit flash programming mode */
 static ssize_t update_fw_enable_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	unsigned long value = 0;
+	unsigned long cmd = 0;
 	int rc = 0;
 	int bootflasher = 0;
-	int old_boot;
+	int no_line_checksum;
+	int do_image_checksum;
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
 
-	if (kstrtoul(buf, 10, &value)) {
+	if (kstrtoul(buf, 10, &cmd)) {
 		goto err_out;
 	}
 
-#if DEBUG_FLASH_MODE
-	dev_info(&glasshub->i2c_client->dev, "%s update_fw_enable = %lu\n", __FUNCTION__, value);
+#if DEBUG_FIRMWARE_UPDATE
+	dev_info(&glasshub->i2c_client->dev, "%s update_fw_enable = %lu\n", __FUNCTION__, cmd);
 #endif
 
 	mutex_lock(&glasshub->device_lock);
 
-	/* bootloader version 3 does not support checksum */
-	old_boot = (glasshub->bootloader_version < 4) ? 1 : 0;
+	/* bootloader version 3 does not support line checksum */
+	no_line_checksum = (glasshub->bootloader_version < 4) ? 1 : 0;
+
+	/* bootloader version 4 does not support image checksum */
+	do_image_checksum = (glasshub->bootloader_version < 5) ? 0 : 1;
 
 	/* handle special bootflasher case */
-	if ((value == BOOTLOADER_FLASHER) && (glasshub->app_version_major == BOOTLOADER_FLASHER)) {
+	if ((cmd == FW_ENABLE_FLASH_BOOT_CODE) && (glasshub->app_version_major == BOOTLOADER_FLASHER)) {
 		bootflasher = 1;
-		old_boot = 0;
-		value = 0;
+		no_line_checksum = 0;
+		do_image_checksum = 0;
+		cmd = FW_ENABLE_FLASH_APP_CODE;
 	}
 
 	/* enable firmware flash */
-	if (value) {
+	if (cmd == FW_ENABLE_FLASH_MODE) {
 		if (!test_bit(FLAG_FLASH_MODE, &glasshub->flags)) {
 			/* allocate memory and clear dirty bits */
 			if (!glasshub->fw_image) {
@@ -1575,7 +1717,7 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 			rc = reset_device_l(glasshub, 0);
 			if (rc)  {
 				glasshub->flash_status = FLASH_ERROR_DEVICE_RESET_ERROR;
-				goto ExitFlashMode;
+				goto exit_flash_mode;
 			}
 
 			/* if flashing boot code, boot into application code */
@@ -1583,17 +1725,13 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 				rc = boot_device_l(glasshub);
 				if (rc) {
 					glasshub->flash_status = FLASH_ERROR_DEVICE_BOOT_ERROR;
-					goto ExitFlashMode;
+					goto exit_flash_mode;
 				}
 			}
 
 			/* here's where we flash the image if it has dirty bits */
 			if (glasshub->fw_image) {
-				int pagesFlashed = 0;
-				int page;
-				uint8_t checksum;
-
-#if DEBUG_FLASH_MODE
+#if DEBUG_FIRMWARE_UPDATE
 				dev_info(&glasshub->i2c_client->dev,
 						"Update pages: %08x %08x %08x %08x\n",
 						glasshub->fw_dirty[0],
@@ -1602,76 +1740,23 @@ static ssize_t update_fw_enable_store(struct device *dev, struct device_attribut
 						glasshub->fw_dirty[3]);
 #endif
 
-				for (page = FIRMWARE_TOTAL_PAGES - 1; page >= 0; page--) {
-					/* flash only dirty pages */
-					if (glasshub->fw_dirty[page / 32] &
-							(1 << (page & 31))) {
-						uint8_t buffer[FIRMWARE_PAGE_SIZE+3];
-						int i, j;
+				/* assume success */
+				glasshub->flash_status = FLASH_STATUS_OK;
 
-						/* initalize command and page number */
-						buffer[0] = CMD_FLASH;
-						buffer[1] = page;
-
-						/* seed checksum */
-						checksum = 0xa5;
-
-						/* copy firmware into buffer */
-						for (i = 2, j = page * FIRMWARE_PAGE_SIZE;
-								i < FIRMWARE_PAGE_SIZE + 2;
-								i++, j++) {
-							buffer[i] = glasshub->fw_image[j];
-							checksum = (checksum << 1) ^ buffer[i] ^ (checksum >> 7);
-						}
-
-						/* add checksum to buffer */
-						buffer[66] = checksum;
-
-#if DEBUG_FLASH_MODE
-						dev_info(&glasshub->i2c_client->dev,
-								"%s: Flash page %d\n",
-								__FUNCTION__, page);
-#endif
-						/* don't send checksum for older bootloader version */
-						rc = _i2c_write_mult(glasshub, buffer,
-								sizeof(buffer) - old_boot);
-						if (rc) {
-							set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
-							dev_err(&glasshub->i2c_client->dev,
-									"%s Unable to flash glasshub device\n",
-									__FUNCTION__);
-							glasshub->flash_status = FLASH_ERROR_I2C_DEVICE_COMM;
-							goto ExitFlashMode;
-						}
-
-						/* new bootloader: check status for error */
-						if (!old_boot) {
-							buffer[0] = CMD_FLASH_STATUS;
-							rc = _i2c_read(glasshub, buffer, 1, buffer, 1);
-							if (rc) {
-								set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
-								dev_err(&glasshub->i2c_client->dev,
-										"%s Error reading flash status\n",
-										__FUNCTION__);
-								glasshub->flash_status = FLASH_ERROR_I2C_DEVICE_COMM;
-								goto ExitFlashMode;
-							} else if (buffer[0] != 0) {
-								dev_err(&glasshub->i2c_client->dev,
-										"%s Device rejected packet: %u\n",
-										__FUNCTION__, buffer[0]);
-								glasshub->flash_status = FLASH_ERROR_DEV_REJECTED_PKT;
-								goto ExitFlashMode;
-							}
-						}
-						++pagesFlashed;
-					}
+				/* flash image, unless this is just an image checksum */
+				if (cmd != FW_ENABLE_CHECKSUM) {
+					glasshub->flash_status = flash_firmware_l(glasshub, no_line_checksum);
+					if (glasshub->flash_status != FLASH_STATUS_OK)
+						goto exit_flash_mode;
 				}
-				dev_info(&glasshub->i2c_client->dev,
-						"%s: %d code page(s) flashed\n",
-						__FUNCTION__, pagesFlashed);
-				glasshub->flash_status = pagesFlashed ? FLASH_STATUS_OK : FLASH_ERROR_NO_PAGES_FLASHED;
+
+				/* do image checksum */
+				if (do_image_checksum) {
+					glasshub->flash_status = checksum_firmware_l(glasshub);
+				}
 			}
-ExitFlashMode:
+
+exit_flash_mode:
 			if (bootflasher) {
 				uint8_t buffer[1];
 
@@ -1679,7 +1764,7 @@ ExitFlashMode:
 				rc = reset_device_l(glasshub, 1);
 				if (rc)  {
 					glasshub->flash_status = FLASH_ERROR_DEVICE_RESET_ERROR;
-					goto ExitFlashMode;
+					goto clear_flash_bit;
 				}
 
 				/* get new bootloader version */
@@ -1687,10 +1772,12 @@ ExitFlashMode:
 				rc = _i2c_read(glasshub, buffer, 1, buffer, 1);
 				if (rc) {
 					glasshub->flash_status = FLASH_ERROR_BOOTLOADER_VERSION;
-					goto ExitFlashMode;
+					goto clear_flash_bit;
 				}
 				glasshub->bootloader_version = buffer[0];
 			}
+
+clear_flash_bit:
 			clear_bit(FLAG_FLASH_MODE, &glasshub->flags);
 		}
 	}
