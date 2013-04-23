@@ -139,6 +139,7 @@ struct bq27x00_access_methods {
 
 static int bq27x00_dump_dataflash(struct bq27x00_device_info *di);
 static int bq27x00_control_cmd(struct bq27x00_device_info *di, u16 cmd);
+static void bq27x00_reset_registers(struct bq27x00_device_info *di);
 
 enum bq27x00_chip { BQ27000, BQ27500 };
 
@@ -390,13 +391,14 @@ static void bq27x00_battery_poll(struct work_struct *work)
 	struct bq27x00_device_info *di =
 		container_of(work, struct bq27x00_device_info, work.work);
 
-	bq27x00_update(di);
-
 	if (poll_interval > 0) {
+		bq27x00_update(di);
 		/* The timer does not have to be accurate. */
 		set_timer_slack(&di->work.timer, poll_interval * HZ / 4);
 		schedule_delayed_work(&di->work, poll_interval * HZ);
 	}
+
+	return;
 }
 
 
@@ -851,7 +853,14 @@ static int bq27x00_battery_reset(struct bq27x00_device_info *di)
 
 	msleep(10);
 
-	return bq27x00_read_i2c(di, CONTROL_CMD, false);
+	bq27x00_read_i2c(di, CONTROL_CMD, false);
+
+	msleep(10);
+
+	/* Reset register map based on fw version */
+	bq27x00_reset_registers(di);
+
+	return 0;
 }
 
 
@@ -1123,6 +1132,27 @@ static const struct attribute_group bq27x00_attr_group = {
 	.attrs = bq27x00_attributes,
 };
 
+static void bq27x00_reset_registers(struct bq27x00_device_info *di)
+{
+	/* Get the fw version to determine the register mapping */
+	di->fw_ver = bq27x00_battery_read_fw_version(di);
+	di->df_ver = bq27x00_battery_read_dataflash_version(di);
+	dev_info(di->dev,
+		"Gas Guage fw version 0x%04x; df version 0x%04x\n",
+		di->fw_ver, di->df_ver);
+
+	if (di->fw_ver == L1_FW_VERSION)
+		di->regs = bq27x00_fw_l1_regs;
+	else if (di->fw_ver == G3_FW_VERSION)
+		di->regs = bq27x00_fw_g3_regs;
+	else {
+		dev_err(di->dev,
+			"Unkown Gas Guage fw version: 0x%04x\n", di->fw_ver);
+		di->regs = bq27x00_fw_g3_regs;
+	}
+}
+
+
 static int bq27x00_battery_probe(struct i2c_client *client,
 				 const struct i2c_device_id *id)
 {
@@ -1168,22 +1198,7 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	else
 		dev_warn(&client->dev, "fixup func not set, using default thermistor behavior\n");
 
-	/* Get the fw version to determine the register mapping */
-	di->fw_ver = bq27x00_battery_read_fw_version(di);
-	di->df_ver = bq27x00_battery_read_dataflash_version(di);
-	dev_info(&client->dev,
-		"Gas Guage fw version 0x%04x; df version 0x%04x\n",
-		di->fw_ver, di->df_ver);
-
-	if (di->fw_ver == L1_FW_VERSION)
-		di->regs = bq27x00_fw_l1_regs;
-	else if (di->fw_ver == G3_FW_VERSION)
-		di->regs = bq27x00_fw_g3_regs;
-	else {
-		dev_err(&client->dev,
-			"Unkown Gas Guage fw version: 0x%04x\n", di->fw_ver);
-		di->regs = bq27x00_fw_g3_regs;
-	}
+	bq27x00_reset_registers(di);
 
 	if (bq27x00_powersupply_init(di))
 		goto batt_failed_3;
