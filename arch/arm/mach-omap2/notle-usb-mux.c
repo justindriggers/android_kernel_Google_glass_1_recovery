@@ -24,6 +24,9 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/gpio.h>
+#include <linux/reboot.h>
+#include <linux/i2c/twl.h>
+#include <linux/i2c/twl6030-gpadc.h>
 
 #include "board-notle.h"
 #include "notle-usb-mux.h"
@@ -34,6 +37,9 @@ enum usb_mux_mode {
 	USB_MUX_MODE_TTY      = 2,
 	USB_MUX_MODE_AUDIO    = 3,
 };
+
+#define FACTORY_CABLE_VOLTAGE_THRESHOLD		4200	/* millivolts */
+#define CABLE_SHUTDOWN_INTERVAL				30000	/* msec */
 
 struct usb_mux_device_info {
 	struct device *dev;
@@ -54,9 +60,20 @@ struct usb_mux_device_info {
 
 	struct workqueue_struct *wq;
 	struct work_struct work;
+	struct delayed_work shutdown_work;
 };
 
 static struct usb_mux_device_info *usb_mux_di;
+
+/*
+ * The following is a flag to prevent a reboot into
+ * fastboot if factory cable is plugged in.  If it is
+ * set then don't reboot.
+ */
+static bool notle_factorycable_bootmode = 0;
+
+/* prototypes */
+static int voltage_id(int, int);
 
 static const char *str_for_mode(enum usb_mux_mode mode)
 {
@@ -86,6 +103,20 @@ static const char *str_for_mode(enum usb_mux_mode mode)
 static void sync_usb_mux_mode(struct usb_mux_device_info *di)
 {
 	enum usb_mux_mode mode;
+	int id_voltage;
+
+	/* check for factory cable */
+	id_voltage = voltage_id(0, 0);
+	if (notle_factorycable_bootmode) {
+		/* schedule a shutdown if factory cable removed */
+		if (id_voltage < FACTORY_CABLE_VOLTAGE_THRESHOLD) {
+			schedule_delayed_work(&di->shutdown_work, msecs_to_jiffies(CABLE_SHUTDOWN_INTERVAL));
+		}
+	} else {
+		if (id_voltage > FACTORY_CABLE_VOLTAGE_THRESHOLD) {
+			kernel_restart("bootloader");
+		}
+	}
 
 	if (di->force_usb || di->usb_online)
 		mode = USB_MUX_MODE_USB;
@@ -147,6 +178,13 @@ static enum usb_mux_mode get_usb_mux_mode(struct usb_mux_device_info *di)
 	return mode;
 }
 
+/*
+ * deferred call to take care of mux and check voltage on ID line
+ *
+ * if factory cable is plugged in then reset into fastboot unless we
+ * booted with the factorycable_bootmode flag set
+ * in that special bootmode, schedule a shut down when cable unplugged
+ */
 static void usb_mux_work(struct work_struct *work)
 {
 	struct usb_mux_device_info *di = container_of(work,
@@ -155,6 +193,11 @@ static void usb_mux_work(struct work_struct *work)
 	mutex_lock(&di->lock);
 	sync_usb_mux_mode(di);
 	mutex_unlock(&di->lock);
+}
+
+static void usb_shutdown_work(struct work_struct *shutdown_work)
+{
+	kernel_power_off();
 }
 
 /*
@@ -202,6 +245,44 @@ static int usb_mux_usb_notifier_call(struct notifier_block *nb,
 		queue_work(di->wq, &di->work);
 
 	return NOTIFY_OK;
+}
+
+/*
+ * Return channel value
+ * Or < 0 on failure.
+ */
+static int twl6030_get_gpadc_conversion(int channel_no)
+{
+	struct twl6030_gpadc_request req;
+	int temp = 0;
+	int ret;
+
+	req.channels = (1 << channel_no);
+	req.method = TWL6030_GPADC_SW2;
+	req.active = 0;
+	req.func_cb = NULL;
+	ret = twl6030_gpadc_conversion(&req);
+	if (ret < 0)
+		return ret;
+
+	if (req.rbuf[channel_no] > 0)
+		temp = req.rbuf[channel_no];
+
+	return temp;
+}
+
+static int voltage_id(int mode, int ms_delay)
+{
+	int voltage;
+
+	mode |= TWL6030_USB_ID_CTRL_MEAS;
+	twl_i2c_write_u8(TWL_MODULE_USB, 0xFF, REG_USB_ID_CTRL_CLR);
+	twl_i2c_write_u8(TWL_MODULE_USB, mode, REG_USB_ID_CTRL_SET);
+	if (ms_delay) {
+		msleep(ms_delay);
+	}
+	voltage = twl6030_get_gpadc_conversion(TWL6030_GPADC_ID_CHANNEL);
+	return voltage;
 }
 
 static ssize_t set_mode(struct device *dev, struct device_attribute *attr,
@@ -307,6 +388,7 @@ static int usb_mux_probe(struct platform_device *pdev)
 
 	di->wq = create_freezable_workqueue(dev_name(&pdev->dev));
 	INIT_WORK(&di->work, usb_mux_work);
+	INIT_DELAYED_WORK(&di->shutdown_work, usb_shutdown_work);
 
 	di->nb.notifier_call = usb_mux_usb_notifier_call;
 	di->otg = otg_get_transceiver();
@@ -361,6 +443,18 @@ static int usb_mux_remove(struct platform_device *pdev)
 
 	return 0;
 }
+
+// Early initialization; return 0 on failure, 1 on success
+static int __init notle_check_factorycable(char *str)
+{
+	if (!str)
+		return 0;
+	if (!strcmp(str,"factorycable"))
+		notle_factorycable_bootmode = 1;
+	return 1;
+}
+
+__setup("androidboot.mode=", notle_check_factorycable);
 
 static struct platform_driver usb_mux_driver = {
 	.driver = {
