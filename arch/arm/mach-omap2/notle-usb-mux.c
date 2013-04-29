@@ -469,7 +469,7 @@ static int __init usb_mux_driver_init(void)
 	int ret;
 
 	ret = platform_driver_register(&usb_mux_driver);
-	if (!ret) {
+	if (ret) {
 		pr_err("Failed to register USB MUX driver\n");
 		goto error;
 	}
