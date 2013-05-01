@@ -70,7 +70,8 @@ enum bq27x00_reg_index {
 	BQ27000_REG_ILMD,
 	BQ27500_REG_SOC,
 	BQ27500_REG_DCAP,
-	BQ27500_REG_CTRL
+	BQ27500_REG_CTRL,
+	BQ27500_REG_RAW_SOC,
 };
 
 /* TI G3 Firmware (v3.24) */
@@ -92,7 +93,8 @@ static u8 bq27x00_fw_g3_regs[] = {
 	0x76,
 	0x2C,
 	0x3C,
-	0x00
+	0x00,
+	0xFF
 };
 
 /*
@@ -118,7 +120,8 @@ static u8 bq27x00_fw_l1_regs[] = {
 	0xFF, /* ILMD */
 	0x20,
 	0x2E,
-	0x00
+	0x00,
+	0x74
 };
 
 
@@ -152,6 +155,7 @@ struct bq27x00_reg_cache {
 	int charge_full;
 	int cycle_count;
 	int capacity;
+	int raw_capacity;
 	int flags;
 
 	int current_now;
@@ -230,6 +234,22 @@ static inline int bq27x00_write(struct bq27x00_device_info *di, int reg_index,
 		return -1;
 
 	return di->bus.write(di, di->regs[reg_index], value, single);
+}
+
+/*
+ * Return the battery Raw State-of-Charge
+ * Or < 0 if something fails.
+ */
+static int bq27x00_battery_read_raw_soc(struct bq27x00_device_info *di)
+{
+	int rsoc;
+
+	rsoc = bq27x00_read(di, BQ27500_REG_RAW_SOC, false);
+
+	if (rsoc < 0)
+		dev_err(di->dev, "error reading raw State-of-Charge\n");
+
+	return rsoc;
 }
 
 /*
@@ -360,6 +380,7 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 	cache.flags = bq27x00_read(di, BQ27x00_REG_FLAGS, is_bq27500);
 	if (cache.flags >= 0) {
 		cache.capacity = bq27x00_battery_read_rsoc(di);
+		cache.raw_capacity = bq27x00_battery_read_raw_soc(di);
 		cache.temperature = bq27x00_read(di, BQ27x00_REG_TEMP, false);
 		cache.internal_temp = bq27x00_read(di, BQ27x00_REG_INT_TEMP, false);
 		cache.time_to_empty = bq27x00_battery_read_time(di, BQ27x00_REG_TTE);
@@ -606,6 +627,9 @@ static int bq27x00_battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 		ret = bq27x00_battery_current(di, val);
+		break;
+	case POWER_SUPPLY_PROP_CAPACITY_LEVEL:
+		ret = bq27x00_simple_value(di->cache.raw_capacity, val);
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		if (di->fake_battery) {

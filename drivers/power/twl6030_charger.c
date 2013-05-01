@@ -1061,6 +1061,7 @@ static void twl6030_monitor_work(struct work_struct *work)
 	struct timespec ts;
 
 	int capacity;
+	int raw_capacity;
 	int voltage_uV;
 	int current_uA;
 	int temperature_cC;
@@ -1091,6 +1092,13 @@ static void twl6030_monitor_work(struct work_struct *work)
 		goto error;
 	}
 	capacity = val.intval;
+
+	ret = battery->get_property(battery, POWER_SUPPLY_PROP_CAPACITY_LEVEL, &val);
+	if (ret) {
+		dev_err(di->dev, "Failed to read battery raw capacity: %d\n", ret);
+		goto error;
+	}
+	raw_capacity = val.intval;
 
 	ret = battery->get_property(battery, POWER_SUPPLY_PROP_VOLTAGE_NOW, &val);
 	if (ret) {
@@ -1187,9 +1195,9 @@ static void twl6030_monitor_work(struct work_struct *work)
 	}
 
 	getnstimeofday(&ts);
-	dev_warn(di->dev, "capacity=%d%% voltage_uV=%d uV current_uA=%d uA "
+	dev_warn(di->dev, "capacity=%d%% raw_capacity=%d%% voltage_uV=%d uV current_uA=%d uA "
 			"temperature_cC=%d current_limit_mA=%d %s%s [%016lu]\n",
-			capacity, voltage_uV, current_uA, temperature_cC, di->current_limit_mA,
+			capacity, raw_capacity, voltage_uV, current_uA, temperature_cC, di->current_limit_mA,
 			twl6030_state[di->state], is_charging(di) ? " CHG" : "", (unsigned long) ts.tv_sec);
 error:
 	twl6030_determine_charge_state(di);
