@@ -701,6 +701,11 @@ static void timekeeping_resume(void)
 static int timekeeping_suspend(void)
 {
 	unsigned long flags;
+	struct timespec ts;
+	unsigned long long time_usec;
+	getnstimeofday(&ts);
+	time_usec = (1000000 * (unsigned long long)ts.tv_sec) + ts.tv_nsec / 1000;
+	printk("pre_suspend_time_usec=%llu", time_usec);
 
 	read_persistent_clock(&timekeeping_suspend_time);
 
