@@ -72,6 +72,13 @@ enum bq27x00_reg_index {
 	BQ27500_REG_DCAP,
 	BQ27500_REG_CTRL,
 	BQ27500_REG_RAW_SOC,
+
+	BQ27500_REG_FAC,
+	BQ27500_REG_RM,
+	BQ27500_REG_FCC,
+	BQ27500_REG_SOH,
+	BQ27500_REG_CC,
+	BQ27500_REG_OC,
 };
 
 /* TI G3 Firmware (v3.24) */
@@ -94,7 +101,13 @@ static u8 bq27x00_fw_g3_regs[] = {
 	0x2C,
 	0x3C,
 	0x00,
-	0xFF
+	0xFF,
+	0x0E,
+	0x10,
+	0x12,
+	0x28,
+	0x2A,
+	0x3A,
 };
 
 /*
@@ -121,7 +134,13 @@ static u8 bq27x00_fw_l1_regs[] = {
 	0x20,
 	0x2E,
 	0x00,
-	0x74
+	0x74,
+	0x0E,
+	0x10,
+	0x12,
+	0x1C,
+	0x1E,
+	0x2C
 };
 
 
@@ -983,8 +1002,8 @@ error:
 	return ret;
 }
 
-#define dump_value(name, reg) do { \
-	int value = bq27x00_read_i2c(di, reg, false); \
+#define dump_value(name, reg_index) do { \
+	int value = bq27x00_read(di, reg_index, false); \
 	printk("bq27x00: %s=0x%04x\n", #name, value); \
 } while(0)
 
@@ -993,18 +1012,18 @@ static int bq27x00_dump_dataflash(struct bq27x00_device_info *di)
 	int ret;
 
 	printk("bq27x00: Control=0x%04x\n", bq27x00_control_cmd(di, 0x0000));
-	dump_value(Temperature, 0x06);
-	dump_value(Voltage, 0x08);
-	dump_value(Flags, 0x0a);
-	dump_value(NominalAvailableCapacity, 0x0c);
-	dump_value(FullAvailableCapacity, 0x0e);
-	dump_value(RemainingCapacity, 0x10);
-	dump_value(FullChargeCapacity, 0x12);
-	dump_value(AverageCurrent, 0x14);
-	dump_value(StateOfHealth, 0x28);
-	dump_value(CycleCount, 0x2a);
-	dump_value(StateOfCharge, 0x2c);
-	dump_value(OperationConfiguration, 0x3a);
+	dump_value(Temperature, BQ27x00_REG_TEMP);
+	dump_value(Voltage, BQ27x00_REG_VOLT);
+	dump_value(Flags, BQ27x00_REG_FLAGS);
+	dump_value(NominalAvailableCapacity, BQ27x00_REG_NAC);
+	dump_value(FullAvailableCapacity, BQ27500_REG_FAC);
+	dump_value(RemainingCapacity, BQ27500_REG_RM);
+	dump_value(FullChargeCapacity, BQ27500_REG_FCC);
+	dump_value(AverageCurrent, BQ27x00_REG_AI);
+	dump_value(StateOfHealth, BQ27500_REG_SOH);
+	dump_value(CycleCount, BQ27500_REG_CC);
+	dump_value(StateOfCharge, BQ27500_REG_SOC);
+	dump_value(OperationConfiguration, BQ27500_REG_OC);
 
 	/* unseal device */
 	ret = bq27x00_write_i2c(di, 0x00, 0x0414, false);
@@ -1037,36 +1056,69 @@ static int bq27x00_dump_dataflash(struct bq27x00_device_info *di)
 	}
 #endif
 
-	ret = dump_subclass(di, 0x02, 10);
-	ret = dump_subclass(di, 0x20, 6);
-	ret = dump_subclass(di, 0x22, 10);
-	ret = dump_subclass(di, 0x24, 15);
-	ret = dump_subclass(di, 0x30, 26);
-	ret = dump_subclass(di, 0x31, 25);
-	ret = dump_subclass(di, 0x38, 10);
-	ret = dump_subclass(di, 0x40, 14);
-	ret = dump_subclass(di, 0x44, 17);
-	ret = dump_subclass(di, 0x50, 79);
-	ret = dump_subclass(di, 0x51, 14);
-	ret = dump_subclass(di, 0x52, 28);
-	ret = dump_subclass(di, 0x53, 46);
-	ret = dump_subclass(di, 0x54, 46);
-	ret = dump_subclass(di, 0x55, 66);
-	ret = dump_subclass(di, 0x56, 66);
-	ret = dump_subclass(di, 0x57, 20);
-	ret = dump_subclass(di, 0x58, 20);
-	ret = dump_subclass(di, 0x59, 20);
-	ret = dump_subclass(di, 0x5a, 20);
-	ret = dump_subclass(di, 0x5b, 20);
-	ret = dump_subclass(di, 0x5c, 20);
-	ret = dump_subclass(di, 0x5d, 20);
-	ret = dump_subclass(di, 0x5e, 20);
-	ret = dump_subclass(di, 0x68, 16);
-	ret = dump_subclass(di, 0x69, 19);
-	ret = dump_subclass(di, 0x6a, 45);
-	ret = dump_subclass(di, 0x6b, 19);
-	ret = dump_subclass(di, 0x6c, 20);
-	ret = dump_subclass(di, 0x6d, 20);
+	if (di->fw_ver == G3_FW_VERSION) {
+		ret = dump_subclass(di, 0x02, 9);
+		ret = dump_subclass(di, 0x20, 5);
+		ret = dump_subclass(di, 0x22, 9);
+		ret = dump_subclass(di, 0x24, 14);
+		ret = dump_subclass(di, 0x30, 26);
+		ret = dump_subclass(di, 0x31, 24);
+		ret = dump_subclass(di, 0x38, 9);
+		ret = dump_subclass(di, 0x40, 17);
+		ret = dump_subclass(di, 0x44, 16);
+		ret = dump_subclass(di, 0x50, 90);
+		ret = dump_subclass(di, 0x51, 13);
+		ret = dump_subclass(di, 0x52, 27);
+		ret = dump_subclass(di, 0x53, 45);
+		ret = dump_subclass(di, 0x54, 45);
+		ret = dump_subclass(di, 0x55, 65);
+		ret = dump_subclass(di, 0x56, 65);
+		ret = dump_subclass(di, 0x57, 19);
+		ret = dump_subclass(di, 0x58, 19);
+		ret = dump_subclass(di, 0x59, 19);
+		ret = dump_subclass(di, 0x5a, 19);
+		ret = dump_subclass(di, 0x5b, 19);
+		ret = dump_subclass(di, 0x5c, 19);
+		ret = dump_subclass(di, 0x5d, 19);
+		ret = dump_subclass(di, 0x5e, 19);
+		ret = dump_subclass(di, 0x68, 15);
+		ret = dump_subclass(di, 0x69, 18);
+		ret = dump_subclass(di, 0x6a, 44);
+		ret = dump_subclass(di, 0x6b, 18);
+		ret = dump_subclass(di, 0x6c, 19);
+		ret = dump_subclass(di, 0x6d, 19);
+	} else if(di->fw_ver == L1_FW_VERSION) {
+		ret = dump_subclass(di, 0x02, 10);
+		ret = dump_subclass(di, 0x20, 6);
+		ret = dump_subclass(di, 0x22, 10);
+		ret = dump_subclass(di, 0x24, 15);
+		ret = dump_subclass(di, 0x30, 26);
+		ret = dump_subclass(di, 0x31, 25);
+		ret = dump_subclass(di, 0x38, 10);
+		ret = dump_subclass(di, 0x40, 14);
+		ret = dump_subclass(di, 0x44, 17);
+		ret = dump_subclass(di, 0x50, 79);
+		ret = dump_subclass(di, 0x51, 14);
+		ret = dump_subclass(di, 0x52, 28);
+		ret = dump_subclass(di, 0x53, 46);
+		ret = dump_subclass(di, 0x54, 46);
+		ret = dump_subclass(di, 0x55, 66);
+		ret = dump_subclass(di, 0x56, 66);
+		ret = dump_subclass(di, 0x57, 20);
+		ret = dump_subclass(di, 0x58, 20);
+		ret = dump_subclass(di, 0x59, 20);
+		ret = dump_subclass(di, 0x5a, 20);
+		ret = dump_subclass(di, 0x5b, 20);
+		ret = dump_subclass(di, 0x5c, 20);
+		ret = dump_subclass(di, 0x5d, 20);
+		ret = dump_subclass(di, 0x5e, 20);
+		ret = dump_subclass(di, 0x68, 16);
+		ret = dump_subclass(di, 0x69, 19);
+		ret = dump_subclass(di, 0x6a, 45);
+		ret = dump_subclass(di, 0x6b, 19);
+		ret = dump_subclass(di, 0x6c, 20);
+		ret = dump_subclass(di, 0x6d, 20);
+	}
 
 #if 0
 	/* seal device */
