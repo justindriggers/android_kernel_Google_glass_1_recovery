@@ -37,7 +37,7 @@
 
 /* driver name/version */
 #define DEVICE_NAME			"glasshub"
-#define DRIVER_VERSION			"0.17"
+#define DRIVER_VERSION			"0.18"
 
 /* minimum MCU firmware version required for this driver */
 #define MINIMUM_MCU_VERSION		((1 << 8) | 1)
@@ -205,6 +205,10 @@
 #define FLASH_ERROR_CHECKSUM_ERROR	-11
 #define FLASH_ERROR_CHECKSUM_MISMATCH	-12
 
+/* flags for pause state */
+#define FLAG_PAUSE			1
+#define FLAG_PAUSE_FOR_AUDIO		2
+
 /*
  * Basic theory of operation:
  *
@@ -283,6 +287,7 @@ struct glasshub_data {
 	uint8_t app_version_major;
 	uint8_t app_version_minor;
 	uint8_t last_irq_status;
+	uint8_t pause;
 	int debug;
 };
 
@@ -1114,17 +1119,70 @@ err_out:
 	return count;
 }
 
-/* show pause*/
+static ssize_t set_pause_state(struct device *dev, const char *buf, size_t count,
+		uint8_t flag)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	uint8_t temp;
+
+	/* convert ASCII to unsigned int */
+	unsigned long value = 0;
+	if (kstrtoul(buf, 10, &value)) {
+		goto exit;
+	}
+
+	/* grab old state */
+	mutex_lock(&glasshub->device_lock);
+	temp = glasshub->pause;
+
+	/* set new state */
+	if (value)
+		glasshub->pause |= flag;
+	else
+		glasshub->pause &= ~flag;
+
+	/* check for state change */
+	if (!glasshub->pause != !temp) {
+		temp = glasshub->pause ? 1 : 0;
+		if (boot_device_l(glasshub) == 0) {
+			if (_i2c_write_reg(glasshub, REG_PAUSE, temp)) {
+				set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
+			}
+		}
+
+	}
+	mutex_unlock(&glasshub->device_lock);
+
+exit:
+	return count;
+}
+
+/* show pause */
 static ssize_t pause_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return show_reg(dev, buf, REG_PAUSE);
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	return sprintf(buf, "%d\n", glasshub->pause & FLAG_PAUSE ? 1 : 0);
 }
 
 /* set pause */
 static ssize_t pause_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG_PAUSE, 0, 1);
+	return set_pause_state(dev, buf, count, FLAG_PAUSE);
+}
+
+/* show pause_for_audio */
+static ssize_t pause_for_audio_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+	return sprintf(buf, "%d\n", glasshub->pause & FLAG_PAUSE_FOR_AUDIO ? 1 : 0);
+}
+
+/* set pause_for_audio */
+static ssize_t pause_for_audio_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	return set_pause_state(dev, buf, count, FLAG_PAUSE_FOR_AUDIO);
 }
 
 /* show wink minimum magnitude */
@@ -1865,6 +1923,7 @@ static DEVICE_ATTR(prox_version, DEV_MODE_RO, prox_version_show, NULL);
 static DEVICE_ATTR(wink, DEV_MODE_RO, wink_show, NULL);
 static DEVICE_ATTR(wink_enable, DEV_MODE_RW, wink_enable_show, wink_enable_store);
 static DEVICE_ATTR(pause, DEV_MODE_RW, pause_show, pause_store);
+static DEVICE_ATTR(pause_for_audio, DEV_MODE_RW, pause_for_audio_show, pause_for_audio_store);
 static DEVICE_ATTR(wink_flag_enable, DEV_MODE_RW, wink_flag_enable_show, wink_flag_enable_store);
 static DEVICE_ATTR(wink_min, DEV_MODE_RW, wink_min_show, wink_min_store);
 static DEVICE_ATTR(wink_max, DEV_MODE_RW, wink_max_show, wink_max_store);
@@ -1902,6 +1961,7 @@ static struct attribute *attrs[] = {
 	&dev_attr_wink.attr,
 	&dev_attr_wink_enable.attr,
 	&dev_attr_pause.attr,
+	&dev_attr_pause_for_audio.attr,
 	&dev_attr_wink_min.attr,
 	&dev_attr_wink_max.attr,
 	&dev_attr_wink_flag_enable.attr,
