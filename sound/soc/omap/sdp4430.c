@@ -53,6 +53,10 @@ static struct regulator *av_switch_reg;
 static int twl6040_power_mode;
 static int mcbsp_cfg;
 static struct snd_soc_codec *twl6040_codec;
+#ifdef CONFIG_MACH_NOTLE
+void notle_hs_jack_detect(struct snd_soc_codec *,
+			struct snd_soc_jack *, int);
+#endif
 
 static int sdp4430_modem_mcbsp_configure(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params, int flag)
@@ -541,8 +545,10 @@ static int sdp4430_twl6040_init(struct snd_soc_pcm_runtime *rtd)
 				hs_jack_pins);
 
 	if (machine_is_omap_4430sdp() || machine_is_omap_tabletblaze()
-                || machine_is_notle() || machine_is_omap4_panda())
+                || machine_is_omap4_panda())
 		twl6040_hs_jack_detect(codec, &hs_jack, SND_JACK_HEADSET);
+	else if (machine_is_notle())
+		notle_hs_jack_detect(codec, &hs_jack, SND_JACK_HEADSET);
 	else
 		snd_soc_jack_report(&hs_jack, SND_JACK_HEADSET, SND_JACK_HEADSET);
 

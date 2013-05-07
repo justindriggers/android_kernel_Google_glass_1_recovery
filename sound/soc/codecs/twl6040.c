@@ -944,12 +944,8 @@ static void twl6040_hs_jack_report(struct snd_soc_codec *codec,
 
 	/* Sync status */
 	status = twl6040_read_reg_volatile(codec, TWL6040_REG_STATUS);
-//	if (status & TWL6040_PLUGCOMP)
-//		state = report;
-	// TODO(petermalkin): For now have the headset always on
-	// Whenever Russ gives me a signal from headset,
-	// place the real code here
-	state = report;
+	if (status & TWL6040_PLUGCOMP)
+		state = report;
 
 	mutex_unlock(&priv->mutex);
 
@@ -1881,6 +1877,7 @@ static int twl6040_probe(struct snd_soc_codec *codec)
 	INIT_DELAYED_WORK(&priv->hf_delayed_work, twl6040_pga_hf_work);
 	INIT_DELAYED_WORK(&priv->ep_delayed_work, twl6040_pga_ep_work);
 
+#ifndef CONFIG_MACH_NOTLE	/* Notle creates switch in notle-usb-mux.c */
 	/* use switch-class based headset reporting if platform requires it */
 	jack = &priv->hs_jack;
 		jack->sdev.name = "h2w";
@@ -1889,6 +1886,7 @@ static int twl6040_probe(struct snd_soc_codec *codec)
 			dev_err(codec->dev, "error registering switch device %d\n", ret);
 			goto reg_err;
 		}
+#endif
 
 	wake_lock_init(&priv->wake_lock, WAKE_LOCK_SUSPEND, "twl6040");
 

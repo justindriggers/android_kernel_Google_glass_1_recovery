@@ -247,10 +247,17 @@ static int twl6030_usb_ldo_init(struct twl6030_usb *twl)
 	 */
 	twl6030_writeb(twl, TWL_MODULE_USB, 0x14, USB_ID_CTRL_SET);
 
+#ifndef CONFIG_MACH_NOTLE
 	/* Program MISC2 register and clear bit VUSB_IN_VBAT */
 	misc2_data = twl6030_readb(twl, TWL6030_MODULE_ID0, TWL6030_MISC2);
 	misc2_data &= 0xEF;
 	twl6030_writeb(twl, TWL6030_MODULE_ID0, misc2_data, TWL6030_MISC2);
+#else
+	misc2_data = twl6030_readb(twl, TWL6030_MODULE_ID0, TWL6030_MISC2);
+	misc2_data |= 0x10;
+	twl6030_writeb(twl, TWL6030_MODULE_ID0, misc2_data, TWL6030_MISC2);
+	regulator_enable(twl->usb3v3);
+#endif
 
 	return 0;
 }
@@ -341,6 +348,7 @@ static irqreturn_t twl6030_usb_irq(int irq, void *_twl)
 		twl->otg.last_event = status;
 		atomic_notifier_call_chain(&twl->otg.notifier,
 				status, twl->otg.gadget);
+#ifndef CONFIG_MACH_NOTLE
 		if (twl->asleep) {
 			regulator_disable(twl->usb3v3);
 			twl->asleep = 0;
@@ -351,6 +359,12 @@ static irqreturn_t twl6030_usb_irq(int irq, void *_twl)
 			twl6030_writeb(twl, TWL6030_MODULE_ID0, misc2_data,
 							TWL6030_MISC2);
 		}
+#else
+		/* For NOTLE we need to keep VUSB alive for headset detect */
+		if (twl->asleep) {
+			twl->asleep = 0;
+		}
+#endif
 	}
 
 vbus_notify:
