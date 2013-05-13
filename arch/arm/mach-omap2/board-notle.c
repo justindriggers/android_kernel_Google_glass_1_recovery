@@ -54,12 +54,8 @@
 #include <linux/regulator/fixed.h>
 #include <linux/regulator/machine.h>
 
-/* Version 1 Touchpad driver */
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
-#include "../../../drivers/input/touchscreen/rmi_i2c.h"
-#endif
-/* Version 2 and 3 touchpad drivers. */
-#if defined(CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C) || defined(CONFIG_RMI4_BUS)
+/* Synaptics touchpad driver. */
+#if defined(CONFIG_RMI4_BUS)
 #include <linux/rmi.h>
 #endif
 
@@ -1325,164 +1321,6 @@ static struct twl4030_platform_data notle_twldata = {
 	.madc           = &notle_gpadc_data,
 };
 
-#if defined(CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C) && defined(CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C)
-#error "Can only define touchpad (v2) or touchscreen (v1) Synaptics touchpad"
-#endif
-
-#ifdef CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C
-
-static union rmi_f11_2d_ctrl0 f11_ctrl0 = {
-	{
-		/* ReportingMode = ‘000’: Continuous, when finger present.
-		 * ReportingMode = ‘001’: Reduced reporting mode.
-		 * ReportingMode = ‘010’: Finger-state change reporting mode.
-		 * ReportingMode = ‘011’: Finger-presence change reporting mode. */
-		.reporting_mode = 1,
-		/* Enable filtering of the reported absolute positioning. */
-		.abs_pos_filt = 0,
-		/* Enable filtering of the reported relative positioning. */
-		.rel_pos_filt = 0,
-		/* Enable ballistics processing for relative finger motion. */
-		.rel_ballistics = 0,
-		.dribble = 0,
-		.report_beyond_clip = 0,
-	},
-};
-
-static union rmi_f11_2d_ctrl1 f11_ctrl1 = {
-	{
-		/* Specifies threshold at which a finger is considered a palm.
-		 * Zero disables. */
-		.palm_detect_thres = 0,
-		/* Motion sensitivity.
-		 * '00': Low
-		 * '01': Medium
-		 * '10': High
-		 * '11': Infinite */
-		.motion_sensitivity = 0,
-		/* '0': Firmware determines tracked finger.
-		 * '1': Host determines tracked finger. */
-		.man_track_en = 0,
-		/* Which finger being tracked.
-		 * '0': Track finger 0
-		 * '1': Track finger 1 */
-		.man_tracked_finger = 0,
-	},
-};
-
-static union rmi_f11_2d_ctrl2__3 f11_ctrl2__3 = {
-	{
-		.delta_x_threshold = 1,
-		.delta_y_threshold = 1,
-	},
-};
-
-static union rmi_f11_2d_ctrl4 f11_ctrl4 = {
-	{
-		/* Define velocity ballistic parameter to all relative
-		 * motion events.  Zero disables. */
-		.velocity = 0,
-	},
-};
-
-static union rmi_f11_2d_ctrl5 f11_ctrl5 = {
-	{
-		/* Define acceleration ballistic parameter to all relative
-		 * motion events.  Zero disables. */
-		.acceleration = 0,
-	},
-};
-
-static union rmi_f11_2d_ctrl6__7 f11_ctrl6__7 = {
-	{
-		/* Maximum sensor X position. */
-		.sensor_max_x_pos = 0x0490,
-	},
-};
-
-static union rmi_f11_2d_ctrl8__9 f11_ctrl8__9 = {
-	{
-		/* Maximum sensor Y position. */
-		.sensor_max_y_pos = 0x00b8,
-	},
-};
-
-static union rmi_f11_2d_ctrl10 f11_ctrl10 = {
-	{
-		/* These bits enable the feature iff the corresponding bit
-		 * is set in the query register. */
-		.single_tap_int_enable = 1,
-		.tap_n_hold_int_enable = 1,
-		.double_tap_int_enable = 1,
-		.early_tap_int_enable = 1,
-		.flick_int_enable = 1,
-		.press_int_enable = 1,
-		.pinch_int_enable = 1,
-	},
-};
-
-static union rmi_f11_2d_ctrl11 f11_ctrl11 = {
-	{
-		/* These bits enable the feature iff the corresponding bit
-		 * is set in the query register. */
-		.palm_detect_int_enable = 1,
-		.rotate_int_enable = 1,
-		.touch_shape_int_enable = 1,
-		.scroll_zone_int_enable = 1,
-		.multi_finger_scroll_int_enable = 1,
-	},
-};
-
-/* All the bits of this data structures must have accurate default
- * control data because of the way the rmi driver writes the control
- * registers to the device. */
-static struct rmi_f11_2d_ctrl f11_ctrl = {
-	.ctrl0 = &f11_ctrl0,
-	.ctrl1 = &f11_ctrl1,
-	.ctrl2__3 = &f11_ctrl2__3,
-	.ctrl4 = &f11_ctrl4,
-	.ctrl5 = &f11_ctrl5,
-	.ctrl6__7 = &f11_ctrl6__7,
-	.ctrl8__9 = &f11_ctrl8__9,
-	.ctrl10 = &f11_ctrl10,
-	.ctrl11 = &f11_ctrl11,
-};
-
-#endif  /* CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C */
-
-#ifdef CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C
-static struct rmi_device_platform_data synaptics_platformdata = {
-	.driver_name = "rmi-generic",
-
-	.irq_polarity = RMI_IRQ_ACTIVE_LOW,
-	.gpio_config = NULL,
-
-	/* function handler pdata */
-	.f11_ctrl = &f11_ctrl,
-	.axis_align = {
-		.swap_axes = false,
-		.flip_x = false,
-		.flip_y = true,
-		.clip_X_low = 0,
-		.clip_Y_low = 0,
-		.clip_X_high = 0,
-		.clip_Y_high = 0,
-		.offset_X = 0,
-		.offset_Y = 0,
-		.rel_report_enabled = 0,
-	},
-	.button_map = NULL,
-#ifdef CONFIG_PM
-	.pm_data = NULL,
-	.pre_suspend = NULL,
-	.post_resume = NULL,
-#endif
-};
-#ifndef RMI_F11_INDEX
-#define RMI_F11_INDEX 0x11
-#endif  // RMI_F11_INDEX
-#endif  /* CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C */
-
 #ifdef CONFIG_RMI4_BUS
 struct notle_gpio_data_s {
 	int gpio_num;
@@ -1573,45 +1411,6 @@ static struct rmi_device_platform_data synaptics_platformdata = {
 
 #endif  /* CONFIG_RMI4_BUS */
 
-
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
-static struct rmi_sensor_suspend_custom_ops synaptics_custom_ops = {
-        .rmi_sensor_custom_suspend = 0,
-        .rmi_sensor_custom_resume = 0,
-        .delay_resume = 0,
-};
-
-static struct rmi_f11_functiondata synaptics_f11_data = {
-        /* flip_X, flip_Y, and swap_axes will be set based on NOTLE_VERSION */
-};
-
-static struct rmi_functiondata synaptics_fndata = {
-        .function_index     = RMI_F11_INDEX,
-        .data               = &synaptics_f11_data,
-};
-
-static struct rmi_functiondata_list synaptics_fndatalist = {
-        .count              = 1,
-        .functiondata       = &synaptics_fndata,
-};
-
-// attn_gpio_number assignment is board specific
-static struct rmi_sensordata __initdata synaptics_sensordata = {
-        .rmi_sensor_setup = 0,
-        .rmi_sensor_teardown = 0,
-        .attn_polarity = 0,
-        .custom_suspend_ops = &synaptics_custom_ops,
-        .perfunctiondata = &synaptics_fndatalist,
-};
-
-static struct rmi_i2c_platformdata __initdata synaptics_platformdata = {
-       // same address here as in I2C_BOARD_INFO
-       .i2c_address = 0x20,
-//       .irq = 0x00,
-        .sensordata = &synaptics_sensordata,
-};
-#endif
-
 static struct usb_mux_platform_data usb_mux_platformdata = {
 	// .gpio_cb0 configured in omap_usb_mux_init
 	.gpio_cb0_flags = GPIOF_OUT_INIT_LOW,
@@ -1689,18 +1488,12 @@ static struct i2c_board_info __initdata notle_i2c_1_boardinfo[] = {
 };
 
 static struct i2c_board_info __initdata notle_i2c_3_boardinfo[] = {
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
-        {
-                I2C_BOARD_INFO("rmi4_ts", 0x20),
-                .platform_data = &synaptics_platformdata,
-        },
-#endif
-#if defined(CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C) || defined(CONFIG_RMI4_BUS)
+#if defined(CONFIG_RMI4_BUS)
         {
                 I2C_BOARD_INFO("rmi_i2c", 0x20),
                 .platform_data = &synaptics_platformdata,
         },
-#endif  /* CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C || CONFIG_RMI4_BUS */
+#endif  /* CONFIG_RMI4_BUS */
 };
 
 /*
@@ -1901,9 +1694,6 @@ static void __init notle_i2c_irq_fixup(void)
     }
 
     // Fix up the global device data structures
-#ifdef CONFIG_TOUCHPAD_SYNAPTICS_RMI4_I2C
-    synaptics_platformdata.irq = gpio_touchpad;
-#endif
 
 #ifdef CONFIG_RMI4_BUS
     synaptics_platformdata.attn_gpio = gpio_touchpad;
@@ -1993,12 +1783,6 @@ static int __init notle_i2c_init(void)
             return -1;
         }
 
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C
-        synaptics_f11_data.flip_X = false;
-        synaptics_f11_data.flip_Y = true;
-        synaptics_f11_data.swap_axes = false;
-        synaptics_sensordata.attn_gpio_number = notle_get_gpio(GPIO_TOUCHPAD_INT_N_INDEX);
-#endif  /* CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C */
         omap4_pmic_init("twl6030", &notle_twldata);
         notle_i2c_irq_fixup();
         omap_register_i2c_bus(2, 400, NULL, 0);
