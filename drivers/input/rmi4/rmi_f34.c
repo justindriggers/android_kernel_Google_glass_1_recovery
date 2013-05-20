@@ -335,7 +335,7 @@ static int f34_read_status(struct rmi_function_container *fc)
 			  BLK_NUM_OFF, &status);
 
 	if (retval < 0) {
-		dev_err(&fc->dev, "Could not read status from 0x%x\n",
+		dev_dbg(&fc->dev, "Could not read status from 0x%x\n",
 		       data_base_addr + instance_data->blocksize + BLK_NUM_OFF);
 		status = 0xff;	/* failure */
 	}
