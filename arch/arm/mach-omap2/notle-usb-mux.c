@@ -217,12 +217,11 @@ static enum usb_mux_mode get_usb_mux_mode(struct usb_mux_device_info *di)
 static void notle_hs_jack_report(struct usb_mux_device_info *di)
 {
 	int state = 0;
-	enum headset_jack_connection connected;
 
 	mutex_lock(&di->lock);
-	connected = get_jack_device(di);
+	di->connected = get_jack_device(di);
 	mutex_unlock(&di->lock);
-	if (connected != HS_JACK_NONE)
+	if (di->connected != HS_JACK_NONE)
 		state = di->report;
 
 	/* the following only do work if state has changed */
@@ -238,8 +237,16 @@ void notle_hs_jack_detect(struct snd_soc_codec *codec,
 
 	di->jack = jack;
 	di->report = report;
+	di->connected = HS_JACK_UNKNOWN;
 
 	notle_hs_jack_report(di);
+
+	/* set the mux based on connection */
+	if (di->connected == HS_JACK_STEREO || di->connected == HS_JACK_MONO) {
+		request_usb_mux_mode(di, USB_MUX_MODE_FLOATING);
+	} else {
+		request_usb_mux_mode(di, USB_MUX_MODE_TTY);
+	}
 }
 EXPORT_SYMBOL_GPL(notle_hs_jack_detect);
 
@@ -360,7 +367,7 @@ static int get_jack_device(struct usb_mux_device_info *di)
 	twl_i2c_read_u8(TWL6030_MODULE_ID0, &save_backup, REG_OTG_BACKUP);
 	twl_i2c_write_u8(TWL6030_MODULE_ID0, save_backup & ~TWL6030_OTG_BACKUP_ID_WKUP, REG_OTG_BACKUP);
 
-	pu220_val = voltage_id(TWL6030_USB_ID_CTRL_PU_220K, ID_READ_DELAY);
+	pu220_val = voltage_id(TWL6030_USB_ID_CTRL_PU_220K, ID_READ_DELAY_NONE);
 
 	/* Restore old values */
 	twl_i2c_write_u8(TWL_MODULE_USB, 0xFF, REG_USB_ID_CTRL_CLR);
@@ -722,4 +729,3 @@ module_exit(usb_mux_driver_exit);
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Corey Tabaka <eieio@google.com>");
-

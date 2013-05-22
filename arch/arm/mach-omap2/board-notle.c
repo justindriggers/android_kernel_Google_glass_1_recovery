@@ -1411,13 +1411,14 @@ static struct rmi_device_platform_data synaptics_platformdata = {
 
 #endif  /* CONFIG_RMI4_BUS */
 
+// cb0/1 LOW/HIGH is tty; LOW/LOW is float (initial default)
 static struct usb_mux_platform_data usb_mux_platformdata = {
 	// .gpio_cb0 configured in omap_usb_mux_init
 	.gpio_cb0_flags = GPIOF_OUT_INIT_LOW,
 	.gpio_cb0_label = "gpio_usb_mux_cb0",
 
 	// .gpio_cb1 configured in omap_usb_mux_init
-	.gpio_cb1_flags = GPIOF_OUT_INIT_HIGH,
+	.gpio_cb1_flags = GPIOF_OUT_INIT_LOW,
 	.gpio_cb1_label = "gpio_usb_mux_cb1",
 };
 
