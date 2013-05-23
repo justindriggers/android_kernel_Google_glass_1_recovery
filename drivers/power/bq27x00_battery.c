@@ -52,6 +52,8 @@
 
 #define INVALID_REG_ADDR		0xFF
 
+#define DEBUG_INFO_LEN			20
+
 enum bq27x00_reg_index {
 	BQ27x00_REG_TEMP = 0,
 	BQ27x00_REG_INT_TEMP,
@@ -165,6 +167,12 @@ static void bq27x00_reset_registers(struct bq27x00_device_info *di);
 
 enum bq27x00_chip { BQ27000, BQ27500 };
 
+struct bq27x00_debug_info {
+	int voltage;
+	int avg_current;
+	long unsigned int timestamp;
+};
+
 struct bq27x00_reg_cache {
 	int temperature;
 	int internal_temp;
@@ -193,10 +201,15 @@ struct bq27x00_device_info {
 
 	unsigned long last_update;
 	struct delayed_work work;
+	struct delayed_work debug_work;
 
 	struct power_supply	bat;
 
 	struct bq27x00_access_methods bus;
+
+	struct bq27x00_debug_info debug_info[DEBUG_INFO_LEN];
+	int debug_index;
+	int debug_enable;
 
 	struct mutex lock;
 
@@ -219,15 +232,16 @@ static enum power_supply_property bq27x00_battery_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_FULL,
 	POWER_SUPPLY_PROP_CHARGE_NOW,
 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
+	POWER_SUPPLY_PROP_CHARGE_COUNTER,
 	POWER_SUPPLY_PROP_CYCLE_COUNT,
 	POWER_SUPPLY_PROP_ENERGY_NOW
 };
+
 
 static unsigned int poll_interval = 360;
 module_param(poll_interval, uint, 0644);
 MODULE_PARM_DESC(poll_interval, "battery poll interval in seconds - " \
 				"0 disables polling");
-
 /*
  * Common code for BQ27x00 devices
  */
@@ -395,6 +409,9 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 {
 	struct bq27x00_reg_cache cache = {0, };
 	bool is_bq27500 = di->chip == BQ27500;
+	int i;
+	int secs;
+	int index = di->debug_index;
 
 	cache.flags = bq27x00_read(di, BQ27x00_REG_FLAGS, is_bq27500);
 	if (cache.flags >= 0) {
@@ -414,6 +431,29 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 		/* We only have to read charge design full once */
 		if (di->charge_design_full <= 0)
 			di->charge_design_full = bq27x00_battery_read_ilmd(di);
+	}
+
+	/*
+	 * For debugging use if debug_enable is set.
+	 * Dumps out 1HZ recording of voltage and avg current
+	 */
+	if (di->debug_enable > 0) {
+		/* Calculate seconds since last report */
+		secs = jiffies_to_msecs(jiffies-di->last_update)/1000;
+		dev_info(di->dev, "%s: Debug info for last %d seconds\n",
+			__func__, secs);
+
+		/* Debug info is printed LIFO */
+		for (i = 0; i < secs && secs < DEBUG_INFO_LEN ; i++) {
+			index = (index == 0) ? DEBUG_INFO_LEN-1 : index-1;
+
+			if (di->debug_info[index].voltage > 0) {
+				dev_info(di->dev, "{%d,%d,%010lu}\n",
+					di->debug_info[index].voltage,
+					di->debug_info[index].avg_current/1000,
+					di->debug_info[index].timestamp);
+			}
+		}
 	}
 
 	/* Ignore current_now which is a snapshot of the current battery state
@@ -602,6 +642,28 @@ static int bq27x00_battery_energy(struct bq27x00_device_info *di,
 	return 0;
 }
 
+/*
+ * Return the coulumb counter in mAh
+ * Positive value means charge is going out of the battery
+ * Negative value means charge is going into the battery
+ */
+static int bq27x00_read_block_i2c(struct bq27x00_device_info *di, u8 reg,
+		unsigned char *buf, size_t len);
+static int bq27x00_battery_qpassed(struct bq27x00_device_info *di,
+	union power_supply_propval *val) {
+
+	unsigned char q_data[10];
+	size_t q_size = 10;
+
+	/* This block of data must be read in one shot.
+	 * Even though we are only interested 2 registers.
+	 */
+	bq27x00_read_block_i2c(di, 0x61, q_data, q_size);
+	val->intval = (int)((s16)((q_data[4] << 8) | q_data[3]));
+
+	return 0;
+}
+
 
 static int bq27x00_simple_value(int value,
 	union power_supply_propval *val)
@@ -649,6 +711,9 @@ static int bq27x00_battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY_LEVEL:
 		ret = bq27x00_simple_value(di->cache.raw_capacity, val);
+		break;
+	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
+		ret = bq27x00_battery_qpassed(di, val);
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		if (di->fake_battery) {
@@ -703,6 +768,42 @@ static void bq27x00_external_power_changed(struct power_supply *psy)
 	schedule_delayed_work(&di->work, 0);
 }
 
+/*
+ * Work to record voltage and current at 1Hz.
+ */
+static void bq27x00_battery_debug_poll(struct work_struct *work)
+{
+	union power_supply_propval val;
+	struct timespec ts;
+
+	struct bq27x00_device_info *di =
+		container_of(work, struct bq27x00_device_info, debug_work.work);
+
+	mutex_lock(&di->lock);
+
+	di->debug_index =
+		(di->debug_index == DEBUG_INFO_LEN-1) ? 0 : di->debug_index+1;
+
+	getnstimeofday(&ts);
+
+	/* Get Voltage */
+	bq27x00_battery_voltage(di, &val);
+	di->debug_info[di->debug_index].voltage = val.intval;
+
+	/* Get Current */
+	bq27x00_battery_current(di, &val);
+	di->debug_info[di->debug_index].avg_current = val.intval;
+
+	di->debug_info[di->debug_index].timestamp = ts.tv_sec;
+
+	mutex_unlock(&di->lock);
+
+	if (di->debug_enable > 0)
+		schedule_delayed_work(&di->debug_work, HZ);
+
+	return;
+}
+
 static int bq27x00_powersupply_init(struct bq27x00_device_info *di)
 {
 	int ret;
@@ -714,6 +815,7 @@ static int bq27x00_powersupply_init(struct bq27x00_device_info *di)
 	di->bat.external_power_changed = bq27x00_external_power_changed;
 
 	INIT_DELAYED_WORK(&di->work, bq27x00_battery_poll);
+	INIT_DELAYED_WORK(&di->debug_work, bq27x00_battery_debug_poll);
 	mutex_init(&di->lock);
 
 	/*
@@ -1189,11 +1291,38 @@ static ssize_t show_reset(struct device *dev,
 	return sprintf(buf, "okay\n");
 }
 
+static ssize_t show_debug_enable(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct bq27x00_device_info *di = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%d\n",di->debug_enable);
+}
+
+static ssize_t set_debug_enable(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	long val;
+	struct bq27x00_device_info *di = dev_get_drvdata(dev);
+
+	if (strict_strtol(buf, 10, &val) < 0)
+		return -EINVAL;
+
+	di->debug_enable = !!val;
+
+	if (di->debug_enable)
+		schedule_delayed_work(&di->debug_work, 0);
+
+	return count;
+}
+
 static DEVICE_ATTR(dump_data_flash, S_IRUGO, show_dump_data_flash, NULL);
 static DEVICE_ATTR(fw_version, S_IRUGO, show_firmware_version, NULL);
 static DEVICE_ATTR(df_version, S_IRUGO, show_dataflash_version, NULL);
 static DEVICE_ATTR(device_type, S_IRUGO, show_device_type, NULL);
 static DEVICE_ATTR(reset, S_IRUGO, show_reset, NULL);
+static DEVICE_ATTR(debug_enable, S_IWUSR|S_IRUGO, show_debug_enable, set_debug_enable);
 
 static struct attribute *bq27x00_attributes[] = {
 	&dev_attr_dump_data_flash.attr,
@@ -1201,6 +1330,7 @@ static struct attribute *bq27x00_attributes[] = {
 	&dev_attr_df_version.attr,
 	&dev_attr_device_type.attr,
 	&dev_attr_reset.attr,
+	&dev_attr_debug_enable.attr,
 	NULL
 };
 
@@ -1268,6 +1398,7 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	di->bat.name = name;
 	di->bus.read = &bq27x00_read_i2c;
 	di->bus.write = &bq27x00_write_i2c;
+	di->debug_enable = 0;
 
 	if (pdata && pdata->translate_temp)
 		di->translate_temp = pdata->translate_temp;
@@ -1316,6 +1447,37 @@ static int bq27x00_battery_remove(struct i2c_client *client)
 	return 0;
 }
 
+static int bq27x00_battery_suspend(struct i2c_client *client)
+{
+	struct bq27x00_device_info *di = i2c_get_clientdata(client);
+	union power_supply_propval val;
+
+	if (di) {
+		mutex_lock(&di->lock);
+		bq27x00_battery_qpassed(di,&val);
+		mutex_unlock(&di->lock);
+		dev_info(di->dev, "Qpassed @suspend: %d mAh\n", val.intval);
+	}
+
+	return 0;
+}
+
+static int bq27x00_battery_resume(struct i2c_client *client)
+{
+	struct bq27x00_device_info *di = i2c_get_clientdata(client);
+	union power_supply_propval val;
+
+	if (di) {
+		mutex_lock(&di->lock);
+		bq27x00_battery_qpassed(di,&val);
+		mutex_unlock(&di->lock);
+		dev_info(di->dev,"Qpassed @resume: %d mAh\n", val.intval);
+	}
+
+	return 0;
+}
+
+
 static const struct i2c_device_id bq27x00_id[] = {
 	{ "bq27200", BQ27000 },	/* bq27200 is same as bq27000, but with i2c */
 	{ "bq27500", BQ27500 },
@@ -1330,6 +1492,8 @@ static struct i2c_driver bq27x00_battery_driver = {
 	},
 	.probe = bq27x00_battery_probe,
 	.remove = bq27x00_battery_remove,
+	.suspend = bq27x00_battery_suspend,
+	.resume = bq27x00_battery_resume,
 	.id_table = bq27x00_id,
 };
 

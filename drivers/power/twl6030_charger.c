@@ -1066,6 +1066,7 @@ static void twl6030_monitor_work(struct work_struct *work)
 	int current_uA;
 	int temperature_cC;
 	int current_limit_mA;
+	int qpassed_mAh;
 	int charging;
 	int ret;
 
@@ -1122,6 +1123,15 @@ static void twl6030_monitor_work(struct work_struct *work)
 		temperature_cC = 0;
 	} else {
 		temperature_cC = val.intval;
+	}
+
+	ret = battery->get_property(battery,
+		POWER_SUPPLY_PROP_CHARGE_COUNTER, &val);
+	if (ret) {
+		dev_warn(di->dev, "Failed to read charge counter: %d\n", ret);
+		qpassed_mAh = 0;
+	} else {
+		qpassed_mAh = val.intval;
 	}
 
 #if defined(CONFIG_MACH_NOTLE)
@@ -1195,10 +1205,16 @@ static void twl6030_monitor_work(struct work_struct *work)
 	}
 
 	getnstimeofday(&ts);
-	dev_warn(di->dev, "capacity=%d%% raw_capacity=%d%% voltage_uV=%d uV current_uA=%d uA "
-			"temperature_cC=%d current_limit_mA=%d %s%s [%016lu]\n",
-			capacity, raw_capacity, voltage_uV, current_uA, temperature_cC, di->current_limit_mA,
-			twl6030_state[di->state], is_charging(di) ? " CHG" : "", (unsigned long) ts.tv_sec);
+	dev_warn(di->dev,
+		"capacity=%d%% raw_capacity=%d%% "
+		"voltage_uV=%d uV current_uA=%d uA "
+		"temperature_cC=%d current_limit_mA=%d "
+		"qpassed=%d mAh %s%s [%016lu]\n",
+		capacity, raw_capacity,
+		voltage_uV, current_uA,
+		temperature_cC, di->current_limit_mA,
+		qpassed_mAh, twl6030_state[di->state],
+		is_charging(di) ? " CHG" : "", (unsigned long) ts.tv_sec);
 error:
 	twl6030_determine_charge_state(di);
 }
