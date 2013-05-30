@@ -87,7 +87,7 @@ enum {
 #define GPIO_BT_RST_N_EVT2              113
 #define GPIO_CAM_PWDN_EVT1              91
 #define GPIO_CAM_PWDN_EVT2              100
-#define GPIO_CAMERA                     121
+#define GPIO_CAMERA                     30  /* gpio_wk30 */
 #define GPIO_TOUCHPAD_INT_N_EVT1        32
 #define GPIO_TOUCHPAD_INT_N_EVT2        3
 #define GPIO_PROX_INT_EVT1              90

@@ -208,7 +208,7 @@ int notle_version_after( notle_version then ) {
         return ( then < NOTLE_VERSION );
 }
 
-int notle_version_support_battery_temperature() {
+int notle_version_support_battery_temperature(void) {
         return (NOTLE_VERSION >= V1_EVT2);
 }
 
@@ -1846,7 +1846,7 @@ static struct omap_board_mux evt2_board_mux[] __initdata = {
     OMAP4_MUX(ABE_MCBSP2_FSX,       OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BT_RST_N
     OMAP4_MUX(SDMMC1_CLK,           OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // CAM_PWDN
     OMAP4_MUX(C2C_DATA14,           OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // PROX_INT
-    OMAP4_MUX(ABE_DMIC_DIN2,        OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN),    // CAMERA, TOP_SW
+    OMAP4_MUX(ABE_DMIC_DIN2,        OMAP_MUX_MODE7),                    // OBSOLETE CAMERA, TOP_SW
     OMAP4_MUX(DPM_EMU2,             OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // SOC_INT
     OMAP4_MUX(USBB1_ULPITLL_STP,    OMAP_MUX_MODE3 | OMAP_PIN_INPUT),   // FPGA_CDONE
     OMAP4_MUX(USBB1_ULPITLL_NXT,    OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // FPGA_CRESET_B
