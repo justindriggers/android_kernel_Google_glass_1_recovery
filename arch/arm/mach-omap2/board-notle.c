@@ -1687,13 +1687,6 @@ static void __init notle_i2c_irq_fixup(void)
     gpio_touchpad = notle_get_gpio(GPIO_TOUCHPAD_INT_N_INDEX);
     gpio_blink = notle_get_gpio(GPIO_BLINK_INT_INDEX);
 
-    // XXX TODO(jscarr) REMOVE this when pre EVT2 units are destroyed
-    // first batch of evt2 had prox_int on blink_int
-    if ( notle_version_after(V1_EVT1) ) {
-        pr_err("Forcing prox_int to %d instead of %d\n", gpio_blink, gpio_prox); 
-        gpio_prox = gpio_blink;
-    }
-
     // Fix up the global device data structures
 
 #ifdef CONFIG_RMI4_BUS
@@ -1845,7 +1838,7 @@ static struct omap_board_mux evt2_board_mux[] __initdata = {
     OMAP4_MUX(USBB2_HSIC_STROBE,    OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BCM_WLAN_WAKE
     OMAP4_MUX(ABE_MCBSP2_FSX,       OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // BT_RST_N
     OMAP4_MUX(SDMMC1_CLK,           OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),  // CAM_PWDN
-    OMAP4_MUX(C2C_DATA14,           OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // PROX_INT
+    OMAP4_MUX(SDMMC1_DAT1,          OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // ALS_PROX_INT
     OMAP4_MUX(ABE_DMIC_DIN2,        OMAP_MUX_MODE7),                    // OBSOLETE CAMERA, TOP_SW
     OMAP4_MUX(DPM_EMU2,             OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLUP),                     // SOC_INT
     OMAP4_MUX(USBB1_ULPITLL_STP,    OMAP_MUX_MODE3 | OMAP_PIN_INPUT),   // FPGA_CDONE

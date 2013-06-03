@@ -1730,7 +1730,7 @@ static int ltr506_setup(struct ltr506_data *ltr506)
 			dev_err(&ltr506->i2c_client->dev, "%s: Enabled interrupts failed...\n", __func__);
 			goto err_out2;
 		}
-		dev_dbg(&ltr506->i2c_client->dev, "%s Enabled interrupt to device\n", __func__);
+		dev_info(&ltr506->i2c_client->dev, "%s Enabled interrupt to device\n", __func__);
 	}
 
 	/* Set ALS measurement gain */
