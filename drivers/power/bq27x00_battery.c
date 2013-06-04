@@ -54,6 +54,9 @@
 
 #define DEBUG_1HZ_COUNT			15
 
+static char debug_1hz_buffer[500] = {0,};
+
+
 enum bq27x00_reg_index {
 	BQ27x00_REG_TEMP = 0,
 	BQ27x00_REG_INT_TEMP,
@@ -493,34 +496,34 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 	if (di->debug_enable > 0) {
 
 		/* Dumps out Data Ram Info */
-		printk("bq27x00 Ex DR: ");
-		printk("0x%04x,%d,%d,0x%04x,%d,%d,%d,%d,%d,%d%%,",
-			cache.control,
-			cache.temperature-2732,
-			cache.voltage,
-			cache.flags,
-			cache.nom_avail_cap,
-			cache.full_avail_cap,
-			cache.remain_cap,
-			cache.full_charge_cap,
-			(short)cache.average_i,
-			(cache.state_of_health & 0x00FF));
-		printk("0x%02x,%d,%d%%,%d,%d,%d,%d,%d,%d%%,%d,%d,%d,%d\n",
-			(cache.state_of_health & 0xFF00) >> 8,
-			cache.cycle_count,
-			cache.capacity,
-			(short)cache.instant_i,
-			cache.internal_temp-2732,
-			cache.r_scale,
-			cache.true_cap,
-			cache.true_fcc,
-			cache.true_soc,
-			cache.q_max,
-			cache.q_passed,
-			cache.DOD0,
-			cache.q_start);
+		printk("bq27x00 Ex DR: "
+		       "0x%04x,%d,%d,0x%04x,%d,%d,%d,%d,%d,%d%%,"
+		       "0x%02x,%d,%d%%,%d,%d,%d,%d,%d,%d%%,%d,%d,%d,%d\n",
+		       cache.control,
+		       cache.temperature-2732,
+		       cache.voltage,
+		       cache.flags,
+		       cache.nom_avail_cap,
+		       cache.full_avail_cap,
+		       cache.remain_cap,
+		       cache.full_charge_cap,
+		       (short)cache.average_i,
+		       (cache.state_of_health & 0x00FF),
+		       (cache.state_of_health & 0xFF00) >> 8,
+		       cache.cycle_count,
+		       cache.capacity,
+		       (short)cache.instant_i,
+		       cache.internal_temp-2732,
+		       cache.r_scale,
+		       cache.true_cap,
+		       cache.true_fcc,
+		       cache.true_soc,
+		       cache.q_max,
+		       cache.q_passed,
+		       cache.DOD0,
+		       cache.q_start);
 
-		/* Selectively dumps out Data Flash periodically*/
+		/* Selectively dumps out Data Flash periodically */
 		if(time_after_eq(jiffies,di->data_flash_update_time)) {
 			bq27x00_dump_partial_dataflash(di);
 			di->data_flash_update_time =
@@ -603,7 +606,7 @@ static int bq27x00_battery_temperature(struct bq27x00_device_info *di,
 		/* if we ever get a valid reading we must not have a fake battery */
 		di->fake_battery = 0;
 	}
-	
+
 	val->intval = temperature;
 
 	return 0;
@@ -876,36 +879,46 @@ static void bq27x00_battery_debug_poll(struct work_struct *work)
 
 	/* Dumps out 1HZ recording of V, I and T at fixed interval */
 	if (di->debug_enable > 0 && di->debug_index == DEBUG_1HZ_COUNT-1) {
-
+		int buffer_used = 0;
 		first_sample = true;
 
 		for (i = 0; i < DEBUG_1HZ_COUNT; i++) {
-
 			if (first_sample) {
-				printk("bq27x00 1-HZ: %ld.%ld,",
-					di->debug_info[i].timestamp.tv_sec,
-					di->debug_info[i].timestamp.tv_nsec/100000000);
+				buffer_used += scnprintf(
+				    debug_1hz_buffer+buffer_used,
+				    sizeof(debug_1hz_buffer) - buffer_used,
+				    "bq27x00 1-HZ: %ld.%ld,",
+				    di->debug_info[i].timestamp.tv_sec,
+				    di->debug_info[i].timestamp.tv_nsec/100000000);
 				first_sample = false;
 				first_ts = di->debug_info[i].timestamp;
 			} else {
 				time_diff =
 					timespec_sub(di->debug_info[i].timestamp,first_ts);
-				printk("%ld.%ld,",time_diff.tv_sec,
-					time_diff.tv_nsec/100000000);
+				buffer_used += scnprintf(
+				    debug_1hz_buffer+buffer_used,
+				    sizeof(debug_1hz_buffer) - buffer_used,
+				    "%ld.%ld,",
+				    time_diff.tv_sec,
+				    time_diff.tv_nsec/100000000);
 			}
-
-			printk("%d,%d,%d;",
-				di->debug_info[i].voltage/1000,
-				di->debug_info[i].avg_current/1000,
-				di->debug_info[i].temperature);
-
+			buffer_used += scnprintf(
+			    debug_1hz_buffer+buffer_used,
+			    sizeof(debug_1hz_buffer) - buffer_used,
+			    "%d,%d,%d;",
+			    di->debug_info[i].voltage/1000,
+			    di->debug_info[i].avg_current/1000,
+			    di->debug_info[i].temperature);
 		}
-		printk("\n");
-
+		buffer_used += scnprintf(
+		    debug_1hz_buffer+buffer_used,
+		    sizeof(debug_1hz_buffer) - buffer_used,
+		    "\n");
+		printk("%s", debug_1hz_buffer);
 		di->debug_index = 0;
-	} else
+	} else {
 		di->debug_index++;
-
+	}
 
 	if (di->debug_enable > 0)
 		schedule_delayed_work(&di->debug_work, HZ);
