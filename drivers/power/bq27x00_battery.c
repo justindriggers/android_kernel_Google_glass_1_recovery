@@ -820,10 +820,10 @@ static int bq27x00_battery_get_property(struct power_supply *psy,
 		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_NOW:
-		ret = bq27x00_simple_value(bq27x00_battery_read_nac(di), val);
+		ret = bq27x00_simple_value(1000 * di->cache.true_cap, val);
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
-		ret = bq27x00_simple_value(di->cache.charge_full, val);
+		ret = bq27x00_simple_value(1000 * di->cache.true_fcc, val);
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
 		ret = bq27x00_simple_value(di->charge_design_full, val);
