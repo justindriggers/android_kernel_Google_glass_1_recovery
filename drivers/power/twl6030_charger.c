@@ -299,15 +299,12 @@ struct twl6030_charger_device_info {
 	int temperature_critical;
 	int charge_disabled;
 
-	int charge_top_off;
-
 	struct led_state led;
 	struct timer_list led_timer;
 	struct work_struct led_work;
 
 	unsigned int recharge_capacity;
 
-	unsigned long full_jiffies;
 	unsigned long monitor_interval_jiffies;
 
 	u8 usb_online;
@@ -1069,6 +1066,7 @@ static void twl6030_monitor_work(struct work_struct *work)
 	int qpassed_mAh;
 	int charging;
 	int ret;
+	int status;
 
 	/* pet the charger watchdog */
 	if (is_charging(di))
@@ -1124,6 +1122,13 @@ static void twl6030_monitor_work(struct work_struct *work)
 	} else {
 		temperature_cC = val.intval;
 	}
+
+	ret = battery->get_property(battery, POWER_SUPPLY_PROP_STATUS, &val);
+	if (ret) {
+		dev_err(di->dev, "Failed to read battery status: %d\n", ret);
+		goto error;
+	}
+	status = val.intval;
 
 	ret = battery->get_property(battery,
 		POWER_SUPPLY_PROP_CHARGE_COUNTER, &val);
@@ -1185,16 +1190,27 @@ static void twl6030_monitor_work(struct work_struct *work)
 		di->temperature_critical = 0;
 	}
 
-	if (is_charging(di) && capacity == 100 && current_uA < 50000) {
-		if (!di->charge_top_off) {
-			di->full_jiffies = msecs_to_jiffies(120 * 1000) + jiffies;
-			di->charge_top_off = 1;
-		} else if (time_after_eq(jiffies, di->full_jiffies)) {
-			di->charge_top_off = 0;
+	/*
+	 * We will charge the device to 100% and the gas gauge reports the battery is full
+	 * As a safety, if the gas gauge did not report that, charging will stop when
+	 * we dip below 20mA.
+	 */
+	if (is_charging(di) && capacity == 100) {
+
+		if (status == POWER_SUPPLY_STATUS_FULL) {
+			dev_warn(di->dev,
+				"bq27x00 reports full capacity, charging stop\n");
+			di->state = STATE_FULL;
+			twl6030_stop_usb_charger(di);
+			twl6030_eval_led_state(di);
+		} else if (current_uA < 20000) {
+			dev_warn(di->dev,
+				"bq27x00 did not report full capacity, charging stop\n");
 			di->state = STATE_FULL;
 			twl6030_stop_usb_charger(di);
 			twl6030_eval_led_state(di);
 		}
+
 	}
 
 	if (di->state == STATE_FULL && capacity <= di->recharge_capacity) {
@@ -1546,7 +1562,6 @@ static int __devinit twl6030_charger_probe(struct platform_device *pdev)
 
 	di->dev = &pdev->dev;
 	di->state = STATE_BATTERY;
-	di->charge_top_off = 0;
 	di->recharge_capacity = 94;
 	di->monitor_interval_jiffies =
 		msecs_to_jiffies(pdata->monitor_interval_seconds * 1000);
