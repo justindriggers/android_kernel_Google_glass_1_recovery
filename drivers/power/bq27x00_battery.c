@@ -55,6 +55,7 @@
 #define DEBUG_1HZ_COUNT			15
 
 static char debug_1hz_buffer[500] = {0,};
+static char subclass_buffer[500] = {0,};
 
 
 enum bq27x00_reg_index {
@@ -223,6 +224,7 @@ struct bq27x00_reg_cache {
 	short q_passed;
 	short DOD0;
 	short q_start;
+	struct timespec timestamp;
 };
 
 struct bq27x00_device_info {
@@ -451,9 +453,12 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 	int temp;
 	unsigned char q_data[10];
 	size_t q_size = 10;
+	struct timespec ts;
 
 	cache.flags = bq27x00_read(di, BQ27x00_REG_FLAGS, false);
 	if (cache.flags >= 0) {
+		getnstimeofday(&ts);
+		cache.timestamp = ts;
 		cache.capacity = bq27x00_battery_read_rsoc(di);
 		cache.raw_capacity = bq27x00_battery_read_raw_soc(di);
 		cache.temperature = bq27x00_read(di, BQ27x00_REG_TEMP, false);
@@ -496,9 +501,11 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 	if (di->debug_enable > 0) {
 
 		/* Dumps out Data Ram Info */
-		printk("bq27x00 Ex DR: "
+		printk("bq27x00 Ex DR: %ld.%ld,"
 		       "0x%04x,%d,%d,0x%04x,%d,%d,%d,%d,%d,%d%%,"
 		       "0x%02x,%d,%d%%,%d,%d,%d,%d,%d,%d%%,%d,%d,%d,%d\n",
+                       cache.timestamp.tv_sec,
+                       cache.timestamp.tv_nsec/100000000,
 		       cache.control,
 		       cache.temperature-2732,
 		       cache.voltage,
@@ -910,11 +917,7 @@ static void bq27x00_battery_debug_poll(struct work_struct *work)
 			    di->debug_info[i].avg_current/1000,
 			    di->debug_info[i].temperature);
 		}
-		buffer_used += scnprintf(
-		    debug_1hz_buffer+buffer_used,
-		    sizeof(debug_1hz_buffer) - buffer_used,
-		    "\n");
-		printk("%s", debug_1hz_buffer);
+		printk("%s\n", debug_1hz_buffer);
 		di->debug_index = 0;
 	} else {
 		di->debug_index++;
@@ -1174,6 +1177,10 @@ static int dump_subclass(struct bq27x00_device_info *di, u8 subclass, size_t len
 	int ret;
 	size_t i, offset, remaining;
 	unsigned char data[64];
+	int buffer_used = 0;
+	struct timespec ts;
+
+	getnstimeofday(&ts);
 
 	memset(data, 0x00, sizeof(data));
 
@@ -1219,12 +1226,20 @@ static int dump_subclass(struct bq27x00_device_info *di, u8 subclass, size_t len
 			goto error;
 		}
 
-		printk("bq27x00: subclass=0x%02x len=%02u blk=%u count=%02u: ", subclass, len, offset, count);
+		buffer_used += scnprintf(
+			subclass_buffer+buffer_used,
+			sizeof(subclass_buffer) - buffer_used,
+			"bq27x00 DF: %ld.%ld subclass=0x%02x len=%02u blk=%u count=%02u: ",
+			ts.tv_sec, ts.tv_nsec/100000000,
+			subclass, len, offset, count);
 
-		for (i=0; i < count; i++)
-			printk("0x%02x ", data[i]);
-
-		printk("\n");
+		for (i=0; i < count; i++) {
+			buffer_used += scnprintf(
+				subclass_buffer+buffer_used,
+				sizeof(subclass_buffer) - buffer_used,
+				"0x%02x ", data[i]);
+		}
+		printk("%s\n", subclass_buffer);
 
 		remaining -= count;
 		offset++;
@@ -1245,7 +1260,7 @@ static int bq27x00_dump_partial_dataflash(struct bq27x00_device_info *di)
 {
 	int ret;
 
-	printk("bq2700: fw version 0x%04x; df version 0x%04x\n",
+	printk("bq27x00: fw version 0x%04x; df version 0x%04x\n",
 		di->fw_ver, di->df_ver);
 
 	/* unseal device */
