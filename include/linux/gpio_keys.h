@@ -17,6 +17,9 @@ struct gpio_keys_button {
 		int last_suspend_cnt;   /* Determine if from suspend state */
 		int prev_state;         /* Previous state of key */
 		struct timespec ts;     /* Time of interrupt */
+		int synth_sent;         /* Boolean flag indicating synth
+		                           key sent during a given suspend/
+		                           resume cycle. */
 	} goog;
 };
 
