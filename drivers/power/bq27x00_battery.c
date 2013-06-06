@@ -1586,7 +1586,7 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	di->bat.name = name;
 	di->bus.read = &bq27x00_read_i2c;
 	di->bus.write = &bq27x00_write_i2c;
-	di->debug_enable = 1;
+	di->debug_enable = 0;
 
 	if (pdata && pdata->translate_temp)
 		di->translate_temp = pdata->translate_temp;
