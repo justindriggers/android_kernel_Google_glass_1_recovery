@@ -1774,14 +1774,17 @@ static void rmi_f11_finger_handler(struct f11_data *f11,
 				 *
 				 * So if we have real fingers data, close out the event packet
 				 * here before starting a new one with the press gesture.
+				 *
+				 * The long press gesture presents with multiple fingers landed
+				 * but for our application we want to constrain it to one finger.
 				 */
-				if (sensor->nbr_fingers) {
+				if (finger_pressed_count == 1) {
 					input_sync(sensor->input); /* sync after groups of events */
+					rmi_f11_input_gesture(f11, sensor,
+					                      "press",
+					                      GESTURE_OFFSET_PRESS_X,
+					                      GESTURE_OFFSET_PRESS_Y);
 				}
-				rmi_f11_input_gesture(f11, sensor,
-						      "press",
-						      GESTURE_OFFSET_PRESS_X,
-						      GESTURE_OFFSET_PRESS_Y);
 			}
 		}
 	}
