@@ -258,14 +258,23 @@ int omap4_charger_detect(void)
 	return charger;
 }
 
+#include "cm2_44xx.h"
+#include "cm44xx.h"
+
 int omap4430_phy_power(struct device *dev, int ID, int on)
 {
+	int ret;
+
 	if (on) {
 
 #ifdef CONFIG_OMAP4_HSOTG_ED_CORRECTION
 		/* apply eye diagram improvement settings */
 		omap44xx_hsotg_ed_correction();
 #endif
+
+		ret = omap4_cm_wait_module_ready(OMAP4430_CM_L4CFG_L4_CFG_CLKCTRL);
+		if (ret < 0)
+			return ret;
 
 		if (ID)
 			/* enable VBUS valid, IDDIG groung */
