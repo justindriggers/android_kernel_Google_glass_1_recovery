@@ -882,7 +882,8 @@ static void bq27x00_battery_debug_poll(struct work_struct *work)
 	/* Record Time */
 	di->debug_info[di->debug_index].timestamp = ts;
 
-	mutex_unlock(&di->lock);
+	if (di->debug_enable > 0)
+		schedule_delayed_work(&di->debug_work, HZ);
 
 	/* Dumps out 1HZ recording of V, I and T at fixed interval */
 	if (di->debug_enable > 0 && di->debug_index == DEBUG_1HZ_COUNT-1) {
@@ -923,8 +924,7 @@ static void bq27x00_battery_debug_poll(struct work_struct *work)
 		di->debug_index++;
 	}
 
-	if (di->debug_enable > 0)
-		schedule_delayed_work(&di->debug_work, HZ);
+	mutex_unlock(&di->lock);
 
 	return;
 }
@@ -1656,6 +1656,8 @@ static int bq27x00_battery_suspend(struct i2c_client *client, pm_message_t mesg)
 	if (di) {
 		mutex_lock(&di->lock);
 		bq27x00_battery_qpassed(di,&val);
+		if (di->debug_enable > 0)
+			cancel_delayed_work_sync(&di->work);
 		mutex_unlock(&di->lock);
 		dev_info(di->dev, "Qpassed @suspend: %d mAh\n", val.intval);
 	}
@@ -1671,6 +1673,8 @@ static int bq27x00_battery_resume(struct i2c_client *client)
 	if (di) {
 		mutex_lock(&di->lock);
 		bq27x00_battery_qpassed(di,&val);
+		if (di->debug_enable > 0)
+			schedule_delayed_work(&di->debug_work, HZ);
 		mutex_unlock(&di->lock);
 		dev_info(di->dev,"Qpassed @resume: %d mAh\n", val.intval);
 	}
