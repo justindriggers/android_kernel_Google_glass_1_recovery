@@ -229,7 +229,7 @@ static void set_ion_carveouts(struct sgx_omaplfb_config *sgx_config,
 	/* actual pages used is the same */
 	ion->nonsecure_tiler2d_size = alloc_pages * PAGE_SIZE * num_buffers;
 
-	ion->tiler2d_size = SZ_64M;
+	ion->tiler2d_size = SZ_64M + SZ_16M;
 
 	/* min pages used from TILER2D container */
 	alloc_pages = tiler_backpages(fmt,
