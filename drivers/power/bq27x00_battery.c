@@ -227,6 +227,18 @@ struct bq27x00_reg_cache {
 	struct timespec timestamp;
 };
 
+struct bq27x00_partial_data_flash {
+	struct timespec timestamp;
+	char subclass_0x52[150];
+	char subclass_0x57[120];
+	char subclass_0x58[120];
+	char subclass_0x5b[120];
+	char subclass_0x5c[120];
+	char subclass_0x5d[120];
+	char subclass_0x5e[120];
+};
+
+
 struct bq27x00_device_info {
 	struct device 		*dev;
 	int			id;
@@ -250,6 +262,8 @@ struct bq27x00_device_info {
 	struct bq27x00_debug_info debug_info[DEBUG_1HZ_COUNT];
 	int debug_index;
 	int debug_enable;
+
+	struct bq27x00_partial_data_flash partial_df;
 
 	struct mutex lock;
 
@@ -1172,12 +1186,13 @@ static int bq27x00_battery_read_dataflash_version(struct bq27x00_device_info *di
 }
 #define SLAVE_LATENCY_DELAY 100
 
-static int dump_subclass(struct bq27x00_device_info *di, u8 subclass, size_t len)
+static int dump_and_store_subclass(struct bq27x00_device_info *di, u8 subclass, size_t len, char * buf)
 {
 	int ret;
 	size_t i, offset, remaining;
 	unsigned char data[64];
 	int buffer_used = 0;
+	int header_used = 0;
 	struct timespec ts;
 
 	getnstimeofday(&ts);
@@ -1226,12 +1241,13 @@ static int dump_subclass(struct bq27x00_device_info *di, u8 subclass, size_t len
 			goto error;
 		}
 
-		buffer_used += scnprintf(
+		header_used = scnprintf(
 			subclass_buffer+buffer_used,
 			sizeof(subclass_buffer) - buffer_used,
 			"bq27x00 DF: %ld.%ld subclass=0x%02x len=%02u blk=%u count=%02u: ",
 			ts.tv_sec, ts.tv_nsec/100000000,
 			subclass, len, offset, count);
+		buffer_used += header_used;
 
 		for (i=0; i < count; i++) {
 			buffer_used += scnprintf(
@@ -1245,10 +1261,19 @@ static int dump_subclass(struct bq27x00_device_info *di, u8 subclass, size_t len
 		offset++;
 	}
 
+	/* Record the df dump for a subclass */
+	if (buffer_used > 0 && buf != NULL && len < 32) {
+		memcpy(buf, subclass_buffer+header_used, buffer_used-header_used);
+	}
+
 	return 0;
 
 error:
 	return ret;
+}
+
+static int dump_subclass(struct bq27x00_device_info *di, u8 subclass, size_t len) {
+	return dump_and_store_subclass(di, subclass, len, 0);
 }
 
 #define dump_value(name, reg_index) do { \
@@ -1259,6 +1284,7 @@ error:
 static int bq27x00_dump_partial_dataflash(struct bq27x00_device_info *di)
 {
 	int ret;
+	struct timespec ts;
 
 	printk("bq27x00: fw version 0x%04x; df version 0x%04x\n",
 		di->fw_ver, di->df_ver);
@@ -1281,13 +1307,26 @@ static int bq27x00_dump_partial_dataflash(struct bq27x00_device_info *di)
 	msleep(SLAVE_LATENCY_DELAY);
 
 	if(di->fw_ver == L1_FW_VERSION) {
-		ret = dump_subclass(di, 0x52, 28);
-		ret = dump_subclass(di, 0x57, 20);
-		ret = dump_subclass(di, 0x58, 20);
-		ret = dump_subclass(di, 0x5b, 20);
-		ret = dump_subclass(di, 0x5c, 20);
-		ret = dump_subclass(di, 0x5d, 20);
-		ret = dump_subclass(di, 0x5e, 20);
+
+
+		getnstimeofday(&ts);
+		di->partial_df.timestamp = ts;
+
+		ret = dump_and_store_subclass(
+			di, 0x52, 28, di->partial_df.subclass_0x52);
+		ret = dump_and_store_subclass(
+			di, 0x57, 20, di->partial_df.subclass_0x57);
+		ret = dump_and_store_subclass(
+			di, 0x58, 20, di->partial_df.subclass_0x58);
+		ret = dump_and_store_subclass(
+			di, 0x5b, 20, di->partial_df.subclass_0x5b);
+		ret = dump_and_store_subclass(
+			di, 0x5c, 20, di->partial_df.subclass_0x5c);
+		ret = dump_and_store_subclass(
+			di, 0x5d, 20, di->partial_df.subclass_0x5d);
+		ret = dump_and_store_subclass(
+			di, 0x5e, 20, di->partial_df.subclass_0x5e);
+
 	}
 
 	return 0;
@@ -1425,6 +1464,34 @@ error:
 	return ret;
 }
 
+static ssize_t show_dump_partial_data_flash(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct bq27x00_device_info *di = dev_get_drvdata(dev);
+	int count = 0;
+
+	mutex_lock(&di->lock);
+
+	if (di->partial_df.timestamp.tv_sec != 0) {
+		count = sprintf(buf, "%ld.%ld\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
+			di->partial_df.timestamp.tv_sec,
+			di->partial_df.timestamp.tv_nsec/100000000,
+			di->partial_df.subclass_0x52,
+			di->partial_df.subclass_0x57,
+			di->partial_df.subclass_0x58,
+			di->partial_df.subclass_0x5b,
+			di->partial_df.subclass_0x5c,
+			di->partial_df.subclass_0x5d,
+			di->partial_df.subclass_0x5e );
+	} else {
+		count = sprintf(buf, "none\n");
+	}
+
+	mutex_unlock(&di->lock);
+
+	return count;
+}
+
 static ssize_t show_dump_data_flash(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -1505,6 +1572,8 @@ static ssize_t set_debug_enable(struct device *dev,
 	return count;
 }
 
+static DEVICE_ATTR(dump_partial_data_flash, S_IRUGO,
+	show_dump_partial_data_flash, NULL);
 static DEVICE_ATTR(dump_data_flash, S_IRUGO, show_dump_data_flash, NULL);
 static DEVICE_ATTR(fw_version, S_IRUGO, show_firmware_version, NULL);
 static DEVICE_ATTR(df_version, S_IRUGO, show_dataflash_version, NULL);
@@ -1513,6 +1582,7 @@ static DEVICE_ATTR(reset, S_IRUGO, show_reset, NULL);
 static DEVICE_ATTR(debug_enable, S_IWUSR|S_IRUGO, show_debug_enable, set_debug_enable);
 
 static struct attribute *bq27x00_attributes[] = {
+	&dev_attr_dump_partial_data_flash.attr,
 	&dev_attr_dump_data_flash.attr,
 	&dev_attr_fw_version.attr,
 	&dev_attr_df_version.attr,
@@ -1532,7 +1602,7 @@ static void bq27x00_reset_registers(struct bq27x00_device_info *di)
 	di->fw_ver = bq27x00_battery_read_fw_version(di);
 	di->df_ver = bq27x00_battery_read_dataflash_version(di);
 	dev_info(di->dev,
-		"Gas Guage fw version 0x%04x; df version 0x%04x\n",
+		"Gas Gauge fw version 0x%04x; df version 0x%04x\n",
 		di->fw_ver, di->df_ver);
 
 	if (di->fw_ver == L1_FW_VERSION)
@@ -1541,7 +1611,7 @@ static void bq27x00_reset_registers(struct bq27x00_device_info *di)
 		di->regs = bq27x00_fw_g3_regs;
 	else {
 		dev_err(di->dev,
-			"Unkown Gas Guage fw version: 0x%04x\n", di->fw_ver);
+			"Unkown Gas Gauge fw version: 0x%04x\n", di->fw_ver);
 		di->regs = bq27x00_fw_g3_regs;
 	}
 }
