@@ -1,5 +1,5 @@
 /*
- * drivers/power/process.c - Functions for starting/stopping processes on 
+ * drivers/power/process.c - Functions for starting/stopping processes on
  *                           suspend transitions.
  *
  * Originally from swsusp.
@@ -18,7 +18,7 @@
 #include <linux/workqueue.h>
 #include <linux/wakelock.h>
 
-/* 
+/*
  * Timeout for stopping processes
  */
 #define TIMEOUT	(20 * HZ)
@@ -114,12 +114,10 @@ static int try_to_freeze_tasks(bool sig_only)
 		 * but it cleans up leftover PF_FREEZE requests.
 		 */
 		if(wakeup) {
-			printk("\n");
 			printk(KERN_ERR "Freezing of %s aborted\n",
 					sig_only ? "user space " : "tasks ");
 		}
 		else {
-			printk("\n");
 			printk(KERN_ERR "Freezing of tasks failed after %d.%02d seconds "
 			       "(%d tasks refusing to freeze, wq_busy=%d):\n",
 			       elapsed_csecs / 100, elapsed_csecs % 100,
@@ -138,7 +136,7 @@ static int try_to_freeze_tasks(bool sig_only)
 		} while_each_thread(g, p);
 		read_unlock(&tasklist_lock);
 	} else {
-		printk("(elapsed %d.%02d seconds) ", elapsed_csecs / 100,
+		printk("Freezing: (elapsed %d.%02d seconds)\n", elapsed_csecs / 100,
 			elapsed_csecs % 100);
 	}
 
@@ -152,22 +150,21 @@ int freeze_processes(void)
 {
 	int error;
 
-	printk("Freezing user space processes ... ");
+	printk("Freezing user space processes ...\n");
 	error = try_to_freeze_tasks(true);
 	if (error)
 		goto Exit;
-	printk("done.\n");
+	printk("Freezing user space processes ... done.\n");
 
-	printk("Freezing remaining freezable tasks ... ");
+	printk("Freezing remaining freezable tasks ...\n");
 	error = try_to_freeze_tasks(false);
 	if (error)
 		goto Exit;
-	printk("done.");
+	printk("Freezing remaining freezable tasks ... done.\n");
 
 	oom_killer_disable();
  Exit:
 	BUG_ON(in_atomic());
-	printk("\n");
 
 	return error;
 }
@@ -196,11 +193,10 @@ void thaw_processes(void)
 {
 	oom_killer_enable();
 
-	printk("Restarting tasks ... ");
+	printk("Restarting tasks ...\n");
 	thaw_workqueues();
 	thaw_tasks(true);
 	thaw_tasks(false);
 	schedule();
-	printk("done.\n");
+	printk("Restarting tasks ... done.\n");
 }
-

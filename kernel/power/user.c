@@ -247,9 +247,9 @@ static long snapshot_ioctl(struct file *filp, unsigned int cmd,
 		if (data->frozen)
 			break;
 
-		printk("Syncing filesystems ... ");
+		printk("Syncing filesystems ...\n");
 		sys_sync();
-		printk("done.\n");
+		printk("Syncing filesystems ... done.\n");
 
 		error = usermodehelper_disable();
 		if (error)

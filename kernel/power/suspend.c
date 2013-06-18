@@ -288,9 +288,9 @@ int enter_state(suspend_state_t state)
 	if (!mutex_trylock(&pm_mutex))
 		return -EBUSY;
 
-	printk(KERN_INFO "PM: Syncing filesystems ... ");
+	printk(KERN_INFO "PM: Syncing filesystems ...\n");
 	sys_sync();
-	printk("done.\n");
+	printk(KERN_INFO "PM: Syncing filesystems ... done.\n");
 
 	pr_debug("PM: Preparing system for %s sleep\n", pm_states[state]);
 	error = suspend_prepare();
