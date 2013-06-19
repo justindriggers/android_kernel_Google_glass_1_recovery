@@ -1222,6 +1222,7 @@ static int dump_and_store_subclass(struct bq27x00_device_info *di, u8 subclass, 
 
 	while (remaining > 0) {
 		size_t count = remaining < 32 ? remaining : 32;
+		buffer_used = 0;
 
 		msleep(SLAVE_LATENCY_DELAY);
 
