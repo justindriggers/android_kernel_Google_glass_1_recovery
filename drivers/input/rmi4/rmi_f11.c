@@ -82,6 +82,13 @@
 #define GESTURE_MT_MINOR 15
 #define GESTURE_PRESSURE 1
 
+/* Size of bounding box around driver detected tap gestures in pixels. */
+static int gesture_detect_tap_box_x = 90;
+static int gesture_detect_tap_box_y = 90;
+/* Time period in which a gesture tap may be detected in ms. */
+static int gesture_detect_tap_time_min = 5;
+static int gesture_detect_tap_time_max = 250;
+
 /* These values are all added to the well known GESTURE_OFFSET values
  * above to specify unique gestures based upon absolute motion data.
  * Flicks are not specified here as they have an inherent locale value */
@@ -95,7 +102,15 @@
 #define GESTURE_OFFSET_PRESS_X 1
 #define GESTURE_OFFSET_PRESS_Y 1
 
-/* //NOTE(CMM) */
+static ssize_t f11_gesture_show(struct device *dev,
+                                struct device_attribute *attr,
+                                char *buf);
+
+static ssize_t f11_gesture_store(struct device *dev,
+                                 struct device_attribute *attr,
+                                 const char *buf, size_t count);
+
+/* NOTE(CMM) End google definitions */
 
 static ssize_t f11_relreport_show(struct device *dev,
 					struct device_attribute *attr,
@@ -127,6 +142,7 @@ static void rmi_f11_free_devices(struct rmi_function_container *fc);
 static void f11_set_abs_params(struct rmi_function_container *fc, int index);
 
 static struct device_attribute attrs[] = {
+	__ATTR(gesture, RMI_RW_ATTR, f11_gesture_show, f11_gesture_store),
 	__ATTR(relreport, RMI_RW_ATTR, f11_relreport_show, f11_relreport_store),
 	__ATTR(maxPos, RMI_RO_ATTR, f11_maxPos_show, rmi_store_error),
 	__ATTR(rezero, RMI_WO_ATTR, rmi_show_error, f11_rezero_store)
@@ -801,6 +817,26 @@ struct f11_2d_sensor {
 #endif
 };
 
+/* Accumulator of touch events for gesture determination.
+ * Currently only targeted for taps but may be extended
+ * for other gestures. */
+struct goog_gesture_detect {
+	int cnt;
+	int max_x;
+	int min_x;
+	int max_y;
+	int min_y;
+	u8 max_fingers;
+	unsigned long time_start;
+	unsigned long time_end;
+};
+
+/* Finger cache used to pass information to driver gesture detector */
+struct finger_cache_s {
+	int x;
+	int y;
+};
+
 struct f11_data {
 	struct f11_2d_device_query dev_query;
 	struct f11_2d_ctrl dev_controls;
@@ -832,6 +868,12 @@ struct f11_data {
 		unsigned int movement_event_cnt;
 		/* Counter of individual finger events per movement sequence. */
 		unsigned int movement_finger_cnt[F11_MAX_NUM_OF_FINGERS];
+		/* A cache of finger position per event timeslice for gesture determination */
+		struct finger_cache_s finger_cache[F11_MAX_NUM_OF_FINGERS];
+		/* Gesture detector accumulator. */
+		struct goog_gesture_detect gesture_detect;
+		/* boolean to enable or disable gesture detect. */
+		int goog_gesture_enable;
 	} goog;
 #ifdef CONFIG_RMI4_DEBUG
 	struct dentry *debugfs_rezero_wait;
@@ -840,7 +882,7 @@ struct f11_data {
 
 /* NOTE(CMM) External reference to get suspend cycle count */
 extern unsigned int get_suspend_cnt(void);
-/* //NOTE(CMM) */
+/* //NOTE(CMM) end external reference */
 
 enum finger_state_values {
 	F11_NO_FINGER	= 0x00,
@@ -1528,6 +1570,11 @@ static void rmi_f11_abs_pos_report(struct f11_data *f11,
 	if (sensor->type_a)
 		input_mt_sync(sensor->input);
 
+	/* Cache the finger location for this movement event
+	   for the gesture detector accumulator. */
+	f11->goog.finger_cache[n_finger].x = x;
+	f11->goog.finger_cache[n_finger].y = y;
+
 	sensor->finger_tracker[n_finger] = finger_state;
 }
 
@@ -1696,6 +1743,65 @@ static void rmi_f11_input_gesture(struct f11_data *f11,
 	wake_lock_timeout(&f11->goog.wakelock, msecs_to_jiffies(WAKELOCK_TIMEOUT_IN_MS));
 }
 
+/* Reset the gesture detector accumulator */
+static void goog_gesture_detect_reset(struct goog_gesture_detect *ggd)
+{
+	memset(ggd, 0, sizeof(*ggd));
+	// Set max and min to extreme initialized values.
+	ggd->max_x = INT_MIN;
+	ggd->max_y = INT_MIN;
+	ggd->min_x = INT_MAX;
+	ggd->min_y = INT_MAX;
+}
+
+/* Accumulate events for gesture determiniation */
+static void goog_gesture_accumulate(struct goog_gesture_detect *ggd,
+                                    struct finger_cache_s *finger_cache,
+                                    u8 finger_pressed_count)
+{
+	/* Accumulate event data for gesture detector. */
+	ggd->cnt += 1;
+	/* Update the bounding box for this movement sequence */
+	ggd->max_x = max(ggd->max_x, finger_cache[0].x);
+	ggd->min_x = min(ggd->min_x, finger_cache[0].x);
+	ggd->max_y = max(ggd->max_y, finger_cache[0].y);
+	ggd->min_y = min(ggd->min_y, finger_cache[0].y);
+	ggd->max_fingers = max(ggd->max_fingers, finger_pressed_count);
+	/* Set the start time of this gesture. */
+	if (ggd->time_start == 0) {
+		ggd->time_start = jiffies;
+	}
+}
+
+static void goog_gesture_handler(struct f11_data *f11, struct goog_gesture_detect *ggd) {
+	/* Convenience field for gesture length in msecs. */
+	unsigned int delta_msec;
+	delta_msec = jiffies_to_msecs(ggd->time_end - ggd->time_start);
+	/* Driver synthesized single tap gesture model.
+	 * All touch events must occur within a bounding box, must have at least events,
+	 must only present 1 finger and all must occur within a specified timeslice
+	 as defined as a "tap". */
+	if (((ggd->max_x - ggd->min_x) < gesture_detect_tap_box_x)
+	    && ((ggd->max_y - ggd->min_y) < gesture_detect_tap_box_y)
+	    && (ggd->cnt > 1)
+	    && (ggd->max_fingers == 1)
+	    && (delta_msec > gesture_detect_tap_time_min) && (delta_msec < gesture_detect_tap_time_max)) {
+		/* NOTE() We specify the first sensor for gesture */
+		rmi_f11_input_gesture(f11, &f11->sensors[0], "driver single tap",
+		                      GESTURE_OFFSET_SINGLE_TAP_X,
+		                      GESTURE_OFFSET_SINGLE_TAP_Y);
+		goog_gesture_detect_reset(ggd);
+		/* Consume the early tap to prevent the real gesture
+		   from being sent */
+		f11->goog.early_tap = 0;
+	} else {
+		pr_info("%s Ignoring driver sythesized single tap gesture\n", __func__);
+		pr_info("%s max_x:%d min_x:%d max_y:%d min_y:%d cnt:%d fgr:%d time:%d s:%ld e:%ld\n",
+		        __func__, ggd->max_x, ggd->min_x, ggd->max_y, ggd->min_y,
+		        ggd->cnt, ggd->max_fingers, delta_msec, ggd->time_start, ggd->time_end);
+	}
+}
+
 /* NOTE(CMM) This has been modified by Google */
 static void rmi_f11_finger_handler(struct f11_data *f11,
 				   struct f11_2d_sensor *sensor)
@@ -1787,6 +1893,12 @@ static void rmi_f11_finger_handler(struct f11_data *f11,
 				}
 			}
 		}
+
+		/* Driver gesture detect model */
+		if (f11->goog.goog_gesture_enable) {
+			goog_gesture_accumulate(&f11->goog.gesture_detect, f11->goog.finger_cache,
+			                        finger_pressed_count);
+		}
 	}
 
 	/* Debugging logging */
@@ -1795,11 +1907,21 @@ static void rmi_f11_finger_handler(struct f11_data *f11,
 		        f11->goog.movement_event_cnt);
 	}
 	if (f11->goog.prev_finger_pressed_cnt != 0 && f11->goog.current_finger_pressed_cnt == 0) {
+		/* Save the time from when the last finger lifted.
+		   Since this is has a strong time element we record
+		   time value before the potentially long printk command. */
+		f11->goog.gesture_detect.time_end = jiffies;
+
 		pr_info("%s Ending movement event cnt:%d fing0:%d fing1:%d fing2:%d\n", __func__,
 		        f11->goog.movement_event_cnt, f11->goog.movement_finger_cnt[0],
 		        f11->goog.movement_finger_cnt[1], f11->goog.movement_finger_cnt[2]);
 		f11->goog.movement_event_cnt = 0;
 		memset(f11->goog.movement_finger_cnt, 0, sizeof(f11->goog.movement_finger_cnt));
+
+		/* Additional work if we have driver gesture detector enabled */
+		if (f11->goog.goog_gesture_enable) {
+			goog_gesture_handler(f11, &f11->goog.gesture_detect);
+		}
 	}
 	if (f11->goog.prev_finger_pressed_cnt == 0 && f11->goog.current_finger_pressed_cnt == 0) {
 		pr_debug("%s Extraneous event\n", __func__);
@@ -2582,6 +2704,8 @@ static int rmi_f11_initialize(struct rmi_function_container *fc)
 #ifdef CONFIG_WAKELOCK
 	wake_lock_init(&f11->goog.wakelock, WAKE_LOCK_SUSPEND, "touchpad_wakelock");
 #endif
+	goog_gesture_detect_reset(&f11->goog.gesture_detect);
+
 	/* //NOTE(CMM) */
 
 	if (IS_ENABLED(CONFIG_RMI4_DEBUG)) {
@@ -2859,6 +2983,7 @@ static int rmi_f11_suspend(struct rmi_function_container *fc)
 	data->goog.synth_events_sent = 0;
 	data->goog.early_tap = 0;
 	data->goog.press = 0;
+	goog_gesture_detect_reset(&data->goog.gesture_detect);
 	dev_info(&fc->dev, "%s Early suspended touchpad\n", __FUNCTION__);
 	return 0;
 }
@@ -2990,6 +3115,47 @@ static void __exit rmi_f11_module_exit(void)
 {
 	driver_unregister(&function_handler.driver);
 }
+
+/* Used to turn on and off driver gesture detection */
+static ssize_t f11_gesture_show(struct device *dev,
+                                struct device_attribute *attr,
+                                char *buf)
+{
+	struct rmi_function_container *fc;
+	struct f11_data *instance_data;
+
+	fc = to_rmi_function_container(dev);
+	instance_data = fc->data;
+
+	return snprintf(buf, PAGE_SIZE, "%u\n",
+	                instance_data->goog.goog_gesture_enable);
+}
+
+static ssize_t f11_gesture_store(struct device *dev,
+					 struct device_attribute *attr,
+					 const char *buf,
+					 size_t count)
+{
+	struct rmi_function_container *fc;
+	struct f11_data *instance_data;
+	unsigned int new_value;
+
+	fc = to_rmi_function_container(dev);
+	instance_data = fc->data;
+
+	if (sscanf(buf, "%u", &new_value) != 1)
+		return -EINVAL;
+	if (new_value < 0 || new_value > 1)
+		return -EINVAL;
+	instance_data->goog.goog_gesture_enable = new_value;
+
+	goog_gesture_detect_reset(&instance_data->goog.gesture_detect);
+
+	dev_info(dev, "Touchpad %s driver gesture tap detector\n", (new_value==1)?"enabled":"disabled");
+
+	return count;
+}
+
 
 static ssize_t f11_maxPos_show(struct device *dev,
 				     struct device_attribute *attr,
