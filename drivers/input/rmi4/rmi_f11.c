@@ -1776,6 +1776,12 @@ static void goog_gesture_accumulate(struct goog_gesture_detect *ggd,
 static void goog_gesture_handler(struct f11_data *f11, struct goog_gesture_detect *ggd) {
 	/* Convenience field for gesture length in msecs. */
 	unsigned int delta_msec;
+
+	/* We only send one driver gestures per suspend/resume cycle */
+	if (f11->goog.synth_events_sent > 0) {
+		return;
+	}
+
 	delta_msec = jiffies_to_msecs(ggd->time_end - ggd->time_start);
 	/* Driver synthesized single tap gesture model.
 	 * All touch events must occur within a bounding box, must have at least events,
@@ -1790,7 +1796,6 @@ static void goog_gesture_handler(struct f11_data *f11, struct goog_gesture_detec
 		rmi_f11_input_gesture(f11, &f11->sensors[0], "driver single tap",
 		                      GESTURE_OFFSET_SINGLE_TAP_X,
 		                      GESTURE_OFFSET_SINGLE_TAP_Y);
-		goog_gesture_detect_reset(ggd);
 		/* Consume the early tap to prevent the real gesture
 		   from being sent */
 		f11->goog.early_tap = 0;
@@ -1800,6 +1805,7 @@ static void goog_gesture_handler(struct f11_data *f11, struct goog_gesture_detec
 		        __func__, ggd->max_x, ggd->min_x, ggd->max_y, ggd->min_y,
 		        ggd->cnt, ggd->max_fingers, delta_msec, ggd->time_start, ggd->time_end);
 	}
+	goog_gesture_detect_reset(ggd);
 }
 
 /* NOTE(CMM) This has been modified by Google */
