@@ -229,6 +229,7 @@ struct bq27x00_reg_cache {
 
 struct bq27x00_partial_data_flash {
 	struct timespec timestamp;
+	char data_ram[120];
 	char subclass_0x52[150];
 	char subclass_0x57[120];
 	char subclass_0x58[120];
@@ -544,8 +545,38 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 		       cache.DOD0,
 		       cache.q_start);
 
-		/* Selectively dumps out Data Flash periodically */
+		/*
+		 * Selectively records Data Flash and Data Ram periodically.
+		 * These cached values are dumped out on sysfs read.
+		 */
 		if(time_after_eq(jiffies,di->data_flash_update_time)) {
+			scnprintf(di->partial_df.data_ram,
+				sizeof(di->partial_df.data_ram),
+				"0x%04x %d %d 0x%04x %d %d %d %d %d %d "
+				"0x%02x %d %d %d %d %d %d %d %d %d %d %d %d",
+				cache.control,
+				cache.temperature-2732,
+				cache.voltage,
+				cache.flags,
+				cache.nom_avail_cap,
+				cache.full_avail_cap,
+				cache.remain_cap,
+				cache.full_charge_cap,
+				(short)cache.average_i,
+				(cache.state_of_health & 0x00FF),
+				(cache.state_of_health & 0xFF00) >> 8,
+				cache.cycle_count,
+				cache.capacity,
+				(short)cache.instant_i,
+				cache.internal_temp-2732,
+				cache.r_scale,
+				cache.true_cap,
+				cache.true_fcc,
+				cache.true_soc,
+				cache.q_max,
+				cache.q_passed,
+				cache.DOD0,
+				cache.q_start);
 			bq27x00_dump_partial_dataflash(di);
 			di->data_flash_update_time =
 				jiffies + msecs_to_jiffies(debug_dataflash_interval);
@@ -974,6 +1005,10 @@ static int bq27x00_powersupply_init(struct bq27x00_device_info *di)
 	}
 
 	dev_info(di->dev, "support ver. %s enabled\n", DRIVER_VERSION);
+
+	/* If debug is enabled, force a DR and DF dump on boot */
+	if (di->debug_enable)
+		di->data_flash_update_time = jiffies;
 
 	bq27x00_update(di);
 
@@ -1474,9 +1509,10 @@ static ssize_t show_dump_partial_data_flash(struct device *dev,
 	mutex_lock(&di->lock);
 
 	if (di->partial_df.timestamp.tv_sec != 0) {
-		count = sprintf(buf, "%ld.%ld\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
+		count = sprintf(buf, "%ld.%ld\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
 			di->partial_df.timestamp.tv_sec,
 			di->partial_df.timestamp.tv_nsec/100000000,
+			di->partial_df.data_ram,
 			di->partial_df.subclass_0x52,
 			di->partial_df.subclass_0x57,
 			di->partial_df.subclass_0x58,
@@ -1682,8 +1718,6 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	 */
 	if (di->debug_enable) {
 		schedule_delayed_work(&di->debug_work, 0);
-
-		bq27x00_dump_partial_dataflash(di);
 		di->data_flash_update_time =
 			jiffies + msecs_to_jiffies(debug_dataflash_interval);
 	}
