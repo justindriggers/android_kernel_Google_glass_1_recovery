@@ -202,11 +202,9 @@ static void turn_off_turbo_sprint_mode_delay_work_fn(struct work_struct *work)
 	        ((long long) turbo_sprint_mode_starttime.tv_nsec);
 	elapsed_time_nS = stop - start;
 
-	printk("Turbo Sprint elapsed Time %lld nS", elapsed_time_nS);
-
 	// Is Turbo Sprint Expired?
 	if (elapsed_time_nS > turbo_sprint_mode_duration_requested_nS ) {
-	    printk("Turbo Sprint Off elapsed Time %lld nS", elapsed_time_nS);
+	    printk("Turbo Sprint Off elapsed Time %lld nS\n", elapsed_time_nS);
 	    turbo_sprint = false;
 	}
 	else {
@@ -259,7 +257,7 @@ static ssize_t pcb_temp_set_turbo_sprint_mode(struct device *dev,
 	    sscanf(buf, "%d",&duration);
 	}
 
-	printk("Turbo Sprint REQUESTED for <%d> seconds [TEMP: %d]", duration, temp);
+	printk("Turbo Sprint REQUESTED for <%d> seconds [TEMP: %d]\n", duration, temp);
 
 	if (duration >= 0) {
 	    mutex_lock(&turbo_sprint_mode_mutex);
