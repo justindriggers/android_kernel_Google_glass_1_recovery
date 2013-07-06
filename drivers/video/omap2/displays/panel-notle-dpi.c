@@ -79,8 +79,9 @@ typedef enum {
         V1_EVT2     = 2,
         V1_EVT3     = 3,
         V1_DVT1     = 4,
+        V1_5_PROTO  = 5,
         SUPPORTED_FROM = V1_EVT1,
-        SUPPORTED_TO = V1_DVT1,
+        SUPPORTED_TO = V1_5_PROTO,
 } notle_version;
 
 enum {

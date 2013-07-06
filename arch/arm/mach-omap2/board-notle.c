@@ -190,6 +190,8 @@ static char * notle_version_str(notle_version board_ver)
                 return "V1 EVT3";
         case V1_DVT1:
                 return "V1 DVT1";
+        case V1_5_PROTO:
+                return "V1.5 PROTO";
         default:
                 return "UNVERSIONED";
         }
@@ -1758,6 +1760,7 @@ static int __init notle_i2c_init(void)
 
                         case V1_EVT3:
                         case V1_DVT1:
+                        case V1_5_PROTO:
                         default:
 				notle_gasgauge_platform_data.translate_temp = NULL;
 
