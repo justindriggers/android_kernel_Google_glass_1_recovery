@@ -670,6 +670,9 @@ static int ps_meas_rate_setup(struct ltr506_data *ltr506)
 	return ret;
 }
 
+/* Set the ALS measurement rate a.k.a. integration time, and the
+ * resolutions, a.k.a. number of bits per sample.
+ */
 static int als_meas_rate_setup(struct ltr506_data *ltr506)
 {
 	int ret = 0;
@@ -1750,6 +1753,9 @@ static int ltr506_setup(struct ltr506_data *ltr506)
 	}
 	dev_dbg(&ltr506->i2c_client->dev, "%s: Set ltr506 gains\n", __func__);
 
+	/* Set the ALS measurement rate and resolution */
+	als_meas_rate_setup(ltr506);
+
 	ret = ps_led_setup(ltr506);
 	if (ret < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s: PS LED Setup Fail...\n", __func__);
@@ -1869,6 +1875,7 @@ static int  __devinit ltr506_probe(struct i2c_client *client, const struct i2c_d
 	}
 
 	/* Get ALS defaults from platform data */
+	ltr506->als_resolution = platdata->pfd_als_resolution;
 	ltr506->als_meas_rate = platdata->pfd_als_meas_rate;
 	ltr506->als_gain = platdata->pfd_als_gain;
 	ltr506->als_filter_interrupts = platdata->pfd_als_filter_interrupts;

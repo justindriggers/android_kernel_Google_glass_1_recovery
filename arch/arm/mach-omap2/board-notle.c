@@ -1538,13 +1538,25 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 	 */
 	.pfd_als_filter_interrupts = 0,
 
+	/* ALS resolution / bit width
+	 * '000: 20 bit
+	 * '001: 19 bit
+	 * '010: 18 bit
+	 * '011: 17 bit
+	 * '100: 16 bit (default)
+	 * '101: 12 bit
+	 * '110: 8 bit
+	 * '111: 4 bit
+	 */
+	.pfd_als_resolution = 4,
+
 	/* ALS measurement repeat rate
 	 * '000:  100ms
 	 * '001:  200ms
-	 * '010:  500ms
+	 * '010:  500ms (default)
 	 * '011: 1000ms
 	 * '1xx: 2000ms */
-	.pfd_als_meas_rate = 3,
+	.pfd_als_meas_rate = 2,
 
 	/* ALS gain.
 	 * '00: 1 lux/count (1-64k lux)

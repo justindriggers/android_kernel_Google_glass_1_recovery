@@ -134,6 +134,7 @@ struct ltr506_platform_data {
 	/* ALS */
 	int pfd_disable_als_on_suspend;
 	int pfd_als_filter_interrupts;
+	int pfd_als_resolution;
 	int pfd_als_meas_rate;
 	int pfd_als_gain;
 
