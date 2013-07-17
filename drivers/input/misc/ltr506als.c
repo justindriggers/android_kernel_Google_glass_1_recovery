@@ -254,9 +254,30 @@ static uint32_t read_als_adc_ch1_value(struct ltr506_data *ltr506)
 		return 0;
 	}
 
-	value = ((uint32_t)buffer[2] << 12) | ((uint32_t)buffer[1] << 4) | ((uint32_t)buffer[0] >> 3);
+	value = ((uint32_t)buffer[2] << 12) | ((uint32_t)buffer[1] << 4) | (uint32_t)(buffer[0] >> 4);
 	return value;
 }
+
+/* Read ALS ADC Channel 2 Value */
+static uint32_t read_als_adc_ch2_value(struct ltr506_data *ltr506)
+{
+	int ret;
+	uint32_t value;
+	uint8_t buffer[3];
+
+	buffer[0] = LTR506_ALS_DATA_CH2_0;
+
+	/* read data bytes from data regs */
+	ret = I2C_Read(buffer, sizeof(buffer));
+	if (ret < 0) {
+		dev_err(&ltr506->i2c_client->dev, "%s Unable to read als adc ch2 values\n", __func__);
+		return 0;
+	}
+
+	value = ((uint32_t)buffer[2] << 12) | ((uint32_t)buffer[1] << 4) | (uint32_t)(buffer[0] >> 4);
+	return value;
+}
+
 
 /* Read ADC Value */
 static uint16_t read_adc_value(struct ltr506_data *ltr506)
@@ -438,6 +459,27 @@ static void report_als_input_event(struct ltr506_data *ltr506)
 		adc_value = read_adc_value(ltr506);
 	}
 
+#define ALS_ADC_DEBUG
+#ifdef ALS_ADC_DEBUG
+	if (1) {
+		// If adc_value is read as zero, re-read to ensure
+		// that it is in fact zero and not an artifact of a a misread to
+		// the device.
+		if (adc_value == 0) {
+			adc_value = read_adc_value(ltr506);
+			dev_info(&ltr506->i2c_client->dev, "%s Re-reading zero adc value new adc_value:%d\n",
+			         __func__, adc_value);
+		}
+
+		// Read the raw channel values to see how the value has
+		// changed.
+		uint32_t adc_value_ch1 = read_als_adc_ch1_value(ltr506);
+		uint32_t adc_value_ch2 = read_als_adc_ch2_value(ltr506);
+		dev_info(&ltr506->i2c_client->dev, "%s adc_value:%d ch1:%d ch2:%d\n",
+		         __func__, adc_value, adc_value_ch1, adc_value_ch2);
+	}
+#endif
+
 	input_report_abs(ltr506->als_input_dev, ABS_MISC, adc_value);
 	input_sync(ltr506->als_input_dev);
 
@@ -504,13 +546,22 @@ static void ltr506_schedwork(struct work_struct *work)
 		// be set occasionally and we miss data.
 		// newdata & 0x01
 		if (interrupt_stat & 0x02) {
+			dev_err(&ltr506->i2c_client->dev,
+			        "%s Unexpected prox val received\n",
+			        __func__);
 			report_ps_input_event(ltr506);
 		}
 		// TODO(cmanton) Ignore newdata flag since it seems to only
 		// be set occasionally and we miss data.
 		// newdata & 0x04
 		if (interrupt_stat & 0x08) {
-			report_als_input_event(ltr506);
+			if (!(newdata & 0x04)) {
+				dev_err(&ltr506->i2c_client->dev,
+				        "%s New data for als not set newdata:0x%02x\n",
+				        __func__, newdata);
+			} else {
+				report_als_input_event(ltr506);
+			}
 		}
 	}
 }
@@ -1681,12 +1732,6 @@ static int ltr506_setup(struct ltr506_data *ltr506)
 	ret = _ltr506_set_bit(ltr506->i2c_client, SET_BIT, LTR506_ALS_CONTR, ALS_SW_RESET);
 	if (ret < 0) {
 		dev_err(&ltr506->i2c_client->dev, "%s: ALS reset fail...\n", __func__);
-		goto err_out1;
-	}
-
-	ret = _ltr506_set_bit(ltr506->i2c_client, SET_BIT, LTR506_ALS_CONTR, PS_SW_RESET);
-	if (ret < 0) {
-		dev_err(&ltr506->i2c_client->dev, "%s: PS reset fail...\n", __func__);
 		goto err_out1;
 	}
 
