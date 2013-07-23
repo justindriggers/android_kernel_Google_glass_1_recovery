@@ -35,6 +35,8 @@
 #include <linux/i2c.h>
 #include <linux/slab.h>
 #include <asm/unaligned.h>
+#include <linux/switch.h>
+#include <linux/interrupt.h>
 
 #include <linux/power/bq27x00_battery.h>
 
@@ -53,6 +55,8 @@
 #define INVALID_REG_ADDR		0xFF
 
 #define DEBUG_1HZ_COUNT			15
+
+#define SYSDOWN_BIT             (1<<1)
 
 static char debug_1hz_buffer[500] = {0,};
 static char subclass_buffer[500] = {0,};
@@ -271,6 +275,9 @@ struct bq27x00_device_info {
 	u8 *regs;
 	int fw_ver;
 	int df_ver;
+
+	struct switch_dev sdev;
+	struct wake_lock wake_lock;
 };
 
 static enum power_supply_property bq27x00_battery_props[] = {
@@ -471,6 +478,18 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 	struct timespec ts;
 
 	cache.flags = bq27x00_read(di, BQ27x00_REG_FLAGS, false);
+
+	if (cache.flags & SYSDOWN_BIT) {
+		dev_warn(di->dev, "detected SYSDOWN condition, pulsing poweroff switch\n");
+		wake_lock(&di->wake_lock);
+		switch_set_state(&di->sdev, 0);
+		switch_set_state(&di->sdev, 1);
+	} else {
+		dev_warn(di->dev, "SYSDOWN condition not detected\n");
+		switch_set_state(&di->sdev, 0);
+		wake_unlock(&di->wake_lock);
+	}
+
 	if (cache.flags >= 0) {
 		getnstimeofday(&ts);
 		cache.timestamp = ts;
@@ -1529,6 +1548,18 @@ static ssize_t show_dump_partial_data_flash(struct device *dev,
 	return count;
 }
 
+static irqreturn_t soc_int_irq_threaded_handler(int irq, void *arg)
+{
+	struct bq27x00_device_info *di = arg;
+
+	dev_warn(di->dev, "soc_int\n");
+
+	/* the actual SysDown event is processed in the normal update path */
+	bq27x00_update(di);
+
+	return IRQ_HANDLED;
+}
+
 static ssize_t show_dump_data_flash(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -1702,10 +1733,30 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 
 	bq27x00_reset_registers(di);
 
+	wake_lock_init(&di->wake_lock, WAKE_LOCK_SUSPEND, "battery_wake_lock");
+
+	/* use switch dev reporting to tell userspace to poweroff gracefully */
+	di->sdev.name = "poweroff";
+	retval = switch_dev_register(&di->sdev);
+	if (retval) {
+		dev_err(&client->dev, "error registering switch device: %d\n", retval);
+		goto batt_failed_3;
+	}
+
 	if (bq27x00_powersupply_init(di))
 		goto batt_failed_3;
 
 	i2c_set_clientdata(client, di);
+
+	if (pdata->soc_int_irq >= 0) {
+		retval = request_threaded_irq(pdata->soc_int_irq, NULL,
+				soc_int_irq_threaded_handler, IRQF_TRIGGER_FALLING | IRQF_ONESHOT, "soc_int_irq", di);
+
+		if (retval) {
+			dev_err(&client->dev, "failed to request threaded irq for soc_int: %d\n", retval);
+			goto batt_failed_3;
+		}
+	}
 
 	retval = sysfs_create_group(&client->dev.kobj, &bq27x00_attr_group);
 	if (retval)
@@ -1725,6 +1776,7 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	return 0;
 
 batt_failed_3:
+	wake_lock_destroy(&di->wake_lock);
 	kfree(di);
 batt_failed_2:
 	kfree(name);
@@ -1747,6 +1799,9 @@ static int bq27x00_battery_remove(struct i2c_client *client)
 	mutex_lock(&battery_mutex);
 	idr_remove(&battery_id, di->id);
 	mutex_unlock(&battery_mutex);
+
+	switch_dev_unregister(&di->sdev);
+	wake_lock_destroy(&di->wake_lock);
 
 	kfree(di);
 

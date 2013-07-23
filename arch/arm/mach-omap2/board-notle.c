@@ -1479,7 +1479,10 @@ static int notle_translate_temp(int temperature)
 }
 
 /* Gas gauge board specific configuration filled in at board init */
-static struct bq27x00_platform_data notle_gasgauge_platform_data;
+static struct bq27x00_platform_data notle_gasgauge_platform_data = {
+	.soc_int_irq = -1,
+	.bat_low_irq = -1,
+};
 
 static struct i2c_board_info __initdata notle_i2c_1_boardinfo[] = {
 #ifdef CONFIG_BATTERY_BQ27x00
@@ -1735,71 +1738,125 @@ static void __init notle_i2c_irq_fixup(void)
     }
 }
 
+/* BQ27520 is on I2C1 with the PMIC; this init needs to happen before that bus is initialized. */
+static int __init notle_bq27520_init(void)
+{
+	int soc_int_gpio, soc_int_irq;
+	int bat_low_gpio, bat_low_irq;
+	int res;
+
+	soc_int_gpio = notle_get_gpio(GPIO_SOC_INT_INDEX);
+	bat_low_gpio = notle_get_gpio(GPIO_BAT_LOW_INDEX);
+
+	res = gpio_request_one(soc_int_gpio, GPIOF_IN, "soc_int_n");
+	if (res) {
+		pr_err("%s: Failed to get soc_int gpio: %d\n", __func__, res);
+		goto error;
+	}
+
+	soc_int_irq = gpio_to_irq(soc_int_gpio);
+
+	res = irq_set_irq_wake(soc_int_irq, 1);
+	if (res) {
+		pr_err("%s: Failed to set irq wake for soc_int: %d\n", __func__, res);
+		goto error;
+	}
+
+	res = gpio_request_one(bat_low_gpio, GPIOF_IN, "bat_low_n");
+	if (res) {
+		pr_err("%s: Failed to get bat_low gpio: %d\n", __func__, res);
+		goto error;
+	}
+
+	bat_low_irq = gpio_to_irq(bat_low_gpio);
+
+	res = irq_set_irq_wake(bat_low_irq, 1);
+	if (res) {
+		pr_err("%s: Failed to set irq wake for bat_low: %d\n", __func__, res);
+		goto error;
+	}
+
+	pr_warn("%s: soc_int_gpio=%d soc_int_irq=%d bat_low_gpio=%d bat_low_irq=%d\n",
+			__func__, soc_int_gpio, soc_int_irq, bat_low_gpio, bat_low_irq);
+
+	notle_gasgauge_platform_data.soc_int_irq = soc_int_irq;
+	notle_gasgauge_platform_data.bat_low_irq = bat_low_irq;
+
+	return 0;
+
+error:
+	return res;
+}
+
 static int __init notle_i2c_init(void)
 {
-        omap_i2c_hwspinlock_init(1, 0, &notle_i2c_1_bus_pdata);
-        omap_i2c_hwspinlock_init(2, 1, &notle_i2c_2_bus_pdata);
-        omap_i2c_hwspinlock_init(3, 2, &notle_i2c_3_bus_pdata);
-        omap_i2c_hwspinlock_init(4, 3, &notle_i2c_4_bus_pdata);
+	omap_i2c_hwspinlock_init(1, 0, &notle_i2c_1_bus_pdata);
+	omap_i2c_hwspinlock_init(2, 1, &notle_i2c_2_bus_pdata);
+	omap_i2c_hwspinlock_init(3, 2, &notle_i2c_3_bus_pdata);
+	omap_i2c_hwspinlock_init(4, 3, &notle_i2c_4_bus_pdata);
 
-        omap_register_i2c_bus_board_data(1, &notle_i2c_1_bus_pdata);
-        omap_register_i2c_bus_board_data(2, &notle_i2c_2_bus_pdata);
-        omap_register_i2c_bus_board_data(3, &notle_i2c_3_bus_pdata);
-        omap_register_i2c_bus_board_data(4, &notle_i2c_4_bus_pdata);
+	omap_register_i2c_bus_board_data(1, &notle_i2c_1_bus_pdata);
+	omap_register_i2c_bus_board_data(2, &notle_i2c_2_bus_pdata);
+	omap_register_i2c_bus_board_data(3, &notle_i2c_3_bus_pdata);
+	omap_register_i2c_bus_board_data(4, &notle_i2c_4_bus_pdata);
 
-		/* setup the charger/battery platform data based on board revision */
-		switch (NOTLE_VERSION) {
-			case V1_EVT1:
-				notle_charger_data.supplied_to = notle_charger_supplicants_evt1;
-				notle_charger_data.num_supplicants =
-					ARRAY_SIZE(notle_charger_supplicants_evt1);
+	/* setup the charger/battery platform data based on board revision */
+	switch (NOTLE_VERSION) {
+		case V1_EVT1:
+			notle_charger_data.supplied_to = notle_charger_supplicants_evt1;
+			notle_charger_data.num_supplicants =
+				ARRAY_SIZE(notle_charger_supplicants_evt1);
 
-				/* EVT1 uses the PMIC gas gauge to poorly monitory the state of charge */
-				notle_twldata.battery = &notle_battery_data;
-				break;
+			/* EVT1 uses the PMIC gas gauge to poorly monitory the state of charge */
+			notle_twldata.battery = &notle_battery_data;
+			break;
 
-			case V1_EVT2:
-				notle_gasgauge_platform_data.translate_temp = notle_translate_temp;
+		case V1_EVT2:
+			notle_bq27520_init();
 
-				notle_charger_data.supplied_to = notle_charger_supplicants_evt2;
-				notle_charger_data.num_supplicants =
-					ARRAY_SIZE(notle_charger_supplicants_evt2);
-
-				/* gas gauge is on i2c1, which is registered in the pmic init */
-				i2c_register_board_info(1, notle_i2c_1_boardinfo,
-						ARRAY_SIZE(notle_i2c_1_boardinfo));
-				break;
-
-                        case V1_EVT3:
-                        case V1_DVT1:
-                        case V1_5_PROTO:
-                        default:
-				notle_gasgauge_platform_data.translate_temp = NULL;
+			notle_gasgauge_platform_data.translate_temp = notle_translate_temp;
 
 				notle_charger_data.supplied_to = notle_charger_supplicants_evt2;
-				notle_charger_data.num_supplicants =
-					ARRAY_SIZE(notle_charger_supplicants_evt2);
+			notle_charger_data.num_supplicants =
+				ARRAY_SIZE(notle_charger_supplicants_evt2);
 
-				/* gas gauge is on i2c1, which is registered in the pmic init */
-				i2c_register_board_info(1, notle_i2c_1_boardinfo,
-						ARRAY_SIZE(notle_i2c_1_boardinfo));
-				break;
+			/* gas gauge is on i2c1, which is registered in the pmic init */
+			i2c_register_board_info(1, notle_i2c_1_boardinfo,
+					ARRAY_SIZE(notle_i2c_1_boardinfo));
+			break;
 
-		}
+		case V1_EVT3:
+		case V1_DVT1:
+		case V1_5_PROTO:
+		default:
+			notle_bq27520_init();
 
-        if (!notle_version_supported()) {
-            pr_err("Unrecognized Notle version: %i\n", NOTLE_VERSION);
-            return -1;
-        }
+			notle_gasgauge_platform_data.translate_temp = NULL;
 
-        omap4_pmic_init("twl6030", &notle_twldata);
-        notle_i2c_irq_fixup();
-        omap_register_i2c_bus(2, 400, NULL, 0);
-        omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
-                        ARRAY_SIZE(notle_i2c_3_boardinfo));
-        omap_register_i2c_bus(4, 400, notle_i2c_4_boardinfo,
-                        ARRAY_SIZE(notle_i2c_4_boardinfo));
-        return 0;
+			notle_charger_data.supplied_to = notle_charger_supplicants_evt2;
+			notle_charger_data.num_supplicants =
+				ARRAY_SIZE(notle_charger_supplicants_evt2);
+
+			/* gas gauge is on i2c1, which is registered in the pmic init */
+			i2c_register_board_info(1, notle_i2c_1_boardinfo,
+					ARRAY_SIZE(notle_i2c_1_boardinfo));
+			break;
+
+	}
+
+	if (!notle_version_supported()) {
+		pr_err("Unrecognized Notle version: %i\n", NOTLE_VERSION);
+		return -1;
+	}
+
+	omap4_pmic_init("twl6030", &notle_twldata);
+	notle_i2c_irq_fixup();
+	omap_register_i2c_bus(2, 400, NULL, 0);
+	omap_register_i2c_bus(3, 400, notle_i2c_3_boardinfo,
+			ARRAY_SIZE(notle_i2c_3_boardinfo));
+	omap_register_i2c_bus(4, 400, notle_i2c_4_boardinfo,
+			ARRAY_SIZE(notle_i2c_4_boardinfo));
+	return 0;
 }
 
 #ifdef CONFIG_OMAP_MUX
