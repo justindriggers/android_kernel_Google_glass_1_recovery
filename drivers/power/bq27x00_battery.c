@@ -1528,7 +1528,9 @@ static ssize_t show_dump_partial_data_flash(struct device *dev,
 	mutex_lock(&di->lock);
 
 	if (di->partial_df.timestamp.tv_sec != 0) {
-		count = sprintf(buf, "%ld.%ld\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
+		count = sprintf(buf, "%d,%d\n%ld.%ld\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
+			di->fw_ver,
+			di->df_ver,
 			di->partial_df.timestamp.tv_sec,
 			di->partial_df.timestamp.tv_nsec/100000000,
 			di->partial_df.data_ram,
