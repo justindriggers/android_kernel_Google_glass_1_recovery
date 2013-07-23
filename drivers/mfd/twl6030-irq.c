@@ -271,6 +271,8 @@ static irqreturn_t handle_twl6030_vlow(int irq, void *unused)
 
 #if 1 /* temporary */
 	pr_err("%s: disabling BAT_VLOW interrupt\n", __func__);
+
+	twl6030_interrupt_mask(VLOW_INT_MASK, REG_INT_MSK_STS_A);
 	disable_irq_nosync(twl6030_irq_base + TWL_VLOW_INTR_OFFSET);
 	WARN_ON(1);
 #else
