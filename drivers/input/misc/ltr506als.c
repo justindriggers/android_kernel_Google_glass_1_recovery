@@ -459,27 +459,6 @@ static void report_als_input_event(struct ltr506_data *ltr506)
 		adc_value = read_adc_value(ltr506);
 	}
 
-#define ALS_ADC_DEBUG
-#ifdef ALS_ADC_DEBUG
-	if (1) {
-		// If adc_value is read as zero, re-read to ensure
-		// that it is in fact zero and not an artifact of a a misread to
-		// the device.
-		if (adc_value == 0) {
-			adc_value = read_adc_value(ltr506);
-			dev_info(&ltr506->i2c_client->dev, "%s Re-reading zero adc value new adc_value:%d\n",
-			         __func__, adc_value);
-		}
-
-		// Read the raw channel values to see how the value has
-		// changed.
-		uint32_t adc_value_ch1 = read_als_adc_ch1_value(ltr506);
-		uint32_t adc_value_ch2 = read_als_adc_ch2_value(ltr506);
-		dev_info(&ltr506->i2c_client->dev, "%s adc_value:%d ch1:%d ch2:%d\n",
-		         __func__, adc_value, adc_value_ch1, adc_value_ch2);
-	}
-#endif
-
 	input_report_abs(ltr506->als_input_dev, ABS_MISC, adc_value);
 	input_sync(ltr506->als_input_dev);
 
