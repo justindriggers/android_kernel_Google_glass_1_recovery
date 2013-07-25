@@ -1778,7 +1778,8 @@ static int ltr506_setup(struct ltr506_data *ltr506)
 	dev_dbg(&ltr506->i2c_client->dev, "%s: Set ltr506 gains\n", __func__);
 
 	/* Set the ALS measurement rate and resolution */
-	als_meas_rate_setup(ltr506);
+	/* NOTE(CMM) This apparently causes instability in the part. */
+	/* als_meas_rate_setup(ltr506); */
 
 	ret = ps_led_setup(ltr506);
 	if (ret < 0) {
