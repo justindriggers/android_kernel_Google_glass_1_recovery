@@ -1069,6 +1069,21 @@ static struct miscdevice twl6030_gpadc_device = {
 	.fops = &twl6030_gpadc_fileops
 };
 
+inline static s8 trim_code_convert(s8 v)
+{
+	const int m = (v&0x7e) >> 1;
+	const int s = v&1;
+
+	/*
+	 * TRM documents (from 2011) the format as sign[bit 0]/magnitude[bits 6..1],
+	 * however Texas Instruments assures us that the format of the TRIM registers
+	 * is 7-bit 2's complement but with the bits rotated so that the MSB is in bit 0!
+	 * Experimentally this interpretation give the most plausible results.
+	 */
+	const int decoded = (s8)(s ? (0xc0 | m) : m);
+	return decoded;
+}
+
 static int twl6030_calibration(void)
 {
 	s8 delta_error1 = 0, delta_error2 = 0;
@@ -1077,6 +1092,7 @@ static int twl6030_calibration(void)
 	s32 offset_error;
 	u8 index;
 	int ret;
+        int gpadc_ctrl_val = 0;
 
 	for (index = 0; index < TWL6030_GPADC_MAX_CHANNELS; index++) {
 		if (~calibration_bit_map & (1 << index))
@@ -1092,9 +1108,9 @@ static int twl6030_calibration(void)
 		if (ret < 0)
 			return ret;
 
-		/* convert 7 bit to 8 bit signed number */
-		delta_error1 = ((s8)(delta_error1 << 1) >> 1);
-		delta_error2 = ((s8)(delta_error2 << 1) >> 1);
+		/* convert signed magnitiude to 2's complement */
+		delta_error1 = trim_code_convert(delta_error1);
+		delta_error2 = trim_code_convert(delta_error2);
 		ideal_code1 = twl6030_ideal[index].code1;
 		ideal_code2 = twl6030_ideal[index].code2;
 
@@ -1105,6 +1121,17 @@ static int twl6030_calibration(void)
 		twl6030_calib_tbl[index].gain_error = gain_error_1 + SCALE;
 		twl6030_calib_tbl[index].offset_error = offset_error;
 	}
+
+        // set channel 7 scaler to be consistent with constants in twl6030_ideal_code
+	ret = twl_i2c_read_u8(TWL_MODULE_MADC, &gpadc_ctrl_val, TWL6030_GPADC_CTRL);
+	if (ret < 0)
+		return ret;
+
+	gpadc_ctrl_val |= TWL6030_GPADC_CTRL_SCALER_DIV4;
+	ret = twl_i2c_write_u8(TWL_MODULE_MADC, gpadc_ctrl_val, TWL6030_GPADC_CTRL);
+
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }
