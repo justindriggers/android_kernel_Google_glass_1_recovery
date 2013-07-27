@@ -615,10 +615,11 @@ static const struct file_operations debug_client_fops = {
 static struct ion_client *ion_client_lookup(struct ion_device *dev,
 					    struct task_struct *task)
 {
-	struct rb_node *n = dev->user_clients.rb_node;
+	struct rb_node *n;
 	struct ion_client *client;
 
 	mutex_lock(&dev->lock);
+	n = dev->user_clients.rb_node;
 	while (n) {
 		client = rb_entry(n, struct ion_client, node);
 		if (task == client->task) {
