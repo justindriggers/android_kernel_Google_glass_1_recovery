@@ -1551,7 +1551,7 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 	 * '110: 8 bit
 	 * '111: 4 bit
 	 */
-	.pfd_als_resolution = 4,
+	.pfd_als_resolution = 0,
 
 	/* ALS measurement repeat rate
 	 * '000:  100ms
@@ -1565,8 +1565,8 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 	 * '00: 1 lux/count (1-64k lux)
 	 * '01: 0.5 lux/count (0.5-32k lux)
 	 * '10: 0.01 lux/count (0.02-640 lux)
-	 * '11: 0.005 lux/count (0.01-32.0 lux) */
-	.pfd_als_gain = 2,
+	 * '11: 0.005 lux/count (0.01-320 lux) */
+	.pfd_als_gain = 3,
 
 	/* Disable ps on suspend flag */
 	.pfd_disable_ps_on_suspend = 0,
