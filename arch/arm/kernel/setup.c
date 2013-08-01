@@ -471,6 +471,16 @@ int __init arm_add_memory(phys_addr_t start, unsigned long size)
 	 * Size is appropriately rounded down, start is rounded up.
 	 */
 	size -= start & ~PAGE_MASK;
+
+	/*
+	 * Work around the size issue by taking off one page such that
+	 * 1024 or 2048 Meg will work for the ATAG_MEM use case.
+	 * Take out 1 meg such that it is 0xFFF00000 aligned for ducati.
+	 */
+
+	if (size > (PAGE_SIZE<<8))
+	    size -= (PAGE_SIZE<<8);
+
 	bank->start = PAGE_ALIGN(start);
 	bank->size  = size & PAGE_MASK;
 

@@ -232,6 +232,15 @@ static int __init omap_rproc_init(void)
 					"tesla-dsp.512MB.bin";
 		}
 
+		if (omap_total_ram_size() > SZ_1G) {
+			if (!strcmp("ipu", omap4_rproc_data[i].name))
+				omap4_rproc_data[i].firmware =
+					"ducati-m3.2GB.bin";
+			else if (!strcmp("dsp", omap4_rproc_data[i].name))
+				omap4_rproc_data[i].firmware =
+					"tesla-dsp.2GB.bin";
+		}
+
 		oh[0] = omap_hwmod_lookup(oh_name);
 
 		if (!oh[0]) {

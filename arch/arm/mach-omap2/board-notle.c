@@ -69,6 +69,7 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
+#include <asm/setup.h>
 
 #include <plat/android-display.h>
 #include <plat/board.h>
@@ -2137,6 +2138,18 @@ static __initdata struct emif_device_details emif_devices_evt2 = {
         .cs0_device = &lpddr2_elpida_4G_S4_dev,
 };
 
+static __initdata struct emif_device_details emif_devices_evt3_2gb = {
+        .cs0_device = &lpddr2_elpida_4G_S4_dev,
+        .cs1_device = &lpddr2_elpida_4G_S4_dev
+};
+
+static u32 __get_notle_memsize()
+{
+    // Check the DMM Register to figure out if this is 1 GB or 2 GB device
+    // bit 22:20 specs the sys size.
+    u32 sys_size = (__raw_readl(OMAP44XX_DMM_VIRT + DMM_LISA_MAP__0) >> 20) & 0x7;
+    return 2048 >> (7-sys_size);
+}
 
 static void __init notle_init(void)
 {
@@ -2164,8 +2177,19 @@ static void __init notle_init(void)
             //and before you set it to input
             omap4_ctrl_wk_pad_writel(OMAP4_USIM_PWRDNZ_MASK,
                     OMAP4_CTRL_MODULE_PAD_WKUP_CONTROL_USIMIO);
-	} else {
-            omap_emif_setup_device_details(&emif_devices_evt2, &emif_devices_evt2);
+        } else {
+
+            u32 mem_size_mb = __get_notle_memsize();
+            printk("Notle Board Ram Size = %d MB\n", mem_size_mb);
+
+            if (notle_version_after(V1_EVT2) && (mem_size_mb==2048))
+            {
+                omap_emif_setup_device_details(&emif_devices_evt3_2gb, &emif_devices_evt3_2gb);
+            }
+            else {
+                omap_emif_setup_device_details(&emif_devices_evt2, &emif_devices_evt2);
+            }
+
             omap4_mux_init(evt2_board_mux, evt2_board_wkup_mux, package);
 
             // Additional mux/pad settings
