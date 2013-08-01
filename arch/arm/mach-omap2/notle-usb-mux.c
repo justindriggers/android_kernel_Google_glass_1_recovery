@@ -66,6 +66,8 @@ struct usb_mux_device_info {
 
 	bool force_usb;
 	bool usb_online;
+	bool tty_priority;
+	bool factorycable_bootmode;
 
 	enum usb_mux_mode cur_mode;
 	enum usb_mux_mode req_mode;
@@ -95,7 +97,8 @@ static struct usb_mux_device_info *usb_mux_di;
  * fastboot if factory cable is plugged in.  If it is
  * set then don't reboot.
  */
-static bool notle_factorycable_bootmode = 0;
+static bool __initdata notle_factorycable_bootmode = false;
+static bool __initdata tty_priority = false;
 
 /* forward decl prototypes */
 static int voltage_id(int, int);
@@ -136,7 +139,7 @@ static void sync_usb_mux_mode(struct usb_mux_device_info *di)
 
 	/* check for factory cable */
 	id_voltage = voltage_id(0, ID_READ_DELAY_NONE);
-	if (notle_factorycable_bootmode) {
+	if (di->factorycable_bootmode) {
 		/* schedule a shutdown if factory cable removed */
 		if (id_voltage < FACTORY_CABLE_VOLTAGE_THRESHOLD) {
 			schedule_delayed_work(&di->shutdown_work, msecs_to_jiffies(CABLE_SHUTDOWN_INTERVAL));
@@ -147,10 +150,13 @@ static void sync_usb_mux_mode(struct usb_mux_device_info *di)
 		}
 	}
 
-	if (di->force_usb || di->usb_online)
+	if (di->force_usb || di->usb_online) {
 		mode = USB_MUX_MODE_USB;
-	else
+	} else if (di->tty_priority) {
+		mode = USB_MUX_MODE_TTY;
+	} else {
 		mode = di->req_mode;
+	}
 
 	dev_warn(di->dev, "Setting MUX mode to %s\n", str_for_mode(mode));
 
@@ -592,6 +598,9 @@ static int usb_mux_probe(struct platform_device *pdev)
 	di->gpio_cb0 = pdata->gpio_cb0;
 	di->gpio_cb1 = pdata->gpio_cb1;
 
+	di->tty_priority = tty_priority;
+	di->factorycable_bootmode = notle_factorycable_bootmode;
+
 	ret = gpio_request_one(pdata->gpio_cb0, pdata->gpio_cb0_flags, pdata->gpio_cb0_label);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to get usb_mux_cb0 gpio_%d\n", pdata->gpio_cb0);
@@ -691,11 +700,21 @@ static int __init notle_check_factorycable(char *str)
 	if (!str)
 		return 0;
 	if (!strcmp(str,"factorycable"))
-		notle_factorycable_bootmode = 1;
+		notle_factorycable_bootmode = true;
+	return 1;
+}
+
+static int __init usb_mux_tty_priority(char *str)
+{
+	if (!str)
+		return 0;
+	if (!strcmp(str,"true"))
+		tty_priority = true;
 	return 1;
 }
 
 __setup("androidboot.mode=", notle_check_factorycable);
+__setup("usb_mux.tty_priority=", usb_mux_tty_priority);
 
 static struct platform_driver usb_mux_driver = {
 	.driver = {
