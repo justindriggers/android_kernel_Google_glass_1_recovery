@@ -114,6 +114,9 @@ struct ltr506_data {
 
 struct ltr506_data *sensor_info;
 
+static int als_enable(struct ltr506_data *ltr506);
+static int als_disable(struct ltr506_data *ltr506);
+
 /* I2C Read */
 static int I2C_Read(char *rxData,
                     int length)
@@ -826,8 +829,14 @@ static int als_enable(struct ltr506_data *ltr506)
 	int rc = 0;
 
 	if (ltr506->als_enable_flag != 0) {
-		dev_err(&ltr506->i2c_client->dev, "%s: ALS already enabled...\n", __func__);
-		return rc;
+		dev_err(&ltr506->i2c_client->dev, "%s: ALS already enabled...disabling first\n", __func__);
+		rc = als_disable(ltr506);
+		if (rc) {
+			dev_err(&ltr506->i2c_client->dev, "%s: Unable to disable ALS\n", __func__);
+			return rc;
+		}
+		/* Wait some amount of time for the ALS to disable. */
+		msleep(30);
 	}
 
 	/* NOTE(CMM) This part requires a workaround to enable the PS in order for the
@@ -1856,6 +1865,24 @@ static void ltr506_late_resume(struct early_suspend *h)
 	if (ltr506->disable_ps_on_suspend && ltr506->ps_suspend_enable_flag) {
 		ret += ps_enable(ltr506);
 		ltr506->ps_suspend_enable_flag = 0;
+	}
+
+	/* Work around to force new values upon resume through the input
+	   subsystem when there is literally no entropy left in our bits. */
+	{
+		uint16_t adc_value;
+		adc_value = read_adc_value(ltr506);
+		if (adc_value == LTR506_ALS_MIN_MEASURE_VAL) {
+			/* Special case to force new value through input
+			   subsystem upon resume. */
+			adc_value = LTR506_ALS_MIN_MEASURE_VAL+1;
+			dev_info(&ltr506->i2c_client->dev,
+			         "%s Detected darkness synthesizing value %d\n",
+			         __func__, adc_value);
+			input_report_abs(ltr506->als_input_dev, ABS_MISC,
+			                 adc_value);
+			input_sync(ltr506->als_input_dev);
+		}
 	}
 
 	if (ret) {

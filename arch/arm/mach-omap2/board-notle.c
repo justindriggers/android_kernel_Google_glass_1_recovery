@@ -1537,7 +1537,7 @@ static struct ltr506_platform_data notle_ltr506als_data = {
 	.pfd_gpio_int_wake_dev = 0,
 
 	/* Disable als on suspend flag */
-	.pfd_disable_als_on_suspend = 0,
+	.pfd_disable_als_on_suspend = 1,
 
 	/* ALS enable filtering interrupts
 	 * by suppressing interrupts when measured value
