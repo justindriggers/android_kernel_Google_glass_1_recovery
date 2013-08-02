@@ -98,7 +98,11 @@ static struct usb_mux_device_info *usb_mux_di;
  * set then don't reboot.
  */
 static bool __initdata notle_factorycable_bootmode = false;
+#ifdef CONFIG_FIQ_DEBUGGER_CONSOLE_DEFAULT_ENABLE
+static bool __initdata tty_priority = true;
+#else
 static bool __initdata tty_priority = false;
+#endif
 
 /* forward decl prototypes */
 static int voltage_id(int, int);
