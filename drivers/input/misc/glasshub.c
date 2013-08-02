@@ -37,7 +37,7 @@
 
 /* driver name/version */
 #define DEVICE_NAME			"glasshub"
-#define DRIVER_VERSION			"0.18"
+#define DRIVER_VERSION			"0.19"
 
 /* minimum MCU firmware version required for this driver */
 #define MINIMUM_MCU_VERSION		((1 << 8) | 1)
@@ -67,7 +67,7 @@
 #define REG_ENABLE_DON_DOFF		5
 #define REG_DON_DOFF			6
 #define REG_ENABLE_WINK			7
-#define REG_RESERVED			8
+#define REG_ACTIVITY_TIMEOUT		8
 #define REG_LED_DRIVE			9
 #define REG_ERROR_CODE			10
 #define REG_FLASH_DATA			11
@@ -80,14 +80,15 @@
 #define REG_AMBIENT_ENABLE		18
 #define REG_WINK_MIN			19
 #define REG_WINK_MAX			20
+#define REG_ACTIVITY_GUARDBAND		21
 
 /* virtual registers */
 #define REG_STATUS_READ_ONLY		64
 
 /* 16-bit registers */
 #define REG16_DETECTOR_BIAS		0x80
-#define REG16_DON_DOFF_BIAS		0x81
-#define REG16_DON_DOFF_EDGE_DETECTOR	0x82
+#define REG16_DOFF_THRESHOLD		0x81
+#define REG16_DON_THRESHOLD		0x82
 #define REG16_PROX_RAW			0x83
 #define REG16_PROX_DATA			0x84
 #define REG16_ADDRESS			0x85
@@ -96,6 +97,8 @@
 #define REG16_FRAME_COUNT		0x88
 #define REG16_DEBUG			0x89
 #define REG16_TIMER_COUNT		0x8a
+#define REG16_ACTIVITY_THRESHOLD	0x8b
+#define REG16_DON_MAX_THRESHOLD		0x8c
 
 /* bootloader commands */
 #define CMD_APP_VERSION			0xf6
@@ -897,32 +900,86 @@ static ssize_t ambient_enable_store(struct device *dev, struct device_attribute 
 	return store_reg(dev, buf, count, REG_AMBIENT_ENABLE, 0, 1);
 }
 
-/* show don/doff bias value */
-static ssize_t don_doff_bias_show(struct device *dev, struct device_attribute *attr,
+/* show doff threshold value */
+static ssize_t doff_threshold_show(struct device *dev, struct device_attribute *attr,
 		char *buf)
 {
-	return show_reg(dev, buf, REG16_DON_DOFF_BIAS);
+	return show_reg(dev, buf, REG16_DOFF_THRESHOLD);
 }
 
-/* set don/doff bias value */
-static ssize_t don_doff_bias_store(struct device *dev, struct device_attribute *attr,
+/* set doff threshold value */
+static ssize_t doff_threshold_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG16_DON_DOFF_BIAS, 0, 10000);
+	return store_reg(dev, buf, count, REG16_DOFF_THRESHOLD, 0, 10000);
 }
 
-/* show don/doff edge detector value */
-static ssize_t don_doff_edge_detector_show(struct device *dev, struct device_attribute *attr,
+/* show don threshold value */
+static ssize_t don_threshold_show(struct device *dev, struct device_attribute *attr,
 		char *buf)
 {
-	return show_reg(dev, buf, REG16_DON_DOFF_EDGE_DETECTOR);
+	return show_reg(dev, buf, REG16_DON_THRESHOLD);
 }
 
-/* set don/doff edge detector value */
-static ssize_t don_doff_edge_detector_store(struct device *dev, struct device_attribute *attr,
+/* set don threshold value */
+static ssize_t don_threshold_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	return store_reg(dev, buf, count, REG16_DON_DOFF_EDGE_DETECTOR, 1, 10000);
+	return store_reg(dev, buf, count, REG16_DON_THRESHOLD, 1, 10000);
+}
+
+/* show don max threshold value */
+static ssize_t don_max_threshold_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	return show_reg(dev, buf, REG16_DON_MAX_THRESHOLD);
+}
+
+/* set don max threshold value */
+static ssize_t don_max_threshold_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	return store_reg(dev, buf, count, REG16_DON_MAX_THRESHOLD, 1, 10000);
+}
+
+/* show activity threshold value */
+static ssize_t activity_threshold_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	return show_reg(dev, buf, REG16_ACTIVITY_THRESHOLD);
+}
+
+/* set activity threshold value */
+static ssize_t activity_threshold_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	return store_reg(dev, buf, count, REG16_ACTIVITY_THRESHOLD, 1, 10000);
+}
+
+/* show activity guardband */
+static ssize_t activity_guardband_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show_reg(dev, buf, REG_ACTIVITY_GUARDBAND);
+}
+
+/* set activity guardband */
+static ssize_t activity_guardband_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	return store_reg(dev, buf, count, REG_ACTIVITY_GUARDBAND, 1, 255);
+}
+
+/* show activity timeout */
+static ssize_t activity_timeout_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show_reg(dev, buf, REG_ACTIVITY_TIMEOUT);
+}
+
+/* set activity timeout */
+static ssize_t activity_timeout_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	return store_reg(dev, buf, count, REG_ACTIVITY_TIMEOUT, 1, 255);
 }
 
 /* show IR LED drive value */
@@ -1914,8 +1971,12 @@ static DEVICE_ATTR(visible, DEV_MODE_RO, visible_show, NULL);
 static DEVICE_ATTR(ir, DEV_MODE_RO, ir_show, NULL);
 static DEVICE_ATTR(don_doff_enable, DEV_MODE_RW, don_doff_enable_show, don_doff_enable_store);
 static DEVICE_ATTR(don_doff, DEV_MODE_RO, don_doff_show, NULL);
-static DEVICE_ATTR(don_doff_bias, DEV_MODE_RW, don_doff_bias_show, don_doff_bias_store);
-static DEVICE_ATTR(don_doff_edge_detector, DEV_MODE_RW, don_doff_edge_detector_show, don_doff_edge_detector_store);
+static DEVICE_ATTR(doff_threshold, DEV_MODE_RW, doff_threshold_show, doff_threshold_store);
+static DEVICE_ATTR(don_threshold, DEV_MODE_RW, don_threshold_show, don_threshold_store);
+static DEVICE_ATTR(don_max_threshold, DEV_MODE_RW, don_max_threshold_show, don_max_threshold_store);
+static DEVICE_ATTR(activity_threshold, DEV_MODE_RW, activity_threshold_show, activity_threshold_store);
+static DEVICE_ATTR(activity_guardband, DEV_MODE_RW, activity_guardband_show, activity_guardband_store);
+static DEVICE_ATTR(activity_timeout, DEV_MODE_RW, activity_timeout_show, activity_timeout_store);
 static DEVICE_ATTR(led_drive, DEV_MODE_RW, led_drive_show, led_drive_store);
 static DEVICE_ATTR(calibrate, DEV_MODE_WO, NULL, calibrate_store);
 static DEVICE_ATTR(calibration_values, DEV_MODE_RO, calibration_values_show, NULL);
@@ -1952,8 +2013,12 @@ static struct attribute *attrs[] = {
 	&dev_attr_ambient_enable.attr,
 	&dev_attr_don_doff_enable.attr,
 	&dev_attr_don_doff.attr,
-	&dev_attr_don_doff_bias.attr,
-	&dev_attr_don_doff_edge_detector.attr,
+	&dev_attr_doff_threshold.attr,
+	&dev_attr_don_threshold.attr,
+	&dev_attr_don_max_threshold.attr,
+	&dev_attr_activity_threshold.attr,
+	&dev_attr_activity_guardband.attr,
+	&dev_attr_activity_timeout.attr,
 	&dev_attr_led_drive.attr,
 	&dev_attr_calibrate.attr,
 	&dev_attr_calibration_values.attr,
