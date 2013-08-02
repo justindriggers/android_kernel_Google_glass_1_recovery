@@ -4569,7 +4569,16 @@ static int omap_dispchw_probe(struct platform_device *pdev)
 	dev_dbg(&pdev->dev, "OMAP DISPC rev %d.%d\n",
 	       FLD_GET(rev, 7, 4), FLD_GET(rev, 3, 0));
 
+#ifndef CONFIG_FB_OMAP_BOOTLOADER_INIT
+	/*
+	 * In the case that the bootloader starts the splash screen,
+	 * we need a way to hold the dispc clock on before power
+	 * management kicks in. We are currently forcing dispc_runtime_get
+	 * to remain enabled.
+	 */
+
 	dispc_runtime_put();
+#endif
 
 	/* Configure vsync gpio to handle vsync dividing */
 	dispc.vsync_gpio = vsync_gpio;

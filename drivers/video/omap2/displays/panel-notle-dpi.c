@@ -1159,6 +1159,11 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
           goto err0;
         }
 
+        if(dssdev->skip_init) {
+          dssdev->skip_init = false;
+          return 0;
+        }
+
         if (panel_config->power_on_delay) {
           msleep(panel_config->power_on_delay);
         }

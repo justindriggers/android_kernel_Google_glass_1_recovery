@@ -1646,9 +1646,6 @@ static struct clk dss_sys_clk = {
 	.enable_reg	= OMAP4430_CM_DSS_DSS_CLKCTRL,
 	.enable_bit	= OMAP4430_OPTFCLKEN_SYS_CLK_SHIFT,
 	.clkdm_name	= "l3_dss_clkdm",
-#ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
-	.flags          = ENABLE_ON_INIT,
-#endif
 	.parent		= &syc_clk_div_ck,
 	.recalc		= &followparent_recalc,
 	.speculate	= &omap2_clksel_speculate,
@@ -1693,9 +1690,6 @@ static struct clk dss_fck = {
 	.enable_reg	= OMAP4430_CM_DSS_DSS_CLKCTRL,
 	.enable_bit	= OMAP4430_MODULEMODE_SWCTRL,
 	.clkdm_name	= "l3_dss_clkdm",
-#ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
-	.flags          = ENABLE_ON_INIT,
-#endif
 	.parent		= &l3_div_ck,
 	.recalc		= &followparent_recalc,
 	.speculate	= &omap2_clksel_speculate,

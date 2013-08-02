@@ -192,9 +192,24 @@ int omapdss_dpi_display_enable(struct omap_dss_device *dssdev)
 	if (r)
 		goto err_get_dss;
 
+#ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
+	/*
+	 * In the case that the bootloader starts the splash screen,
+	 * we need a way to hold the dispc clock on before power
+	 * management kicks in. We are currently forcing dispc_runtime_get
+	 * to be enabled in omap_dispchw_probe().
+	 * As a result, we will skip the dispc_runtime_get() here.
+	 */
+	if (!dssdev->skip_init) {
+		r = dispc_runtime_get();
+		if (r)
+			goto err_get_dispc;
+	}
+#else
 	r = dispc_runtime_get();
 	if (r)
 		goto err_get_dispc;
+#endif
 
 	dpi_basic_init(dssdev);
 
