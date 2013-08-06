@@ -115,7 +115,7 @@ typedef enum {
         V1_DVT1     = 4,
         V1_5_PROTO  = 5,
         SUPPORTED_FROM = V1_EVT1,
-        SUPPORTED_TO = V1_5_PROTO,
+        SUPPORTED_TO   = V1_5_PROTO,
 } notle_version;
 
 int notle_version_before( notle_version then );
