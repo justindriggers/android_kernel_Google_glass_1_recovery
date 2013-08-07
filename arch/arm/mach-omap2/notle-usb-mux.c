@@ -79,7 +79,6 @@ struct usb_mux_device_info {
 
 	struct workqueue_struct *wq;
 	struct work_struct work;
-	struct delayed_work shutdown_work;
 
 	/* for headset detection with Rid to control mux */
 	enum headset_jack_connection connected;
@@ -132,7 +131,6 @@ static const char *str_for_mode(enum usb_mux_mode mode)
  * Syncs the GPIO MUX control lines with the requested MUX mode.
  * If factory cable is plugged in then reset into fastboot unless we
  * booted with the factorycable_bootmode flag set.
- * In that special bootmode, schedule a shut down when cable unplugged.
  *
  * Call with di->lock mutex held.
  */
@@ -143,15 +141,8 @@ static void sync_usb_mux_mode(struct usb_mux_device_info *di)
 
 	/* check for factory cable */
 	id_voltage = voltage_id(0, ID_READ_DELAY_NONE);
-	if (di->factorycable_bootmode) {
-		/* schedule a shutdown if factory cable removed */
-		if (id_voltage < FACTORY_CABLE_VOLTAGE_THRESHOLD) {
-			schedule_delayed_work(&di->shutdown_work, msecs_to_jiffies(CABLE_SHUTDOWN_INTERVAL));
-		}
-	} else {
-		if (id_voltage > FACTORY_CABLE_VOLTAGE_THRESHOLD) {
-			kernel_restart("bootloader");
-		}
+	if (!di->factorycable_bootmode && id_voltage > FACTORY_CABLE_VOLTAGE_THRESHOLD) {
+		kernel_restart("bootloader");
 	}
 
 	if (di->force_usb || di->usb_online) {
@@ -271,11 +262,6 @@ static void usb_mux_work(struct work_struct *work)
 	mutex_lock(&di->lock);
 	sync_usb_mux_mode(di);
 	mutex_unlock(&di->lock);
-}
-
-static void usb_shutdown_work(struct work_struct *shutdown_work)
-{
-	kernel_power_off();
 }
 
 /*
@@ -628,7 +614,6 @@ static int usb_mux_probe(struct platform_device *pdev)
 
 	di->wq = create_freezable_workqueue(dev_name(&pdev->dev));
 	INIT_WORK(&di->work, usb_mux_work);
-	INIT_DELAYED_WORK(&di->shutdown_work, usb_shutdown_work);
 	INIT_DELAYED_WORK(&di->id_work, usb_id_work);
 
 	di->nb.notifier_call = usb_mux_usb_notifier_call;
