@@ -382,6 +382,7 @@ __v7_setup:
 	mov	r10, r12
 	mov	r12, #0x114			@ prep for SMC call to 0x114
 	dsb
+	.arch_extension sec
 	smc	#0
 	dsb
 	mov	r12, r10
