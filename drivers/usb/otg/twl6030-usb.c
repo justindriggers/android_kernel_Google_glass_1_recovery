@@ -316,9 +316,7 @@ static irqreturn_t twl6030_usb_irq(int irq, void *_twl)
 						TWL6030_MISC2);
 
 		regulator_enable(twl->usb3v3);
-		twl6030_phy_suspend(&twl->otg, 0);
 		charger_type = omap4_charger_detect();
-		twl6030_phy_suspend(&twl->otg, 1);
 		if ((charger_type == POWER_SUPPLY_TYPE_USB_CDP)
 				|| (charger_type == POWER_SUPPLY_TYPE_USB)) {
 
@@ -391,7 +389,8 @@ static irqreturn_t twl6030_usbotg_irq(int irq, void *_twl)
 		/* Program MISC2 register and set bit VUSB_IN_VBAT */
 		misc2_data = twl6030_readb(twl, TWL6030_MODULE_ID0,
 						TWL6030_MISC2);
-		misc2_data |= 0x10;
+		misc2_data |= (1<<4);
+		misc2_data &= ~(1<<3);
 		twl6030_writeb(twl, TWL6030_MODULE_ID0, misc2_data,
 						TWL6030_MISC2);
 		regulator_enable(twl->usb3v3);
@@ -465,7 +464,7 @@ static void otg_set_vbus_work(struct work_struct *data)
 	 * register. This enables boost mode.
 	 */
 	if (twl->vbus_enable)
-		twl6030_writeb(twl, TWL_MODULE_MAIN_CHARGE , 0x40,
+		twl6030_writeb(twl, TWL_MODULE_MAIN_CHARGE , OPA_MODE,
 						CHARGERUSB_CTRL1);
 	else
 		twl6030_writeb(twl, TWL_MODULE_MAIN_CHARGE , 0x00,

@@ -2271,6 +2271,7 @@ static int musb_bus_suspend(struct usb_hcd *hcd)
 {
 	struct musb	*musb = hcd_to_musb(hcd);
 	u8		devctl;
+	u8 power;
 
 	wake_unlock(&musb->musb_wakelock);
 
@@ -2288,6 +2289,17 @@ static int musb_bus_suspend(struct usb_hcd *hcd)
 		devctl = musb_readb(musb->mregs, MUSB_DEVCTL);
 		if ((devctl & MUSB_DEVCTL_VBUS) == MUSB_DEVCTL_VBUS)
 			musb->xceiv->state = OTG_STATE_A_WAIT_BCON;
+		break;
+	case OTG_STATE_A_HOST:
+		/* If device enumeration fails, we'll be put to sleep
+		   Poke the right bits to suspend the hub... */
+		power = musb_readb(musb->mregs, MUSB_POWER);
+		power |= MUSB_POWER_SUSPENDM;
+		musb_writeb(musb->mregs, MUSB_POWER, power);
+		musb->port1_status |= USB_PORT_STAT_SUSPEND;
+		musb->xceiv->state = OTG_STATE_A_SUSPEND;
+		musb->is_active = is_otg_enabled(musb)
+			&& musb->xceiv->host->b_hnp_enable;
 		break;
 	default:
 		break;

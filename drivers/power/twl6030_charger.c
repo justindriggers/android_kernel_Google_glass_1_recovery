@@ -395,6 +395,10 @@ static const int led_curve_inverse[] = {
 	0xfc,  0xfd,  0xfd,  0xfe,  0xfe,  0xff,
 };
 
+static bool otg_enabled(struct otg_transceiver* otg) {
+	return (otg->last_event == USB_EVENT_ID);
+}
+
 static int twl6030_get_pwm_level(void)
 {
 	u8 pwm = 0;
@@ -946,8 +950,8 @@ static int twl6030_usb_notifier_call(struct notifier_block *nb,
 			break;
 		case USB_EVENT_CHARGER:
 		case USB_EVENT_NONE:
-			break;
 		case USB_EVENT_ID:
+			break;
 		default:
 			return NOTIFY_OK;
 	}
@@ -969,8 +973,8 @@ static void twl6030_determine_charge_state(struct twl6030_charger_device_info *d
 	twl_i2c_read_u8(TWL6030_MODULE_CHARGER, &stat1, CONTROLLER_STAT1);
 
 	/* printk("battery: determine_charge_state() stat1=%02x int1=%02x\n", stat1, int1); */
-	
-	if (stat1 & VBUS_DET) {
+
+	if ((stat1 & VBUS_DET) && !otg_enabled(di->otg)) {
 		/* dedicated charger detected by PHY? */
 		if (di->usb_event == USB_EVENT_CHARGER)
 			newstate = STATE_AC;
@@ -1040,7 +1044,14 @@ static void twl6030_charge_fault_work(struct work_struct *work)
 	struct twl6030_charger_device_info *di =
 		container_of(work, struct twl6030_charger_device_info, charge_fault_work);
 
-	if (is_charging(di))
+	u8 usb_charge_sts1;
+
+	twl_i2c_read_u8(TWL6030_MODULE_CHARGER, &usb_charge_sts1,
+						CHARGERUSB_STATUS_INT1);
+
+	if (usb_charge_sts1 & (1<<2))
+		twl6030_stop_usb_charger(di);
+	else if (!(usb_charge_sts1 & (1<<2)) && is_charging(di))
 		twl6030_start_usb_charger(di, di->current_limit_mA);
 
 	msleep(10);

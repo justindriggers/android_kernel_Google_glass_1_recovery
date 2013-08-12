@@ -308,15 +308,13 @@ static int usb_mux_usb_notifier_call(struct notifier_block *nb,
 		case USB_EVENT_VBUS:
 		case USB_EVENT_ENUMERATED:
 		case USB_EVENT_CHARGER:
+		case USB_EVENT_ID:
 			di->usb_online = true;
 			break;
 
 		case USB_EVENT_NONE:
 			di->usb_online = false;
 			break;
-
-		case USB_EVENT_ID:
-			return NOTIFY_OK; // don't react to these yet
 	}
 
 	if (usb_online != di->usb_online)
@@ -354,7 +352,7 @@ static int voltage_id(int mode, int ms_delay)
 	int voltage;
 
 	mode |= TWL6030_USB_ID_CTRL_MEAS;
-	twl_i2c_write_u8(TWL_MODULE_USB, 0xFF, REG_USB_ID_CTRL_CLR);
+	twl_i2c_write_u8(TWL_MODULE_USB, ~(1<<2), REG_USB_ID_CTRL_CLR);
 	twl_i2c_write_u8(TWL_MODULE_USB, mode, REG_USB_ID_CTRL_SET);
 	if (ms_delay) {
 		msleep(ms_delay);
@@ -380,7 +378,7 @@ static int get_jack_device(struct usb_mux_device_info *di)
 	pu220_val = voltage_id(TWL6030_USB_ID_CTRL_PU_220K, ID_READ_DELAY_NONE);
 
 	/* Restore old values */
-	twl_i2c_write_u8(TWL_MODULE_USB, 0xFF, REG_USB_ID_CTRL_CLR);
+	twl_i2c_write_u8(TWL_MODULE_USB, ~(1<<2), REG_USB_ID_CTRL_CLR);
 	twl_i2c_write_u8(TWL_MODULE_USB, save_idctrl, REG_USB_ID_CTRL_SET);
 	twl_i2c_write_u8(TWL6030_MODULE_ID0, save_backup, REG_OTG_BACKUP);
 
@@ -512,7 +510,7 @@ static ssize_t show_id_allvoltages(struct device *dev, struct device_attribute *
 	src16upu220pd_val = voltage_id(TWL6030_USB_ID_CTRL_SRC_16U | TWL6030_USB_ID_CTRL_PU_220K | TWL6030_USB_ID_CTRL_GND_DRV, ID_READ_DELAY);
 
 	/* Restore old values */
-	twl_i2c_write_u8(TWL_MODULE_USB, 0xFF, REG_USB_ID_CTRL_CLR);
+	twl_i2c_write_u8(TWL_MODULE_USB, ~(1<<2), REG_USB_ID_CTRL_CLR);
 	twl_i2c_write_u8(TWL_MODULE_USB, save_idctrl, REG_USB_ID_CTRL_SET);
 	twl_i2c_write_u8(TWL6030_MODULE_ID0, save_backup, REG_OTG_BACKUP);
 	mutex_unlock(&di->lock);
