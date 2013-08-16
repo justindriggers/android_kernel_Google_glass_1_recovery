@@ -992,7 +992,7 @@ static ssize_t led_drive_show(struct device *dev, struct device_attribute *attr,
 static ssize_t led_drive_store(struct device *dev, struct device_attribute *attr, const char *buf,
 		size_t count)
 {
-	return store_reg(dev, buf, count, REG_LED_DRIVE, 0, 7);
+	return store_reg(dev, buf, count, REG_LED_DRIVE, 0, 15);
 }
 
 /* calibrate IR LED drive levels */
