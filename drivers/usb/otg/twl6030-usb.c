@@ -88,6 +88,7 @@
 #define HZ_MODE         (1 << 5)
 #define TERM            (1 << 4)
 
+#define ID_GND BIT(0)
 
 #define CONTROLLER_STAT1		0x03
 #define	VBUS_DET			BIT(2)
@@ -377,11 +378,12 @@ static irqreturn_t twl6030_usbotg_irq(int irq, void *_twl)
 #ifndef CONFIG_USB_MUSB_PERIPHERAL
 	struct twl6030_usb *twl = _twl;
 	int status = USB_EVENT_NONE;
-	u8 hw_state, misc2_data;
+	u8 hw_state, misc2_data, id_src;
 
+	id_src = twl6030_readb(twl, TWL_MODULE_USB, USB_ID_INT_SRC);
 	hw_state = twl6030_readb(twl, TWL6030_MODULE_ID0, STS_HW_CONDITIONS);
 
-	if (hw_state & STS_USB_ID) {
+	if ((hw_state & STS_USB_ID) && (id_src & ID_GND)) {
 
 		if (twl->otg.state == OTG_STATE_A_IDLE)
 			return IRQ_HANDLED;
