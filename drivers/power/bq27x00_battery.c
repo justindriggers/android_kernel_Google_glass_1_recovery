@@ -479,17 +479,6 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 
 	cache.flags = bq27x00_read(di, BQ27x00_REG_FLAGS, false);
 
-	if (cache.flags & SYSDOWN_BIT) {
-		dev_warn(di->dev, "detected SYSDOWN condition, pulsing poweroff switch\n");
-		wake_lock(&di->wake_lock);
-		switch_set_state(&di->sdev, 0);
-		switch_set_state(&di->sdev, 1);
-	} else {
-		dev_warn(di->dev, "SYSDOWN condition not detected\n");
-		switch_set_state(&di->sdev, 0);
-		wake_unlock(&di->wake_lock);
-	}
-
 	if (cache.flags >= 0) {
 		getnstimeofday(&ts);
 		cache.timestamp = ts;
@@ -1553,11 +1542,28 @@ static ssize_t show_dump_partial_data_flash(struct device *dev,
 static irqreturn_t soc_int_irq_threaded_handler(int irq, void *arg)
 {
 	struct bq27x00_device_info *di = arg;
+	int flags;
 
 	dev_warn(di->dev, "soc_int\n");
 
 	/* the actual SysDown event is processed in the normal update path */
-	bq27x00_update(di);
+
+	mutex_lock(&di->lock);
+
+	flags = bq27x00_read(di, BQ27x00_REG_FLAGS, false);
+
+	if (flags & SYSDOWN_BIT) {
+		dev_warn(di->dev, "detected SYSDOWN condition, pulsing poweroff switch\n");
+		wake_lock(&di->wake_lock);
+		switch_set_state(&di->sdev, 0);
+		switch_set_state(&di->sdev, 1);
+	} else {
+		dev_warn(di->dev, "SYSDOWN condition not detected\n");
+		switch_set_state(&di->sdev, 0);
+		wake_unlock(&di->wake_lock);
+	}
+
+	mutex_unlock(&di->lock);
 
 	return IRQ_HANDLED;
 }
