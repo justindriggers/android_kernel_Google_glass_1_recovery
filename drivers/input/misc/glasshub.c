@@ -1682,6 +1682,7 @@ static int flash_firmware_l(struct glasshub_data *glasshub, int no_line_checksum
 			/* retry rejected packet */
 			if (rc == FLASH_ERROR_DEV_REJECTED_PKT)
 				rc = flash_page_l(glasshub, no_line_checksum, page);
+			if (rc) return rc;
 			++pages_flashed;
 		}
 	}
