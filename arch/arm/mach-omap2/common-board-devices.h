@@ -25,7 +25,12 @@ static inline void omap4_pmic_init(const char *pmic_type,
 				   struct twl4030_platform_data *pmic_data)
 {
 	/* Phoenix Audio IC needs I2C1 to start with 400 KHz or less */
+#ifdef CONFIG_MACH_NOTLE
+        // Notle clocks are off slightly i.e. 97.2 Mhz instead of 96 Mhz
+	omap_pmic_init(1, 384, pmic_type, OMAP44XX_IRQ_SYS_1N, pmic_data);
+#else
 	omap_pmic_init(1, 400, pmic_type, OMAP44XX_IRQ_SYS_1N, pmic_data);
+#endif
 }
 
 struct ads7846_platform_data;
