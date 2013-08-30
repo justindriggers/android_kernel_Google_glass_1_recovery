@@ -1533,6 +1533,9 @@ int hci_register_dev(struct hci_dev *hdev)
 		BT_INFO("Failed to load transform for ecb(aes): %ld",
 							PTR_ERR(hdev->tfm));
 
+	/* Automatically enable sniff mode on idle connections by default */
+	hdev->idle_timeout = 500; /* ms */
+
 	hci_register_sysfs(hdev);
 
 	hdev->rfkill = rfkill_alloc(hdev->name, &hdev->dev,
