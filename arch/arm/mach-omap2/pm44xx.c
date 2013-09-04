@@ -506,6 +506,15 @@ abort_gpio:
 	return;
 }
 
+const char *omap_board_io_name(int index);
+const char *omap_board_io_use(int index);
+const char *omap_board_wk_name(int index);
+const char *omap_board_wk_use(int index);
+void omap_board_wk_event(int index);
+void omap_board_io_event(int index);
+void omap_board_gpio_event(int index);
+void omap_board_irq_event(int index, const char *name);
+
 #ifdef CONFIG_PM_DEBUG
 #define GPIO_BANKS		6
 #define MODULEMODE_DISABLED	0x0
@@ -515,13 +524,17 @@ static void _print_wakeirq(int irq)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
 
-	if (irq == OMAP44XX_IRQ_LOCALTIMER)
+	if (irq == OMAP44XX_IRQ_LOCALTIMER) {
 		pr_info("Resume caused by IRQ %d, localtimer\n", irq);
-	else if (!desc || !desc->action || !desc->action->name)
+		omap_board_irq_event(irq, "localtimer");
+	} else if (!desc || !desc->action || !desc->action->name) {
 		pr_info("Resume caused by IRQ %d\n", irq);
-	else
+		omap_board_irq_event(irq, NULL);
+	} else {
 		pr_info("Resume caused by IRQ %d, %s\n", irq,
 			desc->action->name);
+		omap_board_irq_event(irq, desc->action->name);
+	}
 }
 
 static void _print_gpio_wakeirq(int irq)
@@ -597,10 +610,12 @@ static void _print_gpio_wakeirq(int irq)
 		gpio = bit + bank * 32;
 		gpioirq = gpio_to_irq(gpio);
 
-		if (gpioirq < 0)
+		if (gpioirq < 0) {
 			pr_info("Resume caused by GPIO %d\n", (int)gpio);
-		else
+			omap_board_gpio_event(gpio);
+		} else {
 			_print_wakeirq(gpioirq);
+		}
 	}
 
 	goto out;
@@ -639,15 +654,18 @@ static void _print_prcm_wakeirq(int irq)
 				omap_readl(CONTROL_PADCONF_WAKEUPEVENT_0 + i*4);
 
 			for_each_set_bit(bit, &wkevt, 32) {
-				pr_info("Resume caused by I/O pad: CONTROL_PADCONF_WAKEUPEVENT_%d[%d]\n",
-					i, bit);
+				pr_info("Resume caused by I/O pad: CONTROL_PADCONF_WAKEUPEVENT_%d[%d] (%s / %s)\n",
+					i, bit, omap_board_io_name(i*32 + bit), omap_board_io_use(i*32 + bit));
 				iopad_wake_found = 1;
+				omap_board_io_event(i*32 + bit);
 			}
 		}
 		wkup_pad_event = omap_readl(CONTROL_WKUP_PADCONF_WAKEUPEVENT_0);
 		for_each_set_bit(bit, &wkup_pad_event, 25) {
-			pr_info("Resume caused by wakeup I/O pad: CONTROL_WKUP_PADCONF_WAKEUPEVENT_0[%d]\n", bit);
+			pr_info("Resume caused by wakeup I/O pad: CONTROL_WKUP_PADCONF_WAKEUPEVENT_0[%d] (%s / %s)\n",
+					bit, omap_board_wk_name(bit), omap_board_wk_use(bit));
 			iopad_wake_found = 1;
+			omap_board_wk_event(bit);
 		}
 	}
 
