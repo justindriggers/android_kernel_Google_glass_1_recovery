@@ -1478,7 +1478,8 @@ int hci_register_dev(struct hci_dev *hdev)
 	hdev->link_mode = (HCI_LM_ACCEPT);
 	hdev->io_capability = 0x03; /* No Input No Output */
 
-	hdev->idle_timeout = 0;
+	/* Automatically enable sniff mode on idle connections by default */
+	hdev->idle_timeout = 500; /* ms */
 	hdev->sniff_max_interval = 800;
 	hdev->sniff_min_interval = 80;
 
@@ -1532,9 +1533,6 @@ int hci_register_dev(struct hci_dev *hdev)
 	if (IS_ERR(hdev->tfm))
 		BT_INFO("Failed to load transform for ecb(aes): %ld",
 							PTR_ERR(hdev->tfm));
-
-	/* Automatically enable sniff mode on idle connections by default */
-	hdev->idle_timeout = 500; /* ms */
 
 	hci_register_sysfs(hdev);
 

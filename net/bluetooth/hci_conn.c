@@ -758,7 +758,7 @@ void hci_conn_enter_active_mode(struct hci_conn *conn, __u8 force_active)
 {
 	struct hci_dev *hdev = conn->hdev;
 
-	BT_DBG("conn %p mode %d", conn, conn->mode);
+	BT_INFO("conn %p mode %d", conn, conn->mode);
 
 	if (test_bit(HCI_RAW, &hdev->flags))
 		return;
@@ -769,6 +769,7 @@ void hci_conn_enter_active_mode(struct hci_conn *conn, __u8 force_active)
 	if (!conn->power_save && !force_active)
 		goto timer;
 
+	BT_INFO("exiting sniff mode");
 	if (!test_and_set_bit(HCI_CONN_MODE_CHANGE_PEND, &conn->pend)) {
 		struct hci_cp_exit_sniff_mode cp;
 		cp.handle = cpu_to_le16(conn->handle);
@@ -786,7 +787,7 @@ void hci_conn_enter_sniff_mode(struct hci_conn *conn)
 {
 	struct hci_dev *hdev = conn->hdev;
 
-	BT_DBG("conn %p mode %d", conn, conn->mode);
+	BT_INFO("conn %p mode %d", conn, conn->mode);
 
 	if (test_bit(HCI_RAW, &hdev->flags))
 		return;
@@ -797,6 +798,7 @@ void hci_conn_enter_sniff_mode(struct hci_conn *conn)
 	if (conn->mode != HCI_CM_ACTIVE || !(conn->link_policy & HCI_LP_SNIFF))
 		return;
 
+	BT_INFO("entering sniff mode");
 	if (lmp_sniffsubr_capable(hdev) && lmp_sniffsubr_capable(conn)) {
 		struct hci_cp_sniff_subrate cp;
 		cp.handle             = cpu_to_le16(conn->handle);
