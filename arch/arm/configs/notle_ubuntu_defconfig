@@ -13,7 +13,7 @@ CONFIG_OMAP2_DSS_DPI=y
 CONFIG_OMAP2_DSS_DSI=y
 
 CONFIG_BCMDHD=y
-CONFIG_BCMDHD_FW_PATH="/system/etc/firmware/fw_bcmdhd.bin"
+CONFIG_BCMDHD_FW_PATH="/etc/firmware/fw_bcmdhd.bin"
 CONFIG_WIFI_CONTROL_FUNC=y
 CONFIG_CFG80211=y
 CONFIG_NL80211_TESTMODE=y
@@ -101,7 +101,7 @@ CONFIG_HIGHMEM=y
 CONFIG_COMPACTION=y
 CONFIG_ARM_FLUSH_CONSOLE_ON_RESTART=y
 CONFIG_HOTPLUG_CPU=y
-CONFIG_CMDLINE="console=ttyO2,115200n8 vmalloc=768M root=/dev/mmcblk0p10 init=/sbin/init androidboot.console=ttyO2 androidboot.carrier=wifi-only product_type=w cpuidle_sysfs_switch"
+CONFIG_CMDLINE="console=ttyO2,115200n8 vmalloc=768M root=/dev/block/platform/omap/omap_hsmmc.1/by-name/userdata init=/sbin/init androidboot.console=ttyO2 androidboot.carrier=wifi-only product_type=w cpuidle_sysfs_switch"
 #CONFIG_CMDLINE_EXTEND is not set
 CONFIG_CPU_FREQ=y
 CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE=y
