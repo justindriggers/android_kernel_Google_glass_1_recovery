@@ -758,7 +758,7 @@ void hci_conn_enter_active_mode(struct hci_conn *conn, __u8 force_active)
 {
 	struct hci_dev *hdev = conn->hdev;
 
-	BT_INFO("conn %p mode %d", conn, conn->mode);
+	BT_DBG("conn %p mode %d", conn, conn->mode);
 
 	if (test_bit(HCI_RAW, &hdev->flags))
 		return;
