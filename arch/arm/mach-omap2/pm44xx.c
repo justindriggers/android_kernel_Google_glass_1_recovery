@@ -514,6 +514,7 @@ void omap_board_wk_event(int index);
 void omap_board_io_event(int index);
 void omap_board_gpio_event(int index);
 void omap_board_irq_event(int index, const char *name);
+void omap_board_suspend_event(void);
 
 #ifdef CONFIG_PM_DEBUG
 #define GPIO_BANKS		6
@@ -917,6 +918,8 @@ static int omap4_pm_suspend(void)
 	/* Enable Device OFF */
 	if (off_mode_enabled)
 		omap4_device_set_state_off(1);
+
+	omap_board_suspend_event();
 
 	/*
 	 * For MPUSS to hit power domain retention(CSWR or OSWR),
