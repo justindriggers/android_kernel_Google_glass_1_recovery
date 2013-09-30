@@ -787,7 +787,18 @@ void hci_conn_enter_sniff_mode(struct hci_conn *conn)
 {
 	struct hci_dev *hdev = conn->hdev;
 
-	BT_INFO("conn %p mode %d", conn, conn->mode);
+	BT_INFO("conn %p mode %d "
+		"hdev_not_raw %d "
+		"hdev_sniff_capable %d "
+		"conn_sniff_capable %d "
+		"conn_mode_active %d "
+		"conn_link_policy_sniff %d",
+		conn, conn->mode,
+		!test_bit(HCI_RAW, &hdev->flags),
+		!!lmp_sniff_capable(hdev),
+		!!lmp_sniff_capable(conn),
+		conn->mode == HCI_CM_ACTIVE,
+		!!(conn->link_policy & HCI_LP_SNIFF));
 
 	if (test_bit(HCI_RAW, &hdev->flags))
 		return;
