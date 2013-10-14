@@ -337,6 +337,7 @@ static int twl6040_power_up(struct twl6040 *twl6040)
 		goto rst_err;
 	mdelay(5);
 	accctl &= ~TWL6040_RESETSPLIT;
+        accctl |= TWL6040_I2CMODE_FAST;
 	ret = twl6040_reg_write(twl6040, TWL6040_REG_ACCCTL, accctl);
 	if (ret)
 		goto rst_err;
@@ -461,6 +462,7 @@ lppll_err:
 	twl6040_reg_write(twl6040, TWL6040_REG_ACCCTL, accctl);
 	mdelay(5);
 	accctl &= ~TWL6040_RESETSPLIT;
+        accctl |= TWL6040_I2CMODE_FAST;
 	twl6040_reg_write(twl6040, TWL6040_REG_ACCCTL, accctl);
 	ldoctl &= ~TWL6040_OSCENA;
 	twl6040_reg_write(twl6040, TWL6040_REG_LDOCTL, ldoctl);
@@ -623,6 +625,7 @@ static int twl6040_power(struct twl6040 *twl6040, int enable)
 	int ret = 0;
 
 	if (enable) {
+		u8 accctl;
 		/* enable 32kHz external clock */
 		if (pdata->set_ext_clk32k) {
 			ret = pdata->set_ext_clk32k(true);
@@ -632,6 +635,17 @@ static int twl6040_power(struct twl6040 *twl6040, int enable)
 				return ret;
 			}
 		}
+
+		/* For some reason on DVT units this gets reset for some
+		   reason and prevent further communication to the chip. Maybe
+		   it is an Errata with the new chips, we are not sure. For
+		   the sake of making this work, lets write the current values
+		   to the register before further access */
+		accctl = twl6040_reg_read(twl6040, TWL6040_REG_ACCCTL);
+		if ((accctl & TWL6040_I2CMODE_FAST) == 0) {
+			printk("WARNING: TWL6040 glitch detected and ACCCTL i2cMode is reset");
+		}
+		twl6040_reg_write(twl6040, TWL6040_REG_ACCCTL, accctl | TWL6040_I2CSEL | TWL6040_I2CMODE_FAST);
 
 		/* disable internal 32kHz oscillator */
 		twl6040_clear_bits(twl6040, TWL6040_REG_ACCCTL,
