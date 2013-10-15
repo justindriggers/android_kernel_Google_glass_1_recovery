@@ -9,6 +9,8 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/spinlock.h>
+#include <linux/clockchips.h>
+#include <linux/time.h>
 #include "board-notle.h"
 
 struct omap_pin_stat {
@@ -20,6 +22,8 @@ struct omap_pin_stat {
 
 	unsigned long wakeup_jiffies;
 	unsigned long running_jiffies;
+
+	unsigned long long wakeup_time;
 };
 
 struct omap_irq_stat {
@@ -28,6 +32,8 @@ struct omap_irq_stat {
 
 	unsigned long wakeup_jiffies;
 	unsigned long running_jiffies;
+
+	unsigned long long wakeup_time;
 };
 
 #define OMAP_IO_STAT(_index, _name, _use, _display) \
@@ -371,24 +377,27 @@ static void *wakeups_next(struct seq_file *m, void *v, loff_t *pos)
 static int wakeups_show(struct seq_file *m, void *v)
 {
 	if (v == SEQ_START_TOKEN) {
-		seq_puts(m, "pin              use              count             active            avg active\n");
+		seq_printf(m, "%-32s %-32s %-16s %-16s %-16s %-16s\n",
+				"pin", "use", "count", "active", "avg active", "wakeup time");
 	} else {
 		if (is_irq_stat(v)) {
 			struct omap_irq_stat *s = v;
 
 			if (s->count) {
-				seq_printf(m, "%-16s IRQ %-11d %10lu %10u %10u\n",
+				seq_printf(m, "%-32s IRQ%-29d %-16lu %-16u %-16u %-16llu\n",
 						s->name[0] ? s->name : "Unknown",
 						s - notle_irq_stats, s->count, jiffies_to_msecs(s->running_jiffies),
-						jiffies_to_msecs(s->running_jiffies / (s->count ? s->count : 1)));
+						jiffies_to_msecs(s->running_jiffies / (s->count ? s->count : 1)),
+						s->wakeup_time);
 			}
 		} else {
 			struct omap_pin_stat *s = v;
 
 			if (s->name != NULL && (s->count || s->default_display)) {
-				seq_printf(m, "%-16s %-16s %10lu %10u %10u\n",
+				seq_printf(m, "%-32s %-32s %-16lu %-16u %-16u %-16llu\n",
 						s->name, s->use, s->count, jiffies_to_msecs(s->running_jiffies),
-						jiffies_to_msecs(s->running_jiffies / (s->count ? s->count : 1)));
+						jiffies_to_msecs(s->running_jiffies / (s->count ? s->count : 1)),
+						s->wakeup_time);
 			}
 		}
 	}
@@ -410,18 +419,50 @@ static int wakeup_last_show(struct seq_file *m, void *v)
 		seq_printf(m, "None\n");
 	} else if (is_irq_stat(last)) {
 		struct omap_irq_stat *s = last;
-		seq_printf(m, "%s IRQ %d %lu %u %u\n", s->name[0] ? s->name : "Unknown",
-				s - notle_irq_stats, s->count, jiffies_to_msecs(s->running_jiffies),
-				jiffies_to_msecs(s->running_jiffies / (s->count ? s->count : 1)));
+
+		if (!s->name[0])
+			seq_printf(m, "irq%d %llu\n", s - notle_irq_stats, s->wakeup_time);
+		else
+			seq_printf(m, "%s %llu\n", s->name, s->wakeup_time);
 	} else {
 		struct omap_pin_stat *s = last;
 
-		seq_printf(m, "%s %s %lu %u %u\n", s->name, s->use, s->count,
-				jiffies_to_msecs(s->running_jiffies),
-				jiffies_to_msecs(s->running_jiffies / (s->count ? s->count : 1)));
+		seq_printf(m, "%s %llu\n", s->name, s->wakeup_time);
 	}
 
 	return 0;
+}
+
+static int time_notify(struct notifier_block *nb, unsigned long reason,
+		void *dev)
+{
+	void *last;
+	struct timespec ts;
+	unsigned long long time_usec;
+
+	switch (reason) {
+		case CLOCK_EVT_NOTIFY_RESUME:
+			last = get_last_wakeup();
+
+			if (last) {
+				getnstimeofday(&ts);
+				time_usec = (1000000 * (unsigned long long)ts.tv_sec) + ts.tv_nsec / 1000;
+
+				if (is_irq_stat(last)) {
+					struct omap_irq_stat *s = last;
+					s->wakeup_time = time_usec;
+				} else {
+					struct omap_pin_stat *s = last;
+					s->wakeup_time = time_usec;
+				}
+			}
+			break;
+
+		default:
+			break;
+	}
+
+	return NOTIFY_OK;
 }
 
 static struct seq_operations wakeups_ops = {
@@ -467,9 +508,15 @@ static struct file_operations proc_wakeup_last_operations = {
 	.release = single_release,
 };
 
+static struct notifier_block time_notifier = {
+	.notifier_call = time_notify,
+};
+
 static int __init proc_wakeups_init(void)
 {
 	struct proc_dir_entry *entry;
+
+	clockevents_register_notifier(&time_notifier);
 
 	entry = create_proc_entry("wakeups", 0, NULL);
 	if (entry)
