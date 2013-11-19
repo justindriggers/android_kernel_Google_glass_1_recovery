@@ -210,6 +210,13 @@ int omap_mux_init_gpio(int gpio, int val);
 int omap_mux_init_signal(const char *muxname, int val);
 
 /**
+ * omap_mux_set_signal - set a signal based on the signal name
+ * @muxname:		Mux name in mode0_name.signal_name format
+ * @val:		Options for the mux register value
+ */
+int omap_mux_set_signal(const char *muxname, int val);
+
+/**
  * omap_mux_enable_wkup - set/clear the pad wakup bit.
  * @muxname:		Mux name in mode0_name.signal_name format
  */
