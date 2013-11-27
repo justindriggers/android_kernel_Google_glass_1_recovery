@@ -81,7 +81,7 @@ static int sdp4430_modem_mcbsp_configure(struct snd_pcm_substream *substream,
 		if (!mcbsp_cfg) {
 			/* Set cpu DAI configuration */
 			ret = snd_soc_dai_set_fmt(modem_rtd->cpu_dai,
-					  SND_SOC_DAIFMT_I2S |
+					  SND_SOC_DAIFMT_LEFT_J |
 					  SND_SOC_DAIFMT_NB_NF |
 					  SND_SOC_DAIFMT_CBM_CFM);
 
