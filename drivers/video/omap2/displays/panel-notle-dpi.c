@@ -1103,6 +1103,7 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
           const int pixels_in_frame = htot*(t->vfp + t->vsw + vres + t->vbp);
           const int count_rescale = 7;
           const struct omap_dss_cpr_coefs *c = &(panel_data->cpr_coefs);
+          const int backlight_state = ice40_read_register(ICE40_BACKLIGHT);
           for (i = 0; i < 3; i++)
             for (j = 0; j < 3; j++)
               if (i != j)
@@ -1138,6 +1139,8 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
           }
           for (i = 0; i < 3; i++) {
             rgbmat[3][i] = rgbmat[i][0] + rgbmat[i][1] + rgbmat[i][2];
+            if ((backlight_state & 0x80) == 0x80)
+              rgbmat[3][i] /= 3;
             if (rgbmat[3][i] > pixels_in_frame)
               rgbmat[3][i] = pixels_in_frame;
           }
