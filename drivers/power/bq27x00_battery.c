@@ -1457,7 +1457,7 @@ static int bq27x00_dump_partial_dataflash(struct bq27x00_device_info *di)
 	printk("bq27x00: fw version 0x%04x; df version 0x%04x\n",
 		di->fw_ver, di->df_ver);
 
-	if(di->fw_ver == L1_600_FW_VERSION || di->fw_ver == L1_604_FW_VERSION) {
+	if(di->fw_ver == L1_600_FW_VERSION || di->fw_ver >= L1_604_FW_VERSION) {
 
 
 		getnstimeofday(&ts);
@@ -1564,7 +1564,7 @@ static int bq27x00_dump_dataflash(struct bq27x00_device_info *di)
 		ret = dump_subclass(di, 0x6b, 18);
 		ret = dump_subclass(di, 0x6c, 19);
 		ret = dump_subclass(di, 0x6d, 19);
-	} else if(di->fw_ver == L1_600_FW_VERSION || di->fw_ver == L1_604_FW_VERSION) {
+	} else if(di->fw_ver == L1_600_FW_VERSION || di->fw_ver >= L1_604_FW_VERSION) {
 
 		ret = dump_subclass(di, 0x02, 10);
 		ret = dump_subclass(di, 0x20, 6);
@@ -1867,7 +1867,7 @@ static void bq27x00_reset_registers(struct bq27x00_device_info *di)
 		"Gas Gauge fw version 0x%04x; df version 0x%04x\n",
 		di->fw_ver, di->df_ver);
 
-	if (di->fw_ver == L1_600_FW_VERSION || di->fw_ver == L1_604_FW_VERSION)
+	if (di->fw_ver == L1_600_FW_VERSION || di->fw_ver >= L1_604_FW_VERSION)
 		di->regs = bq27x00_fw_l1_regs;
 	else if (di->fw_ver == G3_FW_VERSION)
 		di->regs = bq27x00_fw_g3_regs;
