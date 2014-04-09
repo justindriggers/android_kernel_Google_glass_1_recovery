@@ -579,9 +579,8 @@ static int omap_i2c_xfer_msg(struct i2c_adapter *adap,
 	 */
 	if (dev->b_hw && stop) {
 		unsigned long delay = jiffies + OMAP_I2C_TIMEOUT;
-		u16 con = omap_i2c_read_reg(dev, OMAP_I2C_CON_REG);
-		while (con & OMAP_I2C_CON_STT) {
-			con = omap_i2c_read_reg(dev, OMAP_I2C_CON_REG);
+		while ((omap_i2c_read_reg(dev, OMAP_I2C_CON_REG) &
+					OMAP_I2C_CON_STT) == 0) {
 
 			/* Let the user know if i2c is in a bad state */
 			if (time_after(jiffies, delay)) {
@@ -1325,6 +1324,12 @@ static int omap_i2c_suspend(struct device *dev)
 	 * later stages of suspending when device Runtime PM is disabled.
 	 * I2C device will be turned off at "noirq" suspend stage.
 	 */
+	struct platform_device *pdev = to_platform_device(dev);
+	if (atomic_read(&dev->power.usage_count) > 1) {
+		dev_info(dev,
+			 "active I2C transaction detected - suspend aborted\n");
+		return -EBUSY;
+	}
 	ret = pm_runtime_resume(dev);
 	if (ret < 0)
 		return ret;
