@@ -216,6 +216,15 @@
 #define FLAG_PAUSE_FOR_AUDIO		2
 
 /*
+ * Enables horrible hack to fix a power management problem.
+ * We grab a pointer to the OMAP I2C-4 driver so we can do a
+ * pm_runtime_get() call on it to keep it from suspending in
+ * the middle of a the threaded IRQ handler.
+ */
+#define PM_HACK				1
+#define I2C_DEVICE_NAME			"omap_i2c.4"
+
+/*
  * Basic theory of operation:
  *
  * The glass hub device comes up in bootloader mode. This mode supports only 5 commands:
@@ -271,6 +280,9 @@ struct glasshub_data {
 	struct i2c_client *i2c_client;
 	struct input_dev *ps_input_dev;
 	const struct glasshub_platform_data *pdata;
+#if PM_HACK
+	struct device *i2c_dev;
+#endif
 	uint8_t *fw_image;
 	uint32_t fw_dirty[FIRMWARE_NUM_DIRTY_BITS];
 	int flash_status;
@@ -569,7 +581,8 @@ err_out:
 	return rc;
 }
 
-/* Threaded interrupt handler. This is where the real work gets done.
+/*
+ * Threaded interrupt handler. This is where the real work gets done.
  * We grab a mutex to prevent I/O requests from user space from
  * running concurrently. The timestamp for critical operations comes
  * from the main interrupt handler.
@@ -586,6 +599,12 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 
 	/* increment usage count to prevent suspend */
 	pm_runtime_get_sync(&glasshub->i2c_client->dev);
+
+#if PM_HACK
+	/* hack to keep I2C-4 bus from suspending */
+	if (glasshub->i2c_dev)
+		pm_runtime_get_sync(glasshub->i2c_dev);
+#endif
 
 	/* clear in-service flag */
 	timestamp = glasshub->irq_timestamp;
@@ -612,7 +631,12 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 
 	/* read the IRQ source */
 	rc = _i2c_read_reg8(glasshub, REG_STATUS, &status);
-	if (rc) goto Error;
+	if (rc) {
+		dev_err(&glasshub->i2c_client->dev,
+				"%s: Error reading status register\n",
+				__FUNCTION__);
+		goto Error;
+	}
 	glasshub->last_irq_status = status;
 
 	/* process prox data */
@@ -621,7 +645,12 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 
 		/* read value */
 		rc = _i2c_read_reg(glasshub, REG16_PROX_DATA, &value);
-		if (rc) goto Error;
+		if (rc) {
+			dev_err(&glasshub->i2c_client->dev,
+					"%s: Error reading prox data register, count = %d\n",
+					__FUNCTION__, prox_count);
+			goto Error;
+		}
 
 		/* shouldn't happen, but 0xffff indicates we read past end of buffer */
 		if (value == 0xffff) {
@@ -638,7 +667,12 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 		{
 			unsigned frame_count;
 			rc = _i2c_read_reg(glasshub, REG16_FRAME_COUNT, &frame_count);
-			if (rc) goto Error;
+			if (rc) {
+				dev_err(&glasshub->i2c_client->dev,
+						"%s: Error reading frame count register\n",
+						__FUNCTION__);
+				goto Error;
+			}
 			printk("%s: Frame count = %u\n", __func__, frame_count);
 		}
 
@@ -729,7 +763,12 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 	/* process don/doff */
 	if (status & IRQ_DON_DOFF) {
 		rc = _i2c_read_reg8(glasshub, REG_DON_DOFF, &glasshub->don_doff_state);
-		if (rc) goto Error;
+		if (rc) {
+			dev_err(&glasshub->i2c_client->dev,
+					"%s: Error reading don/doff register\n",
+					__FUNCTION__);
+			goto Error;
+		}
 		dev_info(&glasshub->i2c_client->dev, "%s: don/doff state = %u\n",
 				__FUNCTION__, glasshub->don_doff_state);
 		sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "don_doff");
@@ -759,6 +798,13 @@ Exit:
 
 	/* decrement usage count to allow suspend */
 	pm_runtime_put_sync(&glasshub->i2c_client->dev);
+
+#if PM_HACK
+	/* hack to keep I2C-4 bus from suspending */
+	if (glasshub->i2c_dev)
+		pm_runtime_put_sync(glasshub->i2c_dev);
+#endif
+
 	return IRQ_HANDLED;
 }
 
@@ -2326,7 +2372,7 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 	struct glasshub_data *glasshub = NULL;
 	int rc;
 
-	dev_info(&i2c_client->dev, "%s: Probing glasshub...\n", __FUNCTION__);
+	dev_info(&i2c_client->dev, "%s: Probe glasshub...\n", __FUNCTION__);
 	glasshub = kzalloc(sizeof(struct glasshub_data), GFP_KERNEL);
 	if (!glasshub)
 	{
@@ -2334,6 +2380,24 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 				__FUNCTION__);
 		return -ENOMEM;
 	}
+
+#if PM_HACK
+	/* hack to keep I2C-4 bus from suspending */
+	{
+		struct device *p = &i2c_client->dev;
+		while (p) {
+			if (!strcmp(dev_name(p), I2C_DEVICE_NAME)) {
+				glasshub->i2c_dev = p;
+				break;
+			}
+			p = p->parent;
+		}
+		if (!glasshub->i2c_dev)
+			dev_warn(&i2c_client->dev,
+					"%s: Unable to find parent I2C driver\n",
+					__FUNCTION__);
+	}
+#endif
 
 	/* initialize data structure */
 	glasshub->i2c_client = i2c_client;
