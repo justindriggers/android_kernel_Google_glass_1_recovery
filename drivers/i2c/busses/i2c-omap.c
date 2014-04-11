@@ -1324,7 +1324,6 @@ static int omap_i2c_suspend(struct device *dev)
 	 * later stages of suspending when device Runtime PM is disabled.
 	 * I2C device will be turned off at "noirq" suspend stage.
 	 */
-	struct platform_device *pdev = to_platform_device(dev);
 	if (atomic_read(&dev->power.usage_count) > 1) {
 		dev_info(dev,
 			 "active I2C transaction detected - suspend aborted\n");
