@@ -218,15 +218,6 @@
 #define FLAG_PAUSE_FOR_AUDIO		2
 
 /*
- * Enables horrible hack to fix a power management problem.
- * We grab a pointer to the OMAP I2C-4 driver so we can do a
- * pm_runtime_get() call on it to keep it from suspending in
- * the middle of a the threaded IRQ handler.
- */
-#define PM_HACK				0
-#define I2C_DEVICE_NAME			"omap_i2c.4"
-
-/*
  * Basic theory of operation:
  *
  * The glass hub device comes up in bootloader mode. This mode supports only 5 commands:
@@ -282,9 +273,6 @@ struct glasshub_data {
 	struct i2c_client *i2c_client;
 	struct input_dev *ps_input_dev;
 	const struct glasshub_platform_data *pdata;
-#if PM_HACK
-	struct device *i2c_dev;
-#endif
 	uint8_t *fw_image;
 	uint32_t fw_dirty[FIRMWARE_NUM_DIRTY_BITS];
 	int flash_status;
@@ -601,12 +589,6 @@ static void glasshub_process_interrupt_l(struct glasshub_data *glasshub)
 	/* increment usage count to prevent device from suspending */
 	pm_runtime_get_sync(&glasshub->i2c_client->dev);
 
-#if PM_HACK
-	/* hack to keep I2C bus from suspending */
-	if (glasshub->i2c_dev)
-		pm_runtime_get_sync(glasshub->i2c_dev);
-#endif
-
 	/* make sure device is out of suspend */
 	if (pm_runtime_suspended(&glasshub->i2c_client->dev)) {
 		set_bit(FLAG_RUN_HANDLER_ON_RESUME, &glasshub->flags);
@@ -804,12 +786,6 @@ Exit:
 
 	/* release device */
 	pm_runtime_put(&glasshub->i2c_client->dev);
-
-#if PM_HACK
-	/* hack to keep I2C bus from suspending */
-	if (glasshub->i2c_dev)
-		pm_runtime_put(glasshub->i2c_dev);
-#endif
 }
 
 /*
@@ -846,12 +822,6 @@ static irqreturn_t glasshub_irq_handler(int irq, void *dev_id)
 
 	/* resume device */
 	pm_request_resume(&glasshub->i2c_client->dev);
-
-#if PM_HACK
-	/* hack to keep I2C bus from suspending */
-	if (glasshub->i2c_dev)
-		pm_request_resume(glasshub->i2c_dev);
-#endif
 
 	/* save timestamp for threaded handler and schedule it */
 	glasshub->irq_timestamp = read_robust_clock();
@@ -2410,24 +2380,6 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 				__FUNCTION__);
 		return -ENOMEM;
 	}
-
-#if PM_HACK
-	/* hack to keep I2C bus from suspending */
-	{
-		struct device *p = &i2c_client->dev;
-		while (p) {
-			if (!strcmp(dev_name(p), I2C_DEVICE_NAME)) {
-				glasshub->i2c_dev = p;
-				break;
-			}
-			p = p->parent;
-		}
-		if (!glasshub->i2c_dev)
-			dev_warn(&i2c_client->dev,
-					"%s: Unable to find parent I2C driver\n",
-					__FUNCTION__);
-	}
-#endif
 
 	/* initialize data structure */
 	glasshub->i2c_client = i2c_client;
