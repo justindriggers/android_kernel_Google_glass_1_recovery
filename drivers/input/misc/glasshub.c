@@ -1,6 +1,7 @@
-/* Driver for Glass low-power sensor hub
+/*
+ *Driver for Glass low-power sensor hub
  *
- * Copyright (C) 2012 Google, Inc.
+ * Copyright (C) 2012-2014 Google, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -39,7 +40,7 @@
 
 /* driver name/version */
 #define DEVICE_NAME			"glasshub"
-#define DRIVER_VERSION			"0.23"
+#define DRIVER_VERSION			"0.24"
 
 /* minimum MCU firmware version required for this driver */
 #define MINIMUM_MCU_VERSION		((1 << 8) | 12)
@@ -135,6 +136,7 @@
 #define FLAG_DEVICE_DISABLED		4
 #define FLAG_WINK_FLAG_ENABLE		5
 #define FLAG_HANDLER_RUNNING		6
+#define FLAG_RUN_HANDLER_ON_RESUME	7
 #define FLAG_DEVICE_MAY_BE_WEDGED	31
 
 /* flags for device permissions */
@@ -221,7 +223,7 @@
  * pm_runtime_get() call on it to keep it from suspending in
  * the middle of a the threaded IRQ handler.
  */
-#define PM_HACK				1
+#define PM_HACK				0
 #define I2C_DEVICE_NAME			"omap_i2c.4"
 
 /*
@@ -491,7 +493,7 @@ static int _check_part_id(struct glasshub_data *glasshub)
 	return rc;
 }
 
-/* must hold the device lock */
+/* boot application on MCU, must hold the device lock */
 int boot_device_l(struct glasshub_data *glasshub)
 {
 	int retry;
@@ -551,7 +553,7 @@ err_out:
 	return rc;
 }
 
-/* must hold the device lock */
+/* reset MCU, must hold the device lock */
 int reset_device_l(struct glasshub_data *glasshub, int force)
 {
 	int retry;
@@ -582,14 +584,13 @@ err_out:
 }
 
 /*
- * Threaded interrupt handler. This is where the real work gets done.
- * We grab a mutex to prevent I/O requests from user space from
- * running concurrently. The timestamp for critical operations comes
- * from the main interrupt handler.
+ * Process interrupt from MCU. Must be called with lock held.
+ * Runs in process context. Reads the interrupt status register
+ * and sets sysfs state accordingly, and reads prox data if
+ * necessary. Timestamps come from the hard interrupt.
  */
-static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
+static void glasshub_process_interrupt_l(struct glasshub_data *glasshub)
 {
-	struct glasshub_data *glasshub = (struct glasshub_data*) dev_id;
 	int rc = 0;
 	uint8_t status;
 	uint16_t data[PROX_QUEUE_SZ];
@@ -597,29 +598,29 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 	int i;
 	uint64_t timestamp;
 
-	/* increment usage count to prevent suspend */
+	/* increment usage count to prevent device from suspending */
 	pm_runtime_get_sync(&glasshub->i2c_client->dev);
 
 #if PM_HACK
-	/* hack to keep I2C-4 bus from suspending */
+	/* hack to keep I2C bus from suspending */
 	if (glasshub->i2c_dev)
 		pm_runtime_get_sync(glasshub->i2c_dev);
 #endif
 
-	/* clear in-service flag */
+	/* make sure device is out of suspend */
+	if (pm_runtime_suspended(&glasshub->i2c_client->dev)) {
+		set_bit(FLAG_RUN_HANDLER_ON_RESUME, &glasshub->flags);
+		dev_info(&glasshub->i2c_client->dev,
+				"%s: Ignore interrupt, device suspended\n",
+				__FUNCTION__);
+		/* don't release the device since we're not done */
+		return;
+	}
+
+	/* get timestamp and update state bits */
 	timestamp = glasshub->irq_timestamp;
 	set_bit(FLAG_HANDLER_RUNNING, &glasshub->flags);
 	clear_bit(FLAG_WAKE_HANDLER, &glasshub->flags);
-
-	mutex_lock(&glasshub->device_lock);
-
-	/* ignore interrupt if driver is suspended, this will cause further IRQ's to be ignored */
-	if (pm_runtime_suspended(&glasshub->i2c_client->dev)) {
-		dev_err(&glasshub->i2c_client->dev,
-				"%s: Ignore interrupt, device suspended\n",
-				__FUNCTION__);
-		goto Exit;
-	}
 
 	/* just in case the glasshub was reset after scheduling this handler */
 	if (!test_bit(FLAG_DEVICE_BOOTED, &glasshub->flags)) {
@@ -733,7 +734,8 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 			rec.timestamp = glasshub->last_timestamp;
 			kfifo_put(&prox_fifo, &rec);
 			if (glasshub->debug && (i == 0)) {
-				printk("%s: First sample in packet @ %llu\n", __func__, glasshub->last_timestamp);
+				printk("%s: First sample in packet @ %llu\n", __func__,
+						glasshub->last_timestamp);
 			}
 		}
 
@@ -769,62 +771,90 @@ static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
 					__FUNCTION__);
 			goto Error;
 		}
-		dev_info(&glasshub->i2c_client->dev, "%s: don/doff state = %u\n",
-				__FUNCTION__, glasshub->don_doff_state);
+		dev_info(&glasshub->i2c_client->dev,
+				"%s: don/doff state = %u\n",
+				__FUNCTION__,
+				glasshub->don_doff_state);
 		sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "don_doff");
 	}
 
 	/* process wink signal */
 	if (status & IRQ_WINK) {
-		dev_info(&glasshub->i2c_client->dev, "%s: wink signal received\n",
+		dev_info(&glasshub->i2c_client->dev,
+				"%s: wink signal received\n",
 				__FUNCTION__);
 		sysfs_notify(&glasshub->i2c_client->dev.kobj, NULL, "wink");
 	}
 
 	/* look for debug interrupt */
 	if (status & IRQ_DEBUG) {
-		dev_info(&glasshub->i2c_client->dev, "%s: debug interrupt received\n",
+		dev_info(&glasshub->i2c_client->dev,
+				"%s: debug interrupt received\n",
 				__FUNCTION__);
 	}
 	goto Exit;
 
 Error:
-	dev_err(&glasshub->i2c_client->dev, "%s: device read error\n", __FUNCTION__);
+	dev_err(&glasshub->i2c_client->dev, "%s: device read error\n",
+			__FUNCTION__);
 	set_bit(FLAG_DEVICE_MAY_BE_WEDGED, &glasshub->flags);
 
 Exit:
-	mutex_unlock(&glasshub->device_lock);
 	clear_bit(FLAG_HANDLER_RUNNING, &glasshub->flags);
 
-	/* decrement usage count to allow suspend */
-	pm_runtime_put_sync(&glasshub->i2c_client->dev);
+	/* release device */
+	pm_runtime_put(&glasshub->i2c_client->dev);
 
 #if PM_HACK
-	/* hack to keep I2C-4 bus from suspending */
+	/* hack to keep I2C bus from suspending */
 	if (glasshub->i2c_dev)
-		pm_runtime_put_sync(glasshub->i2c_dev);
+		pm_runtime_put(glasshub->i2c_dev);
 #endif
+}
 
+/*
+ * Threaded interrupt handler. 
+ * Grab a mutex to prevent I/O requests from user space from
+ * running concurrently.
+ */
+static irqreturn_t glasshub_threaded_irq_handler(int irq, void *dev_id)
+{
+	struct glasshub_data *glasshub = (struct glasshub_data*) dev_id;
+
+	mutex_lock(&glasshub->device_lock);
+	glasshub_process_interrupt_l(glasshub);
+	mutex_unlock(&glasshub->device_lock);
 	return IRQ_HANDLED;
 }
 
-/* Main interrupt handler. We save a timestamp here and schedule
+/*
+ * Hard interrupt handler. We save a timestamp here and schedule
  * the threaded handler to run later, since we might have to
- * block on I/O requests from user space.
+ * block on I2C read/writes.
  */
 static irqreturn_t glasshub_irq_handler(int irq, void *dev_id)
 {
 	struct glasshub_data *glasshub = (struct glasshub_data*) dev_id;
 
 	/* if device is not booted, the interrupt must be someone else */
-	if (!test_bit(FLAG_DEVICE_BOOTED, &glasshub->flags)) goto Handled;
+	if (!test_bit(FLAG_DEVICE_BOOTED, &glasshub->flags))
+		goto Handled;
 
 	/* if threaded handler is already scheduled, don't schedule it again */
-	if (test_and_set_bit(FLAG_WAKE_HANDLER, &glasshub->flags)) goto Handled;
+	if (test_and_set_bit(FLAG_WAKE_HANDLER, &glasshub->flags))
+		goto Handled;
+
+	/* resume device */
+	pm_request_resume(&glasshub->i2c_client->dev);
+
+#if PM_HACK
+	/* hack to keep I2C bus from suspending */
+	if (glasshub->i2c_dev)
+		pm_request_resume(glasshub->i2c_dev);
+#endif
 
 	/* save timestamp for threaded handler and schedule it */
 	glasshub->irq_timestamp = read_robust_clock();
-	pm_request_resume(&glasshub->i2c_client->dev);
 	return IRQ_WAKE_THREAD;
 
 Handled:
@@ -2382,7 +2412,7 @@ static int __devinit glasshub_probe(struct i2c_client *i2c_client,
 	}
 
 #if PM_HACK
-	/* hack to keep I2C-4 bus from suspending */
+	/* hack to keep I2C bus from suspending */
 	{
 		struct device *p = &i2c_client->dev;
 		while (p) {
@@ -2457,8 +2487,8 @@ err_out:
 	return -ENODEV;
 }
 
-/* abort suspend if we have an IRQ handler pending */
 #ifdef CONFIG_PM
+/* abort suspend if we have an IRQ handler pending */
 static int glasshub_suspend_noirq(struct device *dev)
 {
 	struct glasshub_data *glasshub = dev_get_drvdata(dev);
@@ -2471,9 +2501,29 @@ abort_suspend:
 	return -EBUSY;
 }
 
+/* process interrupt if we had to defer because of suspend */
+static int glasshub_resume_noirq(struct device *dev) {
+	struct glasshub_data *glasshub = dev_get_drvdata(dev);
+
+	mutex_lock(&glasshub->device_lock);
+
+	/* see if we need to process the interrupt */
+	if (test_and_clear_bit(FLAG_RUN_HANDLER_ON_RESUME, &glasshub->flags)) {
+		dev_info(&glasshub->i2c_client->dev,
+				"%s: Device resumed, process interrupt\n",
+				__FUNCTION__);
+		glasshub_process_interrupt_l(glasshub);
+	}
+
+	mutex_unlock(&glasshub->device_lock);
+	return 0;
+}
+
 static const struct dev_pm_ops glasshub_pmops = {
 	.suspend_noirq = glasshub_suspend_noirq,
+	.resume_noirq = glasshub_resume_noirq,
 };
+
 #define GLASSHUB_PMOPS (&glasshub_pmops)
 #else
 #define GLASSHUB_PMOPS NULL
