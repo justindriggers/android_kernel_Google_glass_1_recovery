@@ -41,6 +41,8 @@
 #ifdef CONFIG_ION_OMAP
 #include <linux/ion.h>
 #include <linux/omap_ion.h>
+#include <plat/usb.h>
+#include <plat/omap44xx.h>
 
 extern struct ion_device *omap_ion_device;
 #endif
@@ -575,6 +577,26 @@ long rpmsg_omx_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			return -EFAULT;
 		}
 		break;
+	}
+#endif
+#ifdef CONFIG_ION_OMAP
+	case OMX_GET_TIMER:
+	{
+		struct omx_get_timer data;
+		struct timespec ts;
+
+		/*read_persistent_clock(&ts);*/
+		data.persistent_timer = read_robust_clock();
+
+		data.clock32k = omap_readl(OMAP4430_32KSYNCT_BASE + 0x10);
+
+		if (copy_to_user((char __user *) arg, &data, sizeof(data))) {
+				dev_err(omxserv->dev,
+				"GetTimer: %s: %d: copy_to_user fail: %d\n", __func__,
+				_IOC_NR(cmd), ret);
+		}
+
+	break;
 	}
 #endif
 	default:
