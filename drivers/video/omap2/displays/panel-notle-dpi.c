@@ -134,7 +134,7 @@ static struct gamma_point gamma_curve[] = {
   {0xFF, 0xDC, 0xC7, 0x00, 0x23, 0x38},
 };
 
-static struct init_register_value panel_init_regs[] = {
+static const struct init_register_value panel_init_regs[] = {
   { 0x00, 0x85 },
   { 0x01, 0xC3 },
   { 0x02, 0xC3 },
@@ -152,7 +152,7 @@ static struct init_register_value panel_init_regs[] = {
   { REG_DELAY, 0x04 },
 };
 
-static struct init_register_value panel_shutdown_regs[] = {
+static const struct init_register_value panel_shutdown_regs[] = {
   { 0x00, 0x85 },
   { REG_DELAY, 0x05 },
   { 0x00, 0x81 },
