@@ -40,7 +40,7 @@
 
 /* driver name/version */
 #define DEVICE_NAME			"glasshub"
-#define DRIVER_VERSION			"0.24"
+#define DRIVER_VERSION			"0.25"
 
 /* minimum MCU firmware version required for this driver */
 #define MINIMUM_MCU_VERSION		((1 << 8) | 12)
@@ -1272,6 +1272,9 @@ static ssize_t set_pause_state(struct device *dev, const char *buf, size_t count
 
 	/* check for state change */
 	if (!glasshub->pause != !temp) {
+		dev_info(&glasshub->i2c_client->dev,
+				"pause state changed from %d to %d\n",
+				temp, glasshub->pause);
 		temp = glasshub->pause ? 1 : 0;
 		if (boot_device_l(glasshub) == 0) {
 			if (_i2c_write_reg(glasshub, REG_PAUSE, temp)) {
