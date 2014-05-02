@@ -1149,7 +1149,6 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
           const int htot = t->hfp + t->hsw + t->x_res + t->hbp;
           const int pixels_in_frame = htot*(t->vfp + t->vsw + vres + t->vbp);
           const int count_rescale = 7;
-          const struct omap_dss_cpr_coefs *c = &(panel_data->cpr_coefs);
           const int backlight_state = ice40_read_register(ICE40_BACKLIGHT);
           struct omap_overlay_manager_info info;
           for (i = 0; i < 3; i++)
@@ -1176,6 +1175,7 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
              * My preference would be a for loop, but struct omap_dss_cpr_coefs
              * declares the "matrix" as a list of scalars :-(
              */
+            const struct omap_dss_cpr_coefs *c = &(info.cpr_coefs);
             rgbmat[0][0] = c->rr < 0 ? 0 : (red*c->rr+128)>>8;
             rgbmat[0][1] = c->rg < 0 ? 0 : (grn*c->rg+128)>>8;
             rgbmat[0][2] = c->rb < 0 ? 0 : (blu*c->rb+128)>>8;
