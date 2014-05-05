@@ -40,7 +40,7 @@
 
 /* driver name/version */
 #define DEVICE_NAME			"glasshub"
-#define DRIVER_VERSION			"0.25"
+#define DRIVER_VERSION			"0.26"
 
 /* minimum MCU firmware version required for this driver */
 #define MINIMUM_MCU_VERSION		((1 << 8) | 12)
@@ -94,7 +94,7 @@
 #define REG16_ADDRESS			0x84
 #define REG16_VIS_DATA			0x85
 #define REG16_IR_DATA			0x87
-#define REG16_FRAME_COUNT		0x87
+#define REG16_ERROR_COUNT		0x87
 #define REG16_DEBUG			0x88
 #define REG16_TIMER_COUNT		0x89
 #define REG16_ACTIVITY_THRESHOLD	0x8a
@@ -645,18 +645,18 @@ static void glasshub_process_interrupt_l(struct glasshub_data *glasshub)
 		}
 		++glasshub->sample_count;
 
-		/* DEBUG: read frame counter */
+		/* DEBUG: read timer counter */
 		if (glasshub->debug && (prox_count == 0))
 		{
-			unsigned frame_count;
-			rc = _i2c_read_reg(glasshub, REG16_FRAME_COUNT, &frame_count);
+			unsigned timer_count;
+			rc = _i2c_read_reg(glasshub, REG16_TIMER_COUNT, &timer_count);
 			if (rc) {
 				dev_err(&glasshub->i2c_client->dev,
-						"%s: Error reading frame count register\n",
+						"%s: Error reading timer count register\n",
 						__FUNCTION__);
 				goto Error;
 			}
-			printk("%s: Frame count = %u\n", __func__, frame_count);
+			printk("%s: Timer count = %u\n", __func__, timer_count);
 		}
 
 		/* Buffer up data (and drop data that exceeds our buffer
@@ -1363,10 +1363,10 @@ static ssize_t error_code_show(struct device *dev, struct device_attribute *attr
 	return show_reg(dev, buf, REG_ERROR_CODE);
 }
 
-/* show frame_count value */
-static ssize_t frame_count_show(struct device *dev, struct device_attribute *attr, char *buf)
+/* show error count value */
+static ssize_t error_count_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return show_reg(dev, buf, REG16_FRAME_COUNT);
+	return show_reg(dev, buf, REG16_ERROR_COUNT);
 }
 
 /* show timer value */
@@ -2078,7 +2078,7 @@ static DEVICE_ATTR(flash_status, DEV_MODE_RO, flash_status_show, NULL);
 static DEVICE_ATTR(sample_count, DEV_MODE_RO, sample_count_show, NULL);
 static DEVICE_ATTR(disable, DEV_MODE_RW, disable_show, disable_store);
 static DEVICE_ATTR(debug, DEV_MODE_RW, debug_show, debug_store);
-static DEVICE_ATTR(frame_count, DEV_MODE_RO, frame_count_show, NULL);
+static DEVICE_ATTR(error_count, DEV_MODE_RO, error_count_show, NULL);
 static DEVICE_ATTR(timer_count, DEV_MODE_RO, timer_count_show, NULL);
 static DEVICE_ATTR(irq_timestamp, DEV_MODE_RO, irq_timestamp_show, NULL);
 static DEVICE_ATTR(last_timestamp, DEV_MODE_RO, last_timestamp_show, NULL);
@@ -2116,7 +2116,7 @@ static struct attribute *attrs[] = {
 	&dev_attr_mcu_debug16.attr,
 	&dev_attr_error_code.attr,
 	&dev_attr_sample_count.attr,
-	&dev_attr_frame_count.attr,
+	&dev_attr_error_count.attr,
 	&dev_attr_timer_count.attr,
 	&dev_attr_irq_timestamp.attr,
 	&dev_attr_last_timestamp.attr,
