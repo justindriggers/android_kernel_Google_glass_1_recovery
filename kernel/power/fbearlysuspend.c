@@ -34,6 +34,7 @@ static void stop_drawing_early_suspend(struct early_suspend *h)
 	unsigned long irq_flags;
 
 	spin_lock_irqsave(&fb_state_lock, irq_flags);
+	pr_info("fbearlysuspend: state set to 'request'.\n");
 	fb_state = FB_STATE_REQUEST_STOP_DRAWING;
 	spin_unlock_irqrestore(&fb_state_lock, irq_flags);
 
@@ -44,6 +45,8 @@ static void stop_drawing_early_suspend(struct early_suspend *h)
 	if (unlikely(fb_state != FB_STATE_STOPPED_DRAWING))
 		pr_warning("stop_drawing_early_suspend: timeout waiting for "
 			   "userspace to stop drawing\n");
+
+	pr_info("fbearlysuspend: stop drawing done.\n");
 }
 
 /* tell userspace to start drawing */
@@ -52,9 +55,12 @@ static void start_drawing_late_resume(struct early_suspend *h)
 	unsigned long irq_flags;
 
 	spin_lock_irqsave(&fb_state_lock, irq_flags);
+	pr_info("fbearlysuspend: state set to 'drawing'.\n");
 	fb_state = FB_STATE_DRAWING_OK;
 	spin_unlock_irqrestore(&fb_state_lock, irq_flags);
 	wake_up(&fb_state_wq);
+
+	pr_info("fbearlysuspend: start drawing done.\n");
 }
 
 static struct early_suspend stop_drawing_early_suspend_desc = {
@@ -69,12 +75,17 @@ static ssize_t wait_for_fb_sleep_show(struct kobject *kobj,
 	char *s = buf;
 	int ret;
 
+	pr_info("fbearlysuspend: starting wait for sleep.\n");
+
 	ret = wait_event_interruptible(fb_state_wq,
 				       fb_state != FB_STATE_DRAWING_OK);
-	if (ret && fb_state == FB_STATE_DRAWING_OK)
+	if (ret && fb_state == FB_STATE_DRAWING_OK) {
+		pr_info("fbearlysuspend: wait for sleep failed.\n");
 		return ret;
-	else
+	} else {
+		pr_info("fbearlysuspend: wait for sleep successful.\n");
 		s += sprintf(buf, "sleeping");
+	}
 	return s - buf;
 }
 
@@ -85,8 +96,11 @@ static ssize_t wait_for_fb_wake_show(struct kobject *kobj,
 	int ret;
 	unsigned long irq_flags;
 
+	pr_info("fbearlysuspend: starting wait for wake.\n");
+
 	spin_lock_irqsave(&fb_state_lock, irq_flags);
 	if (fb_state == FB_STATE_REQUEST_STOP_DRAWING) {
+		pr_info("fbearlysuspend: state set to 'stopped'.\n");
 		fb_state = FB_STATE_STOPPED_DRAWING;
 		wake_up(&fb_state_wq);
 	}
@@ -94,10 +108,13 @@ static ssize_t wait_for_fb_wake_show(struct kobject *kobj,
 
 	ret = wait_event_interruptible(fb_state_wq,
 				       fb_state == FB_STATE_DRAWING_OK);
-	if (ret && fb_state != FB_STATE_DRAWING_OK)
+	if (ret && fb_state != FB_STATE_DRAWING_OK) {
+		pr_info("fbearlysuspend: wait for wake failed.\n");
 		return ret;
-	else
+	} else {
+		pr_info("fbearlysuspend: wait for wake successful.\n");
 		s += sprintf(buf, "awake");
+	}
 
 	return s - buf;
 }
