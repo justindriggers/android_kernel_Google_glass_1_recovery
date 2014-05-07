@@ -842,9 +842,27 @@ static ssize_t mono_store(struct notle_drv_data *notle_data,
 
         return size;
 }
-static ssize_t brightness_show(struct notle_drv_data *notle_data, char *buf) {
-        return snprintf(buf, PAGE_SIZE, "%d\n", led_config.brightness);
+
+static inline int range_expand(int v)
+{
+  if (v <= 223)
+    return (v*293)>>8;
+  else
+    return v*16-(255*16-255*3);
 }
+
+static inline int range_reduce(int v)
+{
+  if (v <= 255)
+    return (v*256+293)/293;
+  else
+    return (v+(255*16-255*3))>>4;
+}
+
+static ssize_t brightness_show(struct notle_drv_data *notle_data, char *buf) {
+        return snprintf(buf, PAGE_SIZE, "%d\n", range_reduce(led_config.brightness));
+}
+
 static ssize_t brightness_store(struct notle_drv_data *notle_data,
                                 const char *buf, size_t size) {
         int r, value;
@@ -858,7 +876,7 @@ static ssize_t brightness_store(struct notle_drv_data *notle_data,
           return -EINVAL;
         }
 
-        led_config.brightness = value;
+        led_config.brightness = range_expand(value);
 
         if (!notle_version_supported()) {
               printk(KERN_ERR LOG_TAG "Unsupported Notle version:"
@@ -1081,6 +1099,11 @@ static struct kobj_type panel_notle_ktype = {
 };
 
 /* Utility functions */
+static int bclamp(int b)
+{
+  return b > MAX_BRIGHTNESS ? MAX_BRIGHTNESS : b;
+}
+
 static void led_config_to_linecuts(struct omap_dss_device *dssdev,
                                    struct led_config *led,
                                    int rev,
@@ -1089,25 +1112,26 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
         int *red_linecut = rgbmat[0]+0;
         int *grn_linecut = rgbmat[1]+1;
         int *blu_linecut = rgbmat[2]+2;
-        int total_lines = dssdev->panel.timings.y_res +
-            dssdev->panel.timings.vfp +
-            dssdev->panel.timings.vsw +
-            dssdev->panel.timings.vbp;
+        const struct omap_video_timings *t = &(dssdev->panel.timings);
+        int total_lines = t->y_res +
+            t->vfp +
+            t->vsw +
+            t->vbp;
         struct panel_notle_data *panel_data = get_panel_data(dssdev);
 
         red = *red_linecut   = (int)(total_lines *
                                   (10000 - (
-                                   (3 * led->red_percent * led->brightness * panel_data->limit_mw) /
+                                   (3 * led->red_percent * bclamp(led->brightness) * panel_data->limit_mw) /
                                    (panel_data->red_max_mw * MAX_BRIGHTNESS)))) /
                                  10000;
         grn = *grn_linecut = (int)(total_lines *
                                   (10000 - (
-                                   (3 * led->green_percent * led->brightness * panel_data->limit_mw) /
+                                   (3 * led->green_percent * bclamp(led->brightness) * panel_data->limit_mw) /
                                    (panel_data->green_max_mw * MAX_BRIGHTNESS)))) /
                                  10000;
         blu =  *blu_linecut = (int)(total_lines *
                                   (10000 - (
-                                   (3 * led->blue_percent * led->brightness * panel_data->limit_mw) /
+                                   (3 * led->blue_percent * bclamp(led->brightness) * panel_data->limit_mw) /
                                    (panel_data->blue_max_mw * MAX_BRIGHTNESS)))) /
                                  10000;
 
@@ -1118,12 +1142,12 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
          * is implemented - there's no way to dim a color channel less than a
          * single line.
          */
-        if (*red_linecut > dssdev->panel.timings.y_res - 3)
-          *red_linecut = dssdev->panel.timings.y_res - 3;
-        if (*grn_linecut > dssdev->panel.timings.y_res - 3)
-          *grn_linecut = dssdev->panel.timings.y_res - 3;
-        if (*blu_linecut > dssdev->panel.timings.y_res - 3)
-          *blu_linecut = dssdev->panel.timings.y_res - 3;
+        if (*red_linecut > t->y_res - 3)
+          *red_linecut = t->y_res - 3;
+        if (*grn_linecut > t->y_res - 3)
+          *grn_linecut = t->y_res - 3;
+        if (*blu_linecut > t->y_res - 3)
+          *blu_linecut = t->y_res - 3;
 
         /* Disable any channels that are explicitly at zero percent */
         if (!led->red_percent) *red_linecut = total_lines;
@@ -1139,12 +1163,11 @@ static void led_config_to_linecuts(struct omap_dss_device *dssdev,
           printk(KERN_INFO LOG_TAG "Linecuts truncated: %i/%i/%i -> %i/%i/%i"
                  ", Config: %u/%u/%u/%u\n",
                  red, grn, blu, *red_linecut, *grn_linecut, *blu_linecut,
-                 led->brightness, led->red_percent, led->green_percent, led->blue_percent);
+                 bclamp(led->brightness), led->red_percent, led->green_percent, led->blue_percent);
         }
 
         if (rev > FINAL_LINECUT_BASED_FPGA_REVISION) {
           int i,j;
-          const struct omap_video_timings *t = &(dssdev->panel.timings);
           const int vres = t->y_res;
           const int htot = t->hfp + t->hsw + t->x_res + t->hbp;
           const int pixels_in_frame = htot*(t->vfp + t->vsw + vres + t->vbp);
