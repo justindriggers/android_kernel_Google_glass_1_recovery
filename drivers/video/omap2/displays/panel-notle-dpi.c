@@ -123,7 +123,7 @@ struct gamma_point {
   unsigned char blue_n;
 };
 
-static struct gamma_point gamma_curve[] = {
+static const struct gamma_point gamma_curve_legacy[] = {
   {0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF},
   {0x62, 0x62, 0x49, 0x9D, 0x9D, 0xB6},
   {0x80, 0x7B, 0x67, 0x7F, 0x84, 0x98},
@@ -133,6 +133,19 @@ static struct gamma_point gamma_curve[] = {
   {0xC6, 0xC8, 0x93, 0x39, 0x37, 0x6C},
   {0xFF, 0xDC, 0xC7, 0x00, 0x23, 0x38},
 };
+
+static const struct gamma_point gamma_curve_default[] = {
+  {  0,   0,   0, 255, 255, 255},
+  { 98,  98,  93, 157, 157, 162},
+  {128, 123, 116, 127, 132, 139},
+  {149, 142, 135, 106, 113, 120},
+  {165, 159, 150,  90,  96, 105},
+  {183, 176, 166,  72,  79,  89},
+  {198, 190, 177,  57,  65,  78},
+  {235, 220, 199,  20,  35,  56},
+};
+
+static struct gamma_point gamma_curve[8];
 
 static const struct init_register_value panel_init_regs[] = {
   { 0x00, 0x85 },
@@ -338,6 +351,7 @@ static ssize_t sysfs_reset(struct notle_drv_data *notle_data,
         notle_data->dssdev->state = OMAP_DSS_DISPLAY_DISABLED;
 
         r = kstrtoint(buf, 0, &value);
+        memcpy(gamma_curve, gamma_curve_default, sizeof gamma_curve);
         if (!r && value) {
           fpga_reconfigure(notle_data);
         }
@@ -921,6 +935,18 @@ static ssize_t gamma_show(struct notle_drv_data *notle_data, char *buf,
 
 static int panel_write_register(u8 reg, u8 value);
 
+static void panel_write_gamma(int n)
+{
+  const int gamma_reg = 0x21;
+
+  panel_write_register(gamma_reg + (6 * n) + 0, gamma_curve[n].red_p);
+  panel_write_register(gamma_reg + (6 * n) + 1, gamma_curve[n].green_p);
+  panel_write_register(gamma_reg + (6 * n) + 2, gamma_curve[n].blue_p);
+  panel_write_register(gamma_reg + (6 * n) + 3, gamma_curve[n].red_n);
+  panel_write_register(gamma_reg + (6 * n) + 4, gamma_curve[n].green_n);
+  panel_write_register(gamma_reg + (6 * n) + 5, gamma_curve[n].blue_n);
+}
+
 static ssize_t gamma_store(struct notle_drv_data *notle_data, const char *buf,
                            size_t size, int gamma) {
         unsigned int r_p, g_p, b_p, r_n, g_n, b_n;
@@ -943,22 +969,7 @@ static ssize_t gamma_store(struct notle_drv_data *notle_data, const char *buf,
         gamma_curve[gamma].red_n   = (u8)(r_n & 0xFF);
         gamma_curve[gamma].green_n = (u8)(g_n & 0xFF);
         gamma_curve[gamma].blue_n  = (u8)(b_n & 0xFF);
-        {
-          const int gamma_reg = 0x21;
-          const int j = gamma;
-          panel_write_register(gamma_reg + (6 * j) + 0,
-                               gamma_curve[j].red_p);
-          panel_write_register(gamma_reg + (6 * j) + 1,
-                               gamma_curve[j].green_p);
-          panel_write_register(gamma_reg + (6 * j) + 2,
-                               gamma_curve[j].blue_p);
-          panel_write_register(gamma_reg + (6 * j) + 3,
-                               gamma_curve[j].red_n);
-          panel_write_register(gamma_reg + (6 * j) + 4,
-                               gamma_curve[j].green_n);
-          panel_write_register(gamma_reg + (6 * j) + 5,
-                               gamma_curve[j].blue_n);
-        }
+        panel_write_gamma(gamma);
         return size;
 }
 #define GAMMA_SHOW_STORE(x) \
@@ -978,6 +989,37 @@ GAMMA_SHOW_STORE(5)
 GAMMA_SHOW_STORE(6)
 GAMMA_SHOW_STORE(7)
 GAMMA_SHOW_STORE(8)
+
+static ssize_t gamma_preset_show(struct notle_drv_data *notle_data, char *buf) {
+  if (memcmp(gamma_curve, gamma_curve_legacy, sizeof gamma_curve) == 0)
+    snprintf(buf, PAGE_SIZE, "%s\n", "legacy");
+  else if (memcmp(gamma_curve, gamma_curve_default, sizeof gamma_curve) == 0)
+    snprintf(buf, PAGE_SIZE, "%s\n", "default");
+  else
+    strcpy(buf, "custom");
+  return strlen(buf);
+}
+
+static ssize_t gamma_preset_store(struct notle_drv_data *notle_data,
+                                  const char *buf, size_t size) {
+  int j;
+  char value[128];
+
+  if (size > 128) return -EINVAL;
+
+  sscanf(buf, "%s", value);
+  if (strcmp(value, "legacy") == 0)
+    memcpy(gamma_curve, gamma_curve_legacy, sizeof gamma_curve);
+  else if (strcmp(value, "default") == 0)
+    memcpy(gamma_curve, gamma_curve_default, sizeof gamma_curve);
+  else
+    return -EINVAL;
+  for (j = 0; j < (sizeof(gamma_curve) /
+                   sizeof(struct gamma_point)); ++j) {
+    panel_write_gamma(j);
+  }
+  return size;
+}
 
 /* Sysfs attribute wrappers for show/store functions */
 struct panel_notle_attribute {
@@ -1032,6 +1074,8 @@ static NOTLE_ATTR(gamma7, S_IRUGO|S_IWUSR,
                   gamma7_show, gamma7_store);
 static NOTLE_ATTR(gamma8, S_IRUGO|S_IWUSR,
                   gamma8_show, gamma8_store);
+static NOTLE_ATTR(gamma_preset, S_IRUGO|S_IWUSR,
+                  gamma_preset_show, gamma_preset_store);
 
 static struct attribute *panel_notle_sysfs_attrs[] = {
         &panel_notle_attr_reset.attr,
@@ -1057,6 +1101,7 @@ static struct attribute *panel_notle_sysfs_attrs[] = {
         &panel_notle_attr_gamma6.attr,
         &panel_notle_attr_gamma7.attr,
         &panel_notle_attr_gamma8.attr,
+        &panel_notle_attr_gamma_preset.attr,
         NULL,
 };
 
@@ -1616,18 +1661,7 @@ static int panel_notle_power_on(struct omap_dss_device *dssdev) {
             gamma_reg = panel_init_regs[i].value;
             for (j = 0; j < (sizeof(gamma_curve) /
                              sizeof(struct gamma_point)); ++j) {
-              panel_write_register(gamma_reg + (6 * j) + 0,
-                                   gamma_curve[j].red_p);
-              panel_write_register(gamma_reg + (6 * j) + 1,
-                                   gamma_curve[j].green_p);
-              panel_write_register(gamma_reg + (6 * j) + 2,
-                                   gamma_curve[j].blue_p);
-              panel_write_register(gamma_reg + (6 * j) + 3,
-                                   gamma_curve[j].red_n);
-              panel_write_register(gamma_reg + (6 * j) + 4,
-                                   gamma_curve[j].green_n);
-              panel_write_register(gamma_reg + (6 * j) + 5,
-                                   gamma_curve[j].blue_n);
+              panel_write_gamma(j);
             }
             continue;
           }
@@ -1786,6 +1820,7 @@ static int panel_notle_probe(struct omap_dss_device *dssdev) {
         drv_data->dssdev = dssdev;
         drv_data->panel_config = panel_config;
         drv_data->enabled = 0;
+        memcpy(gamma_curve, gamma_curve_default, sizeof gamma_curve);
 
         dev_set_drvdata(&dssdev->dev, drv_data);
 
