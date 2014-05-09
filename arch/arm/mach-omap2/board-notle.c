@@ -559,6 +559,9 @@ static struct panel_notle_data panel_notle_preevt2 = {
         .green_percent            = 5416,
         .blue_percent             = 2917,
         .cpr_enable               = 0,
+        .cpr_coefs                = {
+            256, 0, 0, 0, 256, 0, 0, 0, 256
+        },
         .gamma_table              = NULL,
         .gamma_enable             = 0,
 };
@@ -575,7 +578,8 @@ static struct panel_notle_data panel_notle = {
         .red_percent              = 2444,
         .green_percent            = 4444,
         .blue_percent             = 3111,
-        .cpr_enable               = 1,
+        .cpr_enable               = 0,
+        /* if cpr_enable==0, cpr_coefs are applied in LED modulation */
         .cpr_coefs                = {
             205, 9, 17, 25, 209, 11, 9, -1, 247
         },
