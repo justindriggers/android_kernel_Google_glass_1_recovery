@@ -867,22 +867,30 @@ static ssize_t mono_store(struct notle_drv_data *notle_data,
                 return -EINVAL;
         }
 
-        r = ice40_read_register(ICE40_BACKLIGHT);
-        if (r < 0) {
-            printk(KERN_ERR LOG_TAG "Failed to read iCE40 register: "
-                   "0x%02x\n", ICE40_BACKLIGHT);
-            return -EIO;
-        }
         if (value) {
-            r |= ICE40_BACKLIGHT_MONO;
+            ice40_defaults.backlight |= ICE40_BACKLIGHT_MONO;
         } else {
-            r &= ~ICE40_BACKLIGHT_MONO;
+            ice40_defaults.backlight &= ~ICE40_BACKLIGHT_MONO;
         }
-        r = ice40_write_register(ICE40_BACKLIGHT, r);
-        if (r < 0) {
-            printk(KERN_ERR LOG_TAG "Failed to write iCE40 register: "
-                   "0x%02x\n", ICE40_BACKLIGHT);
-            return -EIO;
+
+        if (notle_data->dssdev->state == OMAP_DSS_DISPLAY_ACTIVE) {
+            r = ice40_read_register(ICE40_BACKLIGHT);
+            if (r < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to read iCE40 register: "
+                       "0x%02x\n", ICE40_BACKLIGHT);
+                return -EIO;
+            }
+            if (value) {
+                r |= ICE40_BACKLIGHT_MONO;
+            } else {
+                r &= ~ICE40_BACKLIGHT_MONO;
+            }
+            r = ice40_write_register(ICE40_BACKLIGHT, r);
+            if (r < 0) {
+                printk(KERN_ERR LOG_TAG "Failed to write iCE40 register: "
+                       "0x%02x\n", ICE40_BACKLIGHT);
+                return -EIO;
+            }
         }
 
         return size;
