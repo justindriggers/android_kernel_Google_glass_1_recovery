@@ -81,7 +81,8 @@ static const u8 led_matrix_addr[4][3] = {
 #define ICE40_LCOS         0x03
 #define ICE40_LCOS_DISP_ENB     0x01
 
-#define FINAL_LINECUT_BASED_FPGA_REVISION 0x3e
+#define FINAL_LINECUT_BASED_FPGA_REVISION   0x3e
+#define FIRST_MONO_ALL_FIELDS_FPGA_REVISION 0x42
 /*
  * TODO(petermalkin): remove definitions of notle_version from here.
  * Move them to some place else where they could be shared by other
@@ -1490,7 +1491,8 @@ static void led_config_pwm(struct omap_dss_device *dssdev,
                rgbmat[3][0], rgbmat[3][1], rgbmat[3][2]);
     }
     for (i = 0; i < 3; i++) {
-      if ((backlight_state & 0x80) == 0x80)
+      if (rev >= FIRST_MONO_ALL_FIELDS_FPGA_REVISION
+          || (backlight_state & 0x80) == 0x80)
         rgbmat[3][i] /= 3;
     }
     /* clamp gray */
