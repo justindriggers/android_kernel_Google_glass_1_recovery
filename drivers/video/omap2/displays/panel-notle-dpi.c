@@ -376,7 +376,7 @@ static ssize_t sysfs_reset(struct notle_drv_data *notle_data,
         notle_data->dssdev->state = OMAP_DSS_DISPLAY_DISABLED;
 
         r = kstrtoint(buf, 0, &value);
-        memcpy(gamma_curve, gamma_curve_default, sizeof gamma_curve);
+        memcpy(gamma_curve, gamma_curve_legacy, sizeof gamma_curve);
         if (!r && value) {
           fpga_reconfigure(notle_data);
         }
@@ -2100,7 +2100,7 @@ static int panel_notle_probe(struct omap_dss_device *dssdev) {
         drv_data->dssdev = dssdev;
         drv_data->panel_config = panel_config;
         drv_data->enabled = 0;
-        memcpy(gamma_curve, gamma_curve_default, sizeof gamma_curve);
+        memcpy(gamma_curve, gamma_curve_legacy, sizeof gamma_curve);
 
         dev_set_drvdata(&dssdev->dev, drv_data);
 
