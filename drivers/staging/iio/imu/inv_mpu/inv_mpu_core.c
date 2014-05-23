@@ -2050,36 +2050,30 @@ static int inv_mpu_remove(struct i2c_client *client)
 }
 
 /* this is not needed if the I2C_CLIENT_WAKE flag is set */
-#ifdef INV_CONFIG_PM
-static int inv_mpu_resume(struct device *dev)
-{
-	struct inv_mpu_iio_s *st =
-			iio_priv(i2c_get_clientdata(to_i2c_client(dev)));
-#ifndef CONFIG_MACH_NOTLE
-	mutex_unlock(&st->suspend_resume_lock);
-#endif
-	return 0;
-}
-
+#ifdef CONFIG_PM
 static int inv_mpu_suspend(struct device *dev)
 {
 	struct inv_mpu_iio_s *st =
 			iio_priv(i2c_get_clientdata(to_i2c_client(dev)));
 
 #ifndef CONFIG_MACH_NOTLE
-	mutex_lock(&st->suspend_resume_lock);
+	/* if lock fails, the threaded IRQ handler is running */
+	if (mutex_trylock(&st->suspend_resume_lock)) {
+		dev_info(dev, "Suspend aborted\n");
+		return -EBUSY;
+	}
+	mutex_unlock(&st->suspend_resume_lock);
 #endif
 	return 0;
 }
 
 static const struct dev_pm_ops inv_mpu_pmops = {
 	.suspend_noirq = inv_mpu_suspend,
-	.resume_noirq = inv_mpu_resume,
 };
 #define INV_MPU_PMOPS (&inv_mpu_pmops)
 #else
 #define INV_MPU_PMOPS NULL
-#endif /* INV_CONFIG_PM */
+#endif /* CONFIG_PM */
 
 static const u16 normal_i2c[] = { I2C_CLIENT_END };
 /* device id table is used to identify what device can be
