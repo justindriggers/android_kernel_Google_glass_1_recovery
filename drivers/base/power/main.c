@@ -33,6 +33,11 @@
 #include "../base.h"
 #include "power.h"
 
+#ifdef CONFIG_MACH_NOTLE
+#include <linux/reboot.h>
+extern int omap_write_reboot_reason(const char* reason);
+#endif
+
 typedef int (*pm_callback_t)(struct device *);
 
 /*
@@ -693,6 +698,14 @@ static void dpm_drv_timeout(unsigned long data)
 	struct dpm_drv_wd_data *wd_data = (void *)data;
 	struct device *dev = wd_data->dev;
 	struct task_struct *tsk = wd_data->tsk;
+
+#ifdef CONFIG_MACH_NOTLE
+	/* Record the timed-out device */
+	char buf[16];
+	scnprintf(buf,15,"srto:%s", dev_name(dev));
+	buf[15] = '\0';
+	omap_write_reboot_reason(buf);
+#endif
 
 	printk(KERN_EMERG "**** DPM device timeout: %s (%s)\n", dev_name(dev),
 	       (dev->driver ? dev->driver->name : "no driver"));
