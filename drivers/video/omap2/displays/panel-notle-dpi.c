@@ -135,15 +135,31 @@ static const struct gamma_point gamma_curve_legacy[] = {
   {0xFF, 0xDC, 0xC7, 0x00, 0x23, 0x38},
 };
 
-static const struct gamma_point gamma_curve_default[] = {
-  {  0,   0,   0, 255, 255, 255},
-  { 98,  98,  93, 157, 157, 162},
-  {128, 123, 116, 127, 132, 139},
-  {149, 142, 135, 106, 113, 120},
-  {165, 159, 150,  90,  96, 105},
-  {183, 176, 166,  72,  79,  89},
-  {198, 190, 177,  57,  65,  78},
-  {235, 220, 199,  20,  35,  56},
+static const struct gamma_point gamma_curve_v1_0[] = {
+  /*echo 2525/5051/2424 > colormix
+   *echo 236 20 0 20 236 0 0 0 256 > ../cpr_coef
+   *echo 0 > ../gamma_enable
+   *import :.,.+7s/\([0-9]\+\) \+\([0-9]\+\) \+\([0-9]\+\)/ {\1, \2, \3, 255-\1, 255-\2, 255-\3},
+   */
+   {0, 0, 0, 255-0, 255-0, 255-0},
+   {54, 58, 54, 255-54, 255-58, 255-54},
+   {81, 84, 80, 255-81, 255-84, 255-80},
+   {115, 112, 103, 255-115, 255-112, 255-103},
+   {138, 134, 125, 255-138, 255-134, 255-125},
+   {155, 150, 141, 255-155, 255-150, 255-141},
+   {171, 166, 157, 255-171, 255-166, 255-157},
+   {240, 225, 205, 255-240, 255-225, 255-205},
+};
+
+static const struct gamma_point gamma_curve_v1_5[] = {
+   {0, 0, 0, 255-0, 255-0, 255-0},
+   {71, 73, 70, 255-71, 255-73, 255-70},
+   {103, 106, 102, 255-103, 255-106, 255-102},
+   {123, 120, 113, 255-123, 255-120, 255-113},
+   {138, 134, 125, 255-138, 255-134, 255-125},
+   {155, 150, 141, 255-155, 255-150, 255-141},
+   {171, 166, 157, 255-171, 255-166, 255-157},
+   {240, 225, 205, 255-240, 255-225, 255-205},
 };
 
 static struct gamma_point gamma_curve[8];
@@ -311,6 +327,7 @@ static void led_config_pwm(struct omap_dss_device *dssdev,
                               int rev,
                               int (*rgbmat)[3]);
 static void fpga_reconfigure(struct notle_drv_data *notle_data);
+static void gamma_setup(const struct gamma_point *curve, struct notle_drv_data *notle_data);
 
 /* Delayed work to check if FPGA needs reconfiguring */
 #define RECONFIGURE_FPGA_CHECK_INTERVAL (3000) /* msec*/
@@ -376,7 +393,7 @@ static ssize_t sysfs_reset(struct notle_drv_data *notle_data,
         notle_data->dssdev->state = OMAP_DSS_DISPLAY_DISABLED;
 
         r = kstrtoint(buf, 0, &value);
-        memcpy(gamma_curve, gamma_curve_legacy, sizeof gamma_curve);
+        gamma_setup(NULL, notle_data);
         if (!r && value) {
           fpga_reconfigure(notle_data);
         }
@@ -540,8 +557,9 @@ static ssize_t colormix_store(struct notle_drv_data *notle_data,
 
         total = red + green + blue;
         led_config.red_percent = (red * 10000) / total;
-        led_config.green_percent = (green * 10000) / total;
         led_config.blue_percent = (blue * 10000) / total;
+        led_config.green_percent = 10000
+            - led_config.red_percent - led_config.blue_percent;
 
         /*
          * If the display is enabled, write the new FPGA config immediately,
@@ -1100,11 +1118,60 @@ GAMMA_SHOW_STORE(8)
 static ssize_t gamma_preset_show(struct notle_drv_data *notle_data, char *buf) {
   if (memcmp(gamma_curve, gamma_curve_legacy, sizeof gamma_curve) == 0)
     snprintf(buf, PAGE_SIZE, "%s\n", "legacy");
-  else if (memcmp(gamma_curve, gamma_curve_default, sizeof gamma_curve) == 0)
-    snprintf(buf, PAGE_SIZE, "%s\n", "default");
+  else if (memcmp(gamma_curve, gamma_curve_v1_0, sizeof gamma_curve) == 0)
+    snprintf(buf, PAGE_SIZE, "%s\n", "V1_0");
+  else if (memcmp(gamma_curve, gamma_curve_v1_5, sizeof gamma_curve) == 0)
+    snprintf(buf, PAGE_SIZE, "%s\n", "V1_5");
   else
     strcpy(buf, "custom");
   return strlen(buf);
+}
+
+static void gamma_setup(const struct gamma_point *curve, struct notle_drv_data *notle_data) {
+  struct omap_dss_device *dssdev = notle_data->dssdev;
+  struct omap_overlay_manager_info info;
+  dssdev->manager->get_manager_info(dssdev->manager, &info);
+
+  // [TODO] (shand) once we settle on new settings, most of this code goes away!
+  // All that will be left is:
+  // if (curve == NULL)
+  //   curve = get_panel_data(dssdev)->notle_version >= V1_5_PROTO ? gamma_curve_v1_5 : gamma_curve_v1_0;
+  // memcpy(gamma_curve, curve, sizeof gamma_curve);
+  if (curve == NULL) {
+    curve = gamma_curve_legacy;
+  }
+  memcpy(gamma_curve, curve, sizeof gamma_curve);
+  if (memcmp(curve, gamma_curve_legacy, sizeof gamma_curve) == 0) {
+    // colormix 2444/4444/3111
+    // gamma_enable 1
+    // echo  205, 9, 17, 25, 209, 11, 9, -1, 247 > ../cpr_coef
+    static const struct omap_dss_cpr_coefs coefs =
+      { 205, 9, 17, 25, 209, 11, 9, -1, 247 };
+    struct panel_notle_data *panel_data = get_panel_data(dssdev);
+    led_config.red_percent = 2444;
+    led_config.green_percent = 4445;
+    led_config.blue_percent = 3111;
+    info.cpr_coefs = coefs;
+    info.gamma_enable = 1;
+    if (panel_data->gamma_table != NULL) {
+        memcpy(info.gamma_table, panel_data->gamma_table, OMAP_DSS_GAMMA_TABLE_SIZE*sizeof(u32));
+        info.gamma_table_dirty = true;
+    }
+  }
+  else {
+    //echo 2525/5051/2424 > colormix
+    // gamma_enable 0
+    //echo 236 20 0 20 236 0 0 0 256 > ../cpr_coef
+    static const struct omap_dss_cpr_coefs coefs =
+      { 236, 20, 0, 20, 236, 0, 0, 0, 256 };
+    led_config.red_percent = 2525;
+    led_config.green_percent = 5051;
+    led_config.blue_percent = 2424;
+    info.cpr_coefs = coefs;
+    info.gamma_enable = 0;
+  }
+  if (!dssdev->manager->set_manager_info(dssdev->manager, &info))
+    dssdev->manager->apply(dssdev->manager);
 }
 
 static ssize_t gamma_preset_store(struct notle_drv_data *notle_data,
@@ -1115,15 +1182,30 @@ static ssize_t gamma_preset_store(struct notle_drv_data *notle_data,
   if (size > 128) return -EINVAL;
 
   sscanf(buf, "%s", value);
-  if (strcmp(value, "legacy") == 0)
-    memcpy(gamma_curve, gamma_curve_legacy, sizeof gamma_curve);
-  else if (strcmp(value, "default") == 0)
-    memcpy(gamma_curve, gamma_curve_default, sizeof gamma_curve);
+  if (strcmp(value, "legacy") == 0) {
+    gamma_setup(gamma_curve_legacy, notle_data);
+  }
+  else if (strcmp(value, "V1_0") == 0) {
+    gamma_setup(gamma_curve_v1_0, notle_data);
+  }
+  else if (strcmp(value, "V1_5") == 0) {
+    gamma_setup(gamma_curve_v1_5, notle_data);
+  }
   else
     return -EINVAL;
   for (j = 0; j < (sizeof(gamma_curve) /
                    sizeof(struct gamma_point)); ++j) {
     panel_write_gamma(j);
+  }
+  if (notle_data->enabled && led_config.brightness) {
+    // [TODO] (shand) refactor
+    int rgbmat[4][3];
+    const int rev = fpga_read_revision(0);
+    led_config_pwm(notle_data->dssdev, &led_config, rev, rgbmat);
+    if (ice40_set_backlight(1, rev, rgbmat)) {
+      printk(KERN_ERR LOG_TAG "Failed to gamma_preset:"
+             " spi write failed\n");
+    }
   }
   return size;
 }
@@ -1418,15 +1500,17 @@ static void led_config_pwm(struct omap_dss_device *dssdev,
     struct omap_overlay_manager_info info;
     int i,j;
     int red, grn, blu;
+    int max_pwm = 0;
+    int max_chan = -1;
+    const struct omap_dss_cpr_coefs *c;
+    static const struct omap_dss_cpr_coefs identity
+        = { 256, 0, 0, 0, 256, 0, 0, 0, 256 };
     dssdev->manager->get_manager_info(dssdev->manager, &info);
 
     red = (ticks_in_frame * (( (3 * led->red_percent   * b * pd->limit_mw) /  (pd->red_max_mw   * MAX_BRIGHTNESS)))) / 10000;
     grn = (ticks_in_frame * (( (3 * led->green_percent * b * pd->limit_mw) /  (pd->green_max_mw * MAX_BRIGHTNESS)))) / 10000;
     blu = (ticks_in_frame * (( (3 * led->blue_percent  * b * pd->limit_mw) /  (pd->blue_max_mw  * MAX_BRIGHTNESS)))) / 10000;
 
-    const struct omap_dss_cpr_coefs *c;
-    static const struct omap_dss_cpr_coefs identity =
-    { 256, 0, 0, 0, 256, 0, 0, 0, 256 };
     if (info.cpr_enable == 0)
       /* Apply cpr in the LED illumination schedule. */
       c = &(info.cpr_coefs);
@@ -1452,8 +1536,6 @@ static void led_config_pwm(struct omap_dss_device *dssdev,
     }
 
     /* Calculate monochrome PWM */
-    int max_pwm = 0;
-    int max_chan = -1;
     for (i = 0; i < 3; i++) {
       rgbmat[3][i] = rgbmat[i][0] + rgbmat[i][1] + rgbmat[i][2];
       if (max_pwm < rgbmat[3][i]) {
@@ -1507,7 +1589,7 @@ static void led_config_pwm(struct omap_dss_device *dssdev,
     for (i = 0; i < 3; i++) {
       if (rgbmat[i][i] > ticks_in_frame) {
         int excess;
-        const dirn = i < 2 ? +1 : -1;
+        const int dirn = i < 2 ? +1 : -1;
         for (j = dirn > 0 ? 1 : 5; j != 3; j+=dirn) {
           excess = rgbmat[i][(i+j-dirn)%3] - ticks_in_frame;
           if (excess > 0) {
@@ -2100,7 +2182,6 @@ static int panel_notle_probe(struct omap_dss_device *dssdev) {
         drv_data->dssdev = dssdev;
         drv_data->panel_config = panel_config;
         drv_data->enabled = 0;
-        memcpy(gamma_curve, gamma_curve_legacy, sizeof gamma_curve);
 
         dev_set_drvdata(&dssdev->dev, drv_data);
 
@@ -2109,6 +2190,8 @@ static int panel_notle_probe(struct omap_dss_device *dssdev) {
         if (r) {
                 printk(KERN_WARNING LOG_TAG "Failed to create sysfs directory\n");
         }
+
+        gamma_setup(NULL, drv_data);
 
         printk(KERN_WARNING LOG_TAG "Creating display FPGA reconfigure workueue\n");
 
