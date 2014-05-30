@@ -2010,10 +2010,36 @@ static void rmi_f11_finger_handler(struct f11_data *f11,
 				         " tap gesture with no previous early"
 				         " tap\n", __func__);
 			} else {
-				rmi_f11_input_gesture(f11, sensor,
-				                      "double tap",
-				                      GESTURE_OFFSET_DOUBLE_TAP_X,
-				                      GESTURE_OFFSET_DOUBLE_TAP_Y);
+				int x_peek = ((data->abs_pos[0].x_msb << 4) | data->abs_pos[0].x_lsb);
+				int y_peek = ((data->abs_pos[0].y_msb << 4) | data->abs_pos[0].y_lsb);
+
+				if (sensor->axis_align.flip_x)
+					x_peek = max(sensor->max_x - x_peek, 0);
+				if (sensor->axis_align.flip_y)
+					y_peek = max(sensor->max_y - y_peek, 0);
+
+				if (f11->goog.goog_view_enable
+				    && (y_peek >= f11->goog.goog_view_min_y)
+				    && (y_peek <= f11->goog.goog_view_max_y)
+				    && (x_peek >= f11->goog.goog_view_min_x)
+				    && (x_peek <= f11->goog.goog_view_max_x)) {
+					/* Cached x/y coordinates from last finger landing
+					   on touchpad is within the enabled viewfinder area.
+					   Consume and ignore touchpad generated tap gesture
+					   event */
+					dev_info(&sensor->fc->dev, "%s Rejecting double tap"
+					         " gesture within viewfinder boundary"
+					         " min_y:%d y:%d max_y:%d"
+					         " min_x:%d x:%d max_x:%d\n",
+					         __func__, f11->goog.goog_view_min_y, y_peek,
+					         f11->goog.goog_view_max_y, f11->goog.goog_view_min_x,
+					         x_peek, f11->goog.goog_view_max_x);
+				} else {
+				  rmi_f11_input_gesture(f11, sensor,
+				                        "double tap",
+				                        GESTURE_OFFSET_DOUBLE_TAP_X,
+				                        GESTURE_OFFSET_DOUBLE_TAP_Y);
+				}
 			}
 		}
 		if (data->gest_1->press == 1) {
