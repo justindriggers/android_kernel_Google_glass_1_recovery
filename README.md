@@ -9,3 +9,9 @@ Checkout the desired branch into {CM.ROOT}/kernel/Google/glass_1 and build the r
 TARGET_KERNEL_SOURCE := kernel/Google/glass_1
 TARGET_KERNEL_CONFIG := notle_defconfig
 ```
+
+| Kernel          | Glass Version   |
+| :-------------: | :-------------: |
+| XRV60B          | XE17.3          |
+| XRV67           | XE17.31         |
+| XRV70D          | XE18.1          |
